@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { AppShell, Burger, Group, Title, Text, Box } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
@@ -18,42 +20,23 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         breakpoint: 'sm',
         collapsed: { mobile: !opened },
       }}
-      padding="md"
     >
+      {/* 顶部导航栏 */}
       <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Group>
-            <Burger
-              opened={opened}
-              onClick={toggle}
-              hiddenFrom="sm"
-              size="sm"
-            />
-            <Group gap="xs">
-              <Title order={4} c="blue">
-                IT设备资产管理系统
-              </Title>
-              <Text size="sm" c="dimmed">
-                - 硬资产 + 软资产
-              </Text>
-            </Group>
-          </Group>
-          
-          <Group gap="md">
-            <Text size="sm">当前用户: 管理员</Text>
-            <Text size="sm" c="dimmed">
-              部门: IT部
-            </Text>
-          </Group>
+        <Group h="100%" px="md">
+          <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
+          <Title order={4}>资产管理平台</Title>
         </Group>
       </AppShell.Header>
 
+      {/* 左侧边栏 */}
       <AppShell.Navbar p="md">
         <Sidebar />
       </AppShell.Navbar>
 
+      {/* 主内容区域 */}
       <AppShell.Main>
-        <Box p="md">
+        <Box p="lg">
           {children}
         </Box>
       </AppShell.Main>

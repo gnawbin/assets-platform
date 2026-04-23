@@ -19,10 +19,6 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2",
     "@lancedb/lancedb": "^0.24.1",
     "@mantine/charts": "^8.3.8",
     "@mantine/code-highlight": "^8.3.8",
@@ -38,16 +34,17 @@
     "@mantine/tiptap": "^8.3.8",
     "@next/bundle-analyzer": "^16.0.1",
     "@tabler/icons-react": "^3.35.0",
+    "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.4.2",
     "@tauri-apps/plugin-http": "~2.5.4",
+    "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-shell": "^2.3.3",
     "@tauri-apps/plugin-store": "~2.4.1",
     "@tiptap/extension-link": "^3.11.0",
     "@tiptap/pm": "^3.11.0",
     "@tiptap/react": "^3.11.0",
     "@tiptap/starter-kit": "^3.11.0",
-    "@xyflow/react": "^12.9.3",
     "dayjs": "^1.11.19",
     "deepagents": "^1.1.1",
     "embla-carousel": "^8.6.0",
@@ -55,6 +52,8 @@
     "next": "^16.0.1",
     "party-js": "^2.2.0",
     "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "recharts": "^3.4.1",
     "rehype-highlight": "^7.0.2",
@@ -62,7 +61,8 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "xlsx": "^0.18.5",
-    "zod": "4.3.5"
+    "zod": "4.3.5",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",
@@ -74,6 +74,7 @@
     "@storybook/addon-themes": "^9.1.10",
     "@storybook/nextjs": "^9.1.10",
     "@storybook/react": "^9.1.10",
+    "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
@@ -106,8 +107,7 @@
     "terser": "^5.43.1",
     "ts-jest": "^29.4.4",
     "typescript": "5.9.3",
-    "typescript-eslint": "^8.46.0",
-    "@tauri-apps/cli": "^2"
+    "typescript-eslint": "^8.46.0"
   },
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
 }

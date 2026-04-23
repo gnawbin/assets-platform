@@ -1,15 +1,13 @@
 /** @type {import('next').NextConfig} */
+/** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
-  trailingSlash: true,
-  distDir: 'dist',
+  reactStrictMode: true,
   images: {
-    unoptimized: true
+    unoptimized: true,
   },
-  // 为了与Tauri兼容，禁用一些Web特性
+  // Tauri 兼容
   webpack: (config) => {
     config.resolve.fallback = {
-      ...config.resolve.fallback,
       fs: false,
       net: false,
       tls: false,
@@ -19,6 +17,6 @@ const nextConfig = {
     };
     return config;
   },
-}
+};
 
-export default nextConfig
+export default nextConfig;
