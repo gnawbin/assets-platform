@@ -11,7 +11,7 @@ name = "assetsplatform_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.6", default-features = false }  # 关闭默认特性
+tauri-build = { version = "2.5.6", default-features = false , features = [] }  # 关闭默认特性
 
 [dependencies]
 # Tauri 核心（最小特性集）
