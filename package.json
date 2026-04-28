@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node scripts/install-deps.cjs && pnpm tauri-dev",
-    "dev": "next dev --webpack",
+    "dev": "next dev --webpack -p 1480",
     "build": "next build --webpack",
     "preview": "next start",
     "icon": "pntauri icon",

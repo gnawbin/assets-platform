@@ -170,17 +170,10 @@ const Sidebar: React.FC = () => {
       icon: <IconBooks size={18} />,
       label: '资产台账',
       links: [
-        { label: '计算机设备', path: '/hardware/computer' },
-        { label: '网络设备', path: '/hardware/network' },
-        { label: '服务器设备', path: '/hardware/server' },
-        { label: '存储设备', path: '/hardware/storage' },
-        { label: '外设及终端', path: '/hardware/peripheral' },
-        { label: '移动设备', path: '/hardware/mobile' },
-        { label: '所有硬资产', path: '/hardware/all' },
-        { label: '办公软件', path: '/software/office' },
-        { label: '开发工具', path: '/software/development' },
-        { label: '安全软件', path: '/software/security' },
-        { label: '所有软资产', path: '/software/all' },
+     { label: '硬资产', path: '/hardware' },
+    
+        { label: '软资产', path: '/software' },
+       
       ],
     },
     {
