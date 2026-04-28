@@ -82,13 +82,16 @@ hmac = "0.13.0"
 openssl = { version = "0.10", features = ["vendored"] }
 log = "0.4"
 hex="0.4"
-
+arrow="58.1.0"
+polars="0.53.0"
 # 工具库
 config = { version = "0.15", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
 once_cell = "1.21.4"
 thiserror = "2.0.18"
 anyhow = "1.0.98"
+
+polars-io = "0.53.0"
 # Release模式优化配置
 [profile.release]
 lto = false
