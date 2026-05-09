@@ -7,6 +7,8 @@ import React from 'react';
 const theme = createTheme({
   primaryColor: 'blue',
   defaultRadius: 'md',
+  fontFamily:
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"',
 });
 
 const preview: Preview = {
@@ -24,6 +26,7 @@ const preview: Preview = {
         { name: 'dark', value: '#1a1b1e' },
       ],
     },
+    layout: 'fullscreen',
   },
 
   decorators: [

@@ -110,7 +110,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, l
         >
           {ItemContent}
         </UnstyledButton>
-        <Collapse in={opened}>
+        <Collapse expanded={opened}>
           {links.map((linkItem) => {
             const isLinkActive = pathname === linkItem.path;
             return (
