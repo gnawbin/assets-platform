@@ -10,3 +10,9 @@ target
 dist/*
 .next
 pnpm-lock.yaml
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+

@@ -1,4 +1,3 @@
-
 pub mod models;
 pub mod dual_database;
 pub mod public_init;
@@ -36,16 +35,19 @@ pub use secure_init::{
 
 
 
+#[allow(dead_code)]
 static PUBLIC_INIT_SQL_CONTENT: &str = include_str!("../../data/public_init.sql");
 
 /// 全局数据库连接池
 static DATABASE_POOL: OnceLock<RwLock<SqlitePool>> = OnceLock::new();
 
 /// 数据库管理器
+#[allow(dead_code)]
 pub struct DatabaseManager {
     pool: SqlitePool,
 }
 
+#[allow(dead_code)]
 impl DatabaseManager {
     pub async fn new(database_url: &str) -> Result<Self> {
         let options = SqliteConnectOptions::from_str(database_url)?
@@ -81,11 +83,13 @@ impl DatabaseManager {
 }
 
 /// 初始化全局池
+#[allow(dead_code)]
 fn init_global_pool(pool: SqlitePool) {
     let _ = DATABASE_POOL.set(RwLock::new(pool));
 }
 
 /// 更新全局池
+#[allow(dead_code)]
 fn update_global_pool(pool: SqlitePool) {
     if let Some(lock) = DATABASE_POOL.get() {
         *lock.write().unwrap() = pool;

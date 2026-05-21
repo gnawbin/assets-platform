@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use sqlx::FromRow;
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct DbConfig{
    pub id: i64,
@@ -12,6 +13,7 @@ pub struct DbConfig{
   pub created_at: DateTime<Utc>,
   pub update_at: DateTime<Utc>,
 }
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct  SystemConfig{
   pub id: i64,
@@ -34,6 +36,7 @@ pub struct AssetCategory{
  pub update_by: i64,
  pub update_at: DateTime<Utc>,
 }
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Assets{
   pub id: i64,

@@ -354,6 +354,7 @@ dependencies = [
  "config",
  "cron",
  "dirs",
+ "dotenvy",
  "futures",
  "hex",
  "hmac 0.13.0",

@@ -87,11 +87,13 @@ impl PostgresConfig {
 }
 
 /// PostgreSQL 连接池管理器
+#[allow(dead_code)]
 pub struct PostgresManager {
     config: PostgresConfig,
     pool: Option<PgPool>,
 }
 
+#[allow(dead_code)]
 impl PostgresManager {
     /// 创建新的 PostgreSQL 管理器
     pub fn new(config: PostgresConfig) -> Self {
@@ -157,6 +159,7 @@ impl PostgresManager {
 static POSTGRES_POOL: OnceLock<RwLock<Option<PgPool>>> = OnceLock::new();
 
 /// 初始化全局 PostgreSQL 连接池
+#[allow(dead_code)]
 pub async fn init_postgres_pool(config: PostgresConfig) -> Result<()> {
     let options = config.connect_options()?;
     
@@ -181,12 +184,14 @@ pub async fn init_postgres_pool(config: PostgresConfig) -> Result<()> {
 }
 
 /// 从环境变量初始化全局 PostgreSQL 连接池
+#[allow(dead_code)]
 pub async fn init_postgres_pool_from_env() -> Result<()> {
     let config = PostgresConfig::from_env()?;
     init_postgres_pool(config).await
 }
 
 /// 获取全局 PostgreSQL 连接池
+#[allow(dead_code)]
 pub fn get_postgres_pool() -> Result<PgPool> {
     let guard = POSTGRES_POOL
         .get()
@@ -198,11 +203,13 @@ pub fn get_postgres_pool() -> Result<PgPool> {
 }
 
 /// 检查全局 PostgreSQL 连接池是否已初始化
+#[allow(dead_code)]
 pub fn is_postgres_pool_initialized() -> bool {
     POSTGRES_POOL.get().is_some()
 }
 
 /// 关闭全局 PostgreSQL 连接池
+#[allow(dead_code)]
 pub async fn close_postgres_pool() {
     if let Some(lock) = POSTGRES_POOL.get() {
         let pool_opt = lock.write().unwrap().take();
@@ -213,6 +220,7 @@ pub async fn close_postgres_pool() {
 }
 
 /// 测试 PostgreSQL 连接
+#[allow(dead_code)]
 pub async fn test_postgres_connection(config: &PostgresConfig) -> Result<()> {
     let options = config.connect_options()?;
     
@@ -235,6 +243,7 @@ pub async fn test_postgres_connection(config: &PostgresConfig) -> Result<()> {
 }
 
 /// 初始化 PostgreSQL 数据库表结构
+#[allow(dead_code)]
 pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
     // 创建系统配置表
     sqlx::query(
@@ -364,6 +373,7 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
 }
 
 /// 插入初始数据
+#[allow(dead_code)]
 pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
     // 插入默认系统配置
     sqlx::query(
@@ -419,6 +429,7 @@ pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
 }
 
 /// 完整的 PostgreSQL 数据库初始化
+#[allow(dead_code)]
 pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     // 初始化连接池
     init_postgres_pool(config).await?;
@@ -436,6 +447,7 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
 }
 
 /// 从环境变量初始化 PostgreSQL 数据库
+#[allow(dead_code)]
 pub async fn init_postgres_database_from_env() -> Result<()> {
     let config = PostgresConfig::from_env()?;
     init_postgres_database(config).await

@@ -23,6 +23,7 @@ pub async fn init_public_database()->Result<()>{
 
 /// 插入默认链和 RPC 数据
 /// 注意：现在完全由 public_init.sql 提供，此函数保留为空以保持向后兼容
+#[allow(dead_code)]
 async fn insert_default_chain_data(_pool: &SqlitePool) -> Result<()> {
     // public_init.sql 已包含所有默认链和 RPC 数据
     // 此函数保留为空，避免重复插入导致的数据不一致
