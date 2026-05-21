@@ -23,7 +23,7 @@ const meta: Meta<typeof SystemSettings> = {
   argTypes: {
     title: {
       control: 'select',
-      options: ['数据库配置', '权限管理', '资产分类', '部门管理', '用户管理', '系统日志'],
+      options: ['数据库配置', '权限管理','部门管理', '用户管理', '系统日志'],
       description: '配置模块标题',
     },
   },
@@ -50,14 +50,6 @@ export const Permissions: Story = {
   },
 };
 
-/**
- * 资产分类
- */
-export const Categories: Story = {
-  args: {
-    title: '资产分类',
-  },
-};
 
 /**
  * 部门管理

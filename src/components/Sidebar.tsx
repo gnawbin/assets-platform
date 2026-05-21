@@ -170,6 +170,7 @@ const Sidebar: React.FC = () => {
       icon: <IconBooks size={18} />,
       label: '资产台账',
       links: [
+         { label: '资产分类', path: '/categories' },
      { label: '硬资产', path: '/hardware' },
     
         { label: '软资产', path: '/software' },
@@ -206,9 +207,10 @@ const Sidebar: React.FC = () => {
       links: [
         { label: '数据库配置', path: '/settings/database' },
         { label: '权限管理', path: '/settings/permissions' },
-        { label: '资产分类', path: '/settings/categories' },
+       
         { label: '部门管理', path: '/settings/departments' },
         { label: '用户管理', path: '/settings/users' },
+        { label: '流程设计', path: '/settings/process-design' },
         { label: '系统日志', path: '/settings/logs' },
       ],
     },
