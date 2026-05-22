@@ -1,39 +1,29 @@
-pub mod models;
 pub mod dual_database;
-pub mod public_init;
 pub mod encryption;
-pub mod secure_init;
+pub mod models;
 pub mod postgres;
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions, Row};
+pub mod public_init;
+pub mod secure_init;
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
+use sqlx::{sqlite::SqliteConnectOptions, Row, SqlitePool};
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
-use serde::{Deserialize, Serialize};
-use std::path::Path;
-use sha2::Sha256;
 
 pub use dual_database::{
-    DualDatabaseManager,
-    DatabaseStatus,
-    SecureDbState,
-    get_wallet_database_pool,
-    PUBLIC_DB_PATH,
+    get_wallet_database_pool, DatabaseStatus, DualDatabaseManager, SecureDbState, PUBLIC_DB_PATH,
     SECURE_DB_PATH,
 };
 
 pub use public_init::init_public_database;
 pub use secure_init::{
-    init_secure_database,
-    unlock_secure_database,
-    lock_secure_database,
-    change_secure_password,
-    is_secure_database_initialized,
+    change_secure_password, init_secure_database, is_secure_database_initialized,
+    lock_secure_database, unlock_secure_database,
 };
-
-
-
 
 #[allow(dead_code)]
 static PUBLIC_INIT_SQL_CONTENT: &str = include_str!("../../data/public_init.sql");
@@ -50,10 +40,11 @@ pub struct DatabaseManager {
 #[allow(dead_code)]
 impl DatabaseManager {
     pub async fn new(database_url: &str) -> Result<Self> {
-        let options = SqliteConnectOptions::from_str(database_url)?
-            .create_if_missing(true);
+        let options = SqliteConnectOptions::from_str(database_url)?.create_if_missing(true);
         let pool = SqlitePool::connect_with(options).await?;
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await?;
         Ok(Self { pool })
     }
 
@@ -113,20 +104,19 @@ pub async fn export_database_to_init_sql() -> Result<String, String> {
     let mut sql = String::new();
 
     let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     )
     .fetch_all(&pool)
     .await
     .map_err(|e| e.to_string())?;
 
     for table in tables {
-        let create: String = sqlx::query_scalar(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?"
-        )
-        .bind(&table)
-        .fetch_one(&pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        let create: String =
+            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='table' AND name = ?")
+                .bind(&table)
+                .fetch_one(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
 
         sql.push_str(&create);
         sql.push_str(";\n");
@@ -159,12 +149,10 @@ pub async fn reload_database() -> Result<String, String> {
 #[tauri::command]
 pub async fn is_wallet_db_ready() -> Result<bool, String> {
     let pool = get_database_pool();
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE name='wallets'"
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='wallets'")
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(count > 0)
 }
@@ -173,9 +161,10 @@ pub async fn is_wallet_db_ready() -> Result<bool, String> {
 #[tauri::command]
 pub async fn check_database_schema() -> Result<serde_json::Value, String> {
     let pool = get_database_pool();
-    let chains: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE name='chains'"
-    ).fetch_one(&pool).await.map_err(|e| e.to_string())?;
+    let chains: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name='chains'")
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(serde_json::json!({
         "chains_table_exists": chains > 0,

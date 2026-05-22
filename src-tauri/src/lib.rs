@@ -1,8 +1,7 @@
-
 mod database;
 
-use database::models::AssetCategory;
 use database::dual_database::DualDatabaseManager;
+use database::models::AssetCategory;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -19,7 +18,7 @@ async fn get_categories() -> Result<Vec<AssetCategory>, String> {
     .fetch_all(&pool)
     .await
     .map_err(|e| format!("查询资产类别失败: {}", e))?;
-    
+
     Ok(categories)
 }
 
@@ -60,4 +59,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

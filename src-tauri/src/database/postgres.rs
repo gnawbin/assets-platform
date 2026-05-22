@@ -1,13 +1,16 @@
 //! PostgreSQL 数据库连接和初始化模块
-//! 
+//!
 //! 提供 PostgreSQL 数据库的连接池管理、连接测试和数据初始化功能
 
-use anyhow::{Result, anyhow};
-use sqlx::{PgPool, postgres::{PgConnectOptions, PgPoolOptions}};
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    PgPool,
+};
 use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
 
 /// PostgreSQL 数据库配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +42,7 @@ impl Default for PostgresConfig {
             port: 5432,
             database: "assets_platform".to_string(),
             username: "postgres".to_string(),
-            password: "postgres".to_string(),
+            password: "123456".to_string(),
             max_connections: 10,
             min_connections: 2,
             connect_timeout: 30,
@@ -56,10 +59,11 @@ impl PostgresConfig {
             .unwrap_or_else(|_| "5432".to_string())
             .parse::<u16>()
             .map_err(|e| anyhow!("Invalid PG_PORT: {}", e))?;
-        let database = std::env::var("PG_DATABASE").unwrap_or_else(|_| "assets_platform".to_string());
+        let database =
+            std::env::var("PG_DATABASE").unwrap_or_else(|_| "assets_platform".to_string());
         let username = std::env::var("PG_USERNAME").unwrap_or_else(|_| "postgres".to_string());
         let password = std::env::var("PG_PASSWORD").unwrap_or_else(|_| "postgres".to_string());
-        
+
         Ok(Self {
             host,
             port,
@@ -69,7 +73,7 @@ impl PostgresConfig {
             ..Default::default()
         })
     }
-    
+
     /// 构建连接字符串
     pub fn connection_string(&self) -> String {
         format!(
@@ -77,7 +81,7 @@ impl PostgresConfig {
             self.username, self.password, self.host, self.port, self.database
         )
     }
-    
+
     /// 构建连接选项
     pub fn connect_options(&self) -> Result<PgConnectOptions> {
         let conn_str = self.connection_string();
@@ -97,22 +101,19 @@ pub struct PostgresManager {
 impl PostgresManager {
     /// 创建新的 PostgreSQL 管理器
     pub fn new(config: PostgresConfig) -> Self {
-        Self {
-            config,
-            pool: None,
-        }
+        Self { config, pool: None }
     }
-    
+
     /// 从环境变量创建 PostgreSQL 管理器
     pub fn from_env() -> Result<Self> {
         let config = PostgresConfig::from_env()?;
         Ok(Self::new(config))
     }
-    
+
     /// 连接到 PostgreSQL 数据库
     pub async fn connect(&mut self) -> Result<()> {
         let options = self.config.connect_options()?;
-        
+
         let pool = PgPoolOptions::new()
             .max_connections(self.config.max_connections)
             .min_connections(self.config.min_connections)
@@ -121,34 +122,36 @@ impl PostgresManager {
             .connect_with(options)
             .await
             .map_err(|e| anyhow!("Failed to connect to PostgreSQL: {}", e))?;
-        
+
         // 测试连接
         sqlx::query("SELECT 1")
             .fetch_one(&pool)
             .await
             .map_err(|e| anyhow!("PostgreSQL connection test failed: {}", e))?;
-        
+
         self.pool = Some(pool);
         Ok(())
     }
-    
+
     /// 断开数据库连接
     pub async fn disconnect(&mut self) {
         if let Some(pool) = self.pool.take() {
             pool.close().await;
         }
     }
-    
+
     /// 获取数据库连接池
     pub fn pool(&self) -> Result<&PgPool> {
-        self.pool.as_ref().ok_or_else(|| anyhow!("PostgreSQL not connected"))
+        self.pool
+            .as_ref()
+            .ok_or_else(|| anyhow!("PostgreSQL not connected"))
     }
-    
+
     /// 检查是否已连接
     pub fn is_connected(&self) -> bool {
         self.pool.is_some()
     }
-    
+
     /// 获取数据库配置
     pub fn config(&self) -> &PostgresConfig {
         &self.config
@@ -162,23 +165,22 @@ static POSTGRES_POOL: OnceLock<RwLock<Option<PgPool>>> = OnceLock::new();
 #[allow(dead_code)]
 pub async fn init_postgres_pool(config: PostgresConfig) -> Result<()> {
     let options = config.connect_options()?;
-    
+
     let pool = PgPoolOptions::new()
         .max_connections(config.max_connections)
         .min_connections(config.min_connections)
-     
-       .acquire_timeout(Duration::from_secs(config.connect_timeout))
+        .acquire_timeout(Duration::from_secs(config.connect_timeout))
         .idle_timeout(Duration::from_secs(config.idle_timeout))
         .connect_with(options)
         .await
         .map_err(|e| anyhow!("Failed to connect to PostgreSQL: {}", e))?;
-    
+
     // 测试连接
     sqlx::query("SELECT 1")
         .fetch_one(&pool)
         .await
         .map_err(|e| anyhow!("PostgreSQL connection test failed: {}", e))?;
-    
+
     POSTGRES_POOL.get_or_init(|| RwLock::new(Some(pool)));
     Ok(())
 }
@@ -198,8 +200,11 @@ pub fn get_postgres_pool() -> Result<PgPool> {
         .ok_or_else(|| anyhow!("PostgreSQL pool not initialized"))?
         .read()
         .map_err(|_| anyhow!("Failed to acquire read lock on PostgreSQL pool"))?;
-    
-    guard.as_ref().cloned().ok_or_else(|| anyhow!("PostgreSQL pool is None"))
+
+    guard
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| anyhow!("PostgreSQL pool is None"))
 }
 
 /// 检查全局 PostgreSQL 连接池是否已初始化
@@ -223,21 +228,20 @@ pub async fn close_postgres_pool() {
 #[allow(dead_code)]
 pub async fn test_postgres_connection(config: &PostgresConfig) -> Result<()> {
     let options = config.connect_options()?;
-    
+
     let pool = PgPoolOptions::new()
         .max_connections(1)
-
-       .acquire_timeout(Duration::from_secs(config.connect_timeout))
+        .acquire_timeout(Duration::from_secs(config.connect_timeout))
         .connect_with(options)
         .await
         .map_err(|e| anyhow!("Failed to connect to PostgreSQL: {}", e))?;
-    
+
     // 测试连接
     sqlx::query("SELECT 1")
         .fetch_one(&pool)
         .await
         .map_err(|e| anyhow!("PostgreSQL connection test failed: {}", e))?;
-    
+
     pool.close().await;
     Ok(())
 }
@@ -256,12 +260,12 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to create system_config table: {}", e))?;
-    
+
     // 创建数据库配置表
     sqlx::query(
         r#"
@@ -275,12 +279,12 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to create db_config table: {}", e))?;
-    
+
     // 创建资产分类表
     sqlx::query(
         r#"
@@ -296,12 +300,12 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
             updated_by BIGINT,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to create asset_category table: {}", e))?;
-    
+
     // 创建资产表
     sqlx::query(
         r#"
@@ -326,12 +330,12 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (category_id) REFERENCES asset_category(id)
         )
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to create assets table: {}", e))?;
-    
+
     // 创建用户表
     sqlx::query(
         r#"
@@ -347,28 +351,30 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         )
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to create users table: {}", e))?;
-    
+
     // 创建索引
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_assets_asset_no ON assets(asset_no)")
         .execute(pool)
         .await
         .map_err(|e| anyhow!("Failed to create index on assets: {}", e))?;
-    
+
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_assets_category_id ON assets(category_id)")
         .execute(pool)
         .await
         .map_err(|e| anyhow!("Failed to create index on assets: {}", e))?;
-    
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_asset_category_parent_id ON asset_category(parent_id)")
-        .execute(pool)
-        .await
-        .map_err(|e| anyhow!("Failed to create index on asset_category: {}", e))?;
-    
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_asset_category_parent_id ON asset_category(parent_id)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create index on asset_category: {}", e))?;
+
     Ok(())
 }
 
@@ -385,12 +391,12 @@ pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
             ('default_language', 'zh-CN', '默认语言'),
             ('pagination_size', '20', '分页大小')
         ON CONFLICT (config_key) DO NOTHING
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to insert system config: {}", e))?;
-    
+
     // 插入默认资产分类
     sqlx::query(
         r#"
@@ -406,12 +412,12 @@ pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
             ('办公软件', 'software', 6, 2, '办公软件'),
             ('开发工具', 'software', 6, 3, '开发工具软件')
         ON CONFLICT (id) DO NOTHING
-        "#
+        "#,
     )
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to insert asset categories: {}", e))?;
-    
+
     // 插入默认用户（密码为 admin123 的哈希值）
     sqlx::query(
         r#"
@@ -424,7 +430,7 @@ pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await
     .map_err(|e| anyhow!("Failed to insert default user: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -433,16 +439,16 @@ pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
 pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     // 初始化连接池
     init_postgres_pool(config).await?;
-    
+
     // 获取连接池
     let pool = get_postgres_pool()?;
-    
+
     // 初始化表结构
     init_postgres_tables(&pool).await?;
-    
+
     // 插入初始数据
     insert_initial_data(&pool).await?;
-    
+
     Ok(())
 }
 
@@ -456,7 +462,7 @@ pub async fn init_postgres_database_from_env() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_postgres_config_default() {
         let config = PostgresConfig::default();
@@ -466,25 +472,25 @@ mod tests {
         assert_eq!(config.username, "postgres");
         assert_eq!(config.password, "postgres");
     }
-    
+
     #[test]
     fn test_postgres_config_connection_string() {
         let config = PostgresConfig::default();
         let conn_str = config.connection_string();
         assert!(conn_str.contains("postgres://postgres:postgres@localhost:5432/assets_platform"));
     }
-    
+
     #[tokio::test]
     async fn test_postgres_manager() {
         // 注意：这个测试需要实际的 PostgreSQL 数据库才能运行
         // 在实际环境中，应该使用测试数据库或模拟连接
         let config = PostgresConfig::default();
         let mut manager = PostgresManager::new(config);
-        
+
         // 测试连接（在实际环境中取消注释）
         // let result = manager.connect().await;
         // assert!(result.is_ok() || result.is_err()); // 连接可能成功或失败，取决于数据库是否可用
-        
+
         // 测试配置获取
         assert_eq!(manager.config().host, "localhost");
     }

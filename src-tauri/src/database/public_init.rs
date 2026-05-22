@@ -1,10 +1,10 @@
+use super::dual_database::{DualDatabaseManager, PUBLIC_DB_PATH};
+use super::encryption::create_unencrypted_pool;
 use anyhow::Result;
 use sqlx::SqlitePool;
-use super::dual_database::{DualDatabaseManager,PUBLIC_DB_PATH};
-use super::encryption::create_unencrypted_pool;
 
 static PUBLIC_INIT_SQL: &str = include_str!("../../data/public_init.sql");
-pub async fn init_public_database()->Result<()>{
+pub async fn init_public_database() -> Result<()> {
     std::fs::create_dir_all("data")?;
 
     let pool = create_unencrypted_pool(PUBLIC_DB_PATH).await?;
@@ -51,13 +51,13 @@ fn parse_sql_statements(sql: &str) -> Vec<String> {
     let mut in_string = false;
     let mut string_delimiter = '\0';
     let mut paren_depth = 0;
-    
+
     let chars: Vec<char> = sql.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         let ch = chars[i];
-        
+
         if !in_string && (ch == '\'' || ch == '"') {
             in_string = true;
             string_delimiter = ch;
@@ -82,13 +82,13 @@ fn parse_sql_statements(sql: &str) -> Vec<String> {
                 i += 1;
                 continue;
             }
-            
+
             if ch == '(' {
                 paren_depth += 1;
             } else if ch == ')' {
                 paren_depth -= 1;
             }
-            
+
             if ch == ';' && paren_depth == 0 {
                 let trimmed = current_statement.trim();
                 if !trimmed.is_empty() && !trimmed.starts_with("--") {
@@ -101,15 +101,15 @@ fn parse_sql_statements(sql: &str) -> Vec<String> {
         } else {
             current_statement.push(ch);
         }
-        
+
         i += 1;
     }
-    
+
     let trimmed = current_statement.trim();
     if !trimmed.is_empty() && !trimmed.starts_with("--") {
         statements.push(trimmed.to_string());
     }
-    
+
     statements
 }
 
