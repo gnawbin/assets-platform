@@ -411,7 +411,7 @@ pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
             ('操作系统', 'software', 6, 1, '操作系统软件'),
             ('办公软件', 'software', 6, 2, '办公软件'),
             ('开发工具', 'software', 6, 3, '开发工具软件')
-        ON CONFLICT (id) DO NOTHING
+        ON CONFLICT (category_name) DO NOTHING
         "#,
     )
     .execute(pool)
@@ -470,14 +470,14 @@ mod tests {
         assert_eq!(config.port, 5432);
         assert_eq!(config.database, "assets_platform");
         assert_eq!(config.username, "postgres");
-        assert_eq!(config.password, "postgres");
+        assert_eq!(config.password, "123456");
     }
 
     #[test]
     fn test_postgres_config_connection_string() {
         let config = PostgresConfig::default();
         let conn_str = config.connection_string();
-        assert!(conn_str.contains("postgres://postgres:postgres@localhost:5432/assets_platform"));
+        assert!(conn_str.contains("postgres://postgres:123456@localhost:5432/assets_platform"));
     }
 
     #[tokio::test]

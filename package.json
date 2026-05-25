@@ -37,7 +37,7 @@
     "@next/bundle-analyzer": "^16.0.1",
     "@puckeditor/core": "^0.21.2",
     "@tabler/icons-react": "^3.35.0",
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "2.11.0",
     "@tauri-apps/plugin-clipboard-manager": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-http": "~2",
@@ -77,9 +77,11 @@
     "@storybook/addon-essentials": "^8.6.14",
     "@storybook/addon-interactions": "^8.6.14",
     "@storybook/addon-themes": "^9.1.10",
+    "@tauri-apps/cli": "2.11.0",
+
     "@storybook/nextjs": "^9.1.10",
     "@storybook/react": "^9.1.10",
-    "@tauri-apps/cli": "^2",
+   
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",

@@ -1,6 +1,5 @@
 mod database;
 
-use database::dual_database::DualDatabaseManager;
 use database::models::AssetCategory;
 
 #[tauri::command]
@@ -11,9 +10,9 @@ fn greet(name: &str) -> String {
 /// 获取所有资产类别列表
 #[tauri::command]
 async fn get_categories() -> Result<Vec<AssetCategory>, String> {
-    let pool = DualDatabaseManager::public_pool();
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let categories = sqlx::query_as::<_, AssetCategory>(
-        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at FROM asset_categories ORDER BY sort ASC"
+        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at FROM asset_category ORDER BY sort ASC"
     )
     .fetch_all(&pool)
     .await
@@ -46,12 +45,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
-            // 应用启动时自动初始化公开数据库
+            // 应用启动时自动初始化数据库
             tauri::async_runtime::block_on(async {
-                database::init_public_database()
-                    .await
-                    .expect("公开数据库初始化失败");
-                println!("公开数据库初始化完成");
+                database::init_database().await.expect("数据库初始化失败");
+                println!("数据库初始化完成");
             });
             Ok(())
         })

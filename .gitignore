@@ -7,10 +7,10 @@
 
 node_modules
 target 
-dist/*
+dist/
 .next
 pnpm-lock.yaml
-
+.vscode
 # Environment variables
 .env
 .env.local

@@ -15,13 +15,13 @@ tauri-build = { version = "2.5.6", default-features = false , features = [] }  #
 
 [dependencies]
 # Tauri 核心（最小特性集）
-tauri = { version = "2.10.3", default-features = false, features = ["wry"] }
-tauri-plugin-opener = { version = "2.5.3", default-features = false }
-tauri-plugin-shell = "2.3.4"
-tauri-plugin-dialog = "2.6.0"
-tauri-plugin-process = "2.0.0"
-tauri-plugin-updater = "2.0.0"
-tauri-plugin-fs = "2.4.1"
+tauri = { version = "2.11.2", default-features = false, features = ["wry"] }
+tauri-plugin-opener = { version = "2.5.4", default-features = false }
+tauri-plugin-shell = "2.3.5"
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-process = "2.3.0"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-fs = "2.5.1"
 # 序列化
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
@@ -29,17 +29,8 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 # JWT
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["aws_lc_rs"] }
 
-# 权限
-
-# 数据库（SQLx + SQLite 最小化）
-sqlx = { version = "0.8.6", default-features = false, features = [
-    "sqlite",
-    "postgres",
-    "runtime-tokio-native-tls",
-    "macros",
-    "chrono",
-] }
-libsqlite3-sys = { version = "0.30.0", features = ["bundled-sqlcipher"] }
+# 数据库（仅 PostgreSQL）
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "chrono"] }
 
 # 异步运行时（只开必须的特性，不要 full）
 tokio = { version = "1.52", default-features = false, features = [
@@ -63,7 +54,7 @@ url = "2.0"
 # 目录路径
 dirs = "6.0.0"
 # 懒加载静态变量
-lazy_static = "1.4"
+lazy_static = "1.5.0"
 # 明确指定兼容版本
 base64 = "0.22.1"
 # 正则表达式
@@ -71,19 +62,22 @@ regex = "1.10"
 # Cron表达式解析
 cron = "0.16.0"
 # 加密相关
-aes = "0.9.0"
-cbc = "0.2.0"
-zeroize = { version = "^1.8", features = ["derive"] }
+aes = "0.8.2"          # 降级稳定版
+cbc = "0.1.2"          # 降级稳定版
+zeroize = { version = "1.8.2", features = ["derive"] }
 sha2 = "0.11.0"
-winapi = { version = "0.3", features = ["memoryapi", "debugapi", "sysinfoapi", "processthreadsapi", "errhandlingapi"] }
-block-padding = "0.4.2"
+block-padding = "0.3.0" # 配套版本
 pbkdf2 = "0.13.0"
 hmac = "0.13.0"
-openssl = { version = "0.10", features = ["vendored"] }
+
+
+winapi = { version = "0.3", features = ["memoryapi", "debugapi", "sysinfoapi", "processthreadsapi", "errhandlingapi"] }
+
+
+
 log = "0.4"
 hex="0.4"
-arrow="58.1.0"
-polars="0.53.0"
+
 # 工具库
 config = { version = "0.15", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["serde"] }
@@ -93,8 +87,7 @@ anyhow = "1.0.98"
 dotenvy = "0.15"
 
 opa-wasm = "0.2.0"
-wasmtime = { version = "44.0.1", features = ["async"] }
-polars-io = "0.53.0"
+
 # Release模式优化配置
 [profile.release]
 lto = false
