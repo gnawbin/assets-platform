@@ -12,6 +12,9 @@ use std::str::FromStr;
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
+/// 默认 PostgreSQL 数据库名称（始终存在，用于管理操作）
+const DEFAULT_POSTGRES_DB: &str = "postgres";
+
 /// PostgreSQL 数据库配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresConfig {
@@ -42,7 +45,7 @@ impl Default for PostgresConfig {
             port: 5432,
             database: "assets_platform".to_string(),
             username: "postgres".to_string(),
-            password: "123456".to_string(),
+            password: "postgres".to_string(),
             max_connections: 10,
             min_connections: 2,
             connect_timeout: 30,
@@ -161,9 +164,100 @@ impl PostgresManager {
 /// 全局 PostgreSQL 连接池
 static POSTGRES_POOL: OnceLock<RwLock<Option<PgPool>>> = OnceLock::new();
 
+/// 确保目标数据库存在，若不存在则自动创建
+///
+/// 该函数会先连接到默认的 `postgres` 数据库，检查目标数据库是否存在，
+/// 如果不存在则执行 `CREATE DATABASE` 创建它。
+/// 需要 PostgreSQL 用户拥有 `CREATEDB` 权限。
+#[allow(dead_code)]
+pub async fn ensure_database_exists(config: &PostgresConfig) -> Result<()> {
+    // 使用默认的 postgres 数据库进行管理操作
+    let admin_config = PostgresConfig {
+        database: DEFAULT_POSTGRES_DB.to_string(),
+        max_connections: 2,
+        min_connections: 1,
+        ..config.clone()
+    };
+
+    let admin_url = admin_config.connection_string();
+    let admin_options = PgConnectOptions::from_str(&admin_url)
+        .map_err(|e| anyhow!("无法解析管理连接字符串: {}", e))?;
+
+    // 创建临时连接池连接到默认 postgres 数据库
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(2)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(config.connect_timeout))
+        .connect_with(admin_options)
+        .await
+        .map_err(|e| {
+            anyhow!(
+                "无法连接到 PostgreSQL 服务器（默认 postgres 数据库）: {}",
+                e
+            )
+        })?;
+
+    // 检查目标数据库是否存在
+    let db_exists: bool = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)",
+    )
+    .bind(&config.database)
+    .fetch_one(&admin_pool)
+    .await
+    .map_err(|e| anyhow!("检查数据库是否存在时出错: {}", e))?;
+
+    if !db_exists {
+        println!("数据库 '{}' 不存在，正在自动创建...", config.database);
+
+        // CREATE DATABASE 不能使用参数化查询，需要对数据库名进行安全处理
+        let create_sql = format!(
+            "CREATE DATABASE \"{}\"",
+            config
+                .database
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect::<String>()
+        );
+
+        sqlx::query(&create_sql)
+            .execute(&admin_pool)
+            .await
+            .map_err(|e| {
+                anyhow!(
+                    "自动创建数据库 '{}' 失败: {}。\n\
+                     请手动创建数据库：\n\
+                     1. 打开 PostgreSQL 命令行或 pgAdmin\n\
+                     2. 执行: CREATE DATABASE \"{}\";\n\
+                     3. 然后重新启动应用",
+                    config.database,
+                    e,
+                    config.database
+                )
+            })?;
+
+        println!("数据库 '{}' 创建成功！", config.database);
+    } else {
+        println!("数据库 '{}' 已存在，跳过创建。", config.database);
+    }
+
+    // 关闭管理连接池
+    admin_pool.close().await;
+    Ok(())
+}
+
 /// 初始化全局 PostgreSQL 连接池
 #[allow(dead_code)]
 pub async fn init_postgres_pool(config: PostgresConfig) -> Result<()> {
+    // 1. 确保目标数据库存在（自动创建）
+    match ensure_database_exists(&config).await {
+        Ok(()) => {}
+        Err(e) => {
+            eprintln!("警告: 自动创建数据库失败: {}", e);
+            // 继续尝试连接，让连接池的错误提供更详细的信息
+        }
+    }
+
+    // 2. 连接到目标数据库
     let options = config.connect_options()?;
 
     let pool = PgPoolOptions::new()
@@ -173,13 +267,13 @@ pub async fn init_postgres_pool(config: PostgresConfig) -> Result<()> {
         .idle_timeout(Duration::from_secs(config.idle_timeout))
         .connect_with(options)
         .await
-        .map_err(|e| anyhow!("Failed to connect to PostgreSQL: {}", e))?;
+        .map_err(|e| anyhow!("连接到 PostgreSQL 失败: {}", e))?;
 
-    // 测试连接
+    // 3. 测试连接
     sqlx::query("SELECT 1")
         .fetch_one(&pool)
         .await
-        .map_err(|e| anyhow!("PostgreSQL connection test failed: {}", e))?;
+        .map_err(|e| anyhow!("PostgreSQL 连接测试失败: {}", e))?;
 
     POSTGRES_POOL.get_or_init(|| RwLock::new(Some(pool)));
     Ok(())
@@ -470,14 +564,14 @@ mod tests {
         assert_eq!(config.port, 5432);
         assert_eq!(config.database, "assets_platform");
         assert_eq!(config.username, "postgres");
-        assert_eq!(config.password, "123456");
+        assert_eq!(config.password, "postgres");
     }
 
     #[test]
     fn test_postgres_config_connection_string() {
         let config = PostgresConfig::default();
         let conn_str = config.connection_string();
-        assert!(conn_str.contains("postgres://postgres:123456@localhost:5432/assets_platform"));
+        assert!(conn_str.contains("postgres://postgres:postgres@localhost:5432/assets_platform"));
     }
 
     #[tokio::test]

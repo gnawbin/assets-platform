@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "node scripts/install-deps.cjs && pnpm tauri-dev",
+    "start": "node script/install-deps.cjs && pnpm tauri-dev",
     "dev": "next dev --webpack -p 1480",
     "build": "next build --webpack",
     "preview": "next start",
@@ -12,7 +12,7 @@
     "tauri-build": "tauri build",
     "tauri-dev": "tauri dev",
     "version:update": "node scripts/update-version.js",
-    "setup": "node scripts/install-deps.cjs",
+    "setup": "node script/install-deps.cjs",
     "check": "pnpm tauri-dev --help",
     "test": "jest",
     "test:watch": "jest --watch",
