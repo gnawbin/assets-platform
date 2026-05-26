@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
 import {
@@ -15,6 +15,7 @@ import {
   Textarea,
 } from '@mantine/core';
 import { IconArrowLeft } from '@tabler/icons-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface Category {
   id: number;
@@ -131,7 +132,9 @@ const mockCategories: Category[] = [
 
 const NewCategoryPage: React.FC = () => {
   const router = useRouter();
-
+  const [categories, setParentCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     category_name: '',
     asset_type: '',
@@ -139,9 +142,27 @@ const NewCategoryPage: React.FC = () => {
     sort: 0,
     description: '',
   });
-
+  
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    const fetchParentCategories = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await invoke<Category[]>('get_categories');
+        console.log('获取类别数据:', data);
+        setParentCategories(data);
+    //    setFilteredCategories(data);
+      } catch (err) {
+        console.error('获取类别列表失败:', err);
+        setError(typeof err === 'string' ? err : '获取类别列表失败，请稍后重试');
+      } finally {
+        setLoading(false);
+      }
+    };
 
+    fetchParentCategories();
+  }, []);
   // 构建父级类别选项（只显示顶级类别，即 parent_id === 0）
   const parentOptions = mockCategories
     .filter((c) => c.parent_id === 0)

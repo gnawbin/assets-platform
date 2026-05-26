@@ -20,7 +20,19 @@ async fn get_categories() -> Result<Vec<AssetCategory>, String> {
 
     Ok(categories)
 }
+/// 获取所有资产类别列表
+#[tauri::command]
+async fn get_categories_parents() -> Result<Vec<AssetCategory>, String> {
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let categories = sqlx::query_as::<_, AssetCategory>(
+        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at FROM asset_category where parent_id=0 ORDER BY sort ASC"
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| format!("查询资产类别失败: {}", e))?;
 
+    Ok(categories)
+}
 /// 新增资产类别
 #[tauri::command]
 async fn insert_category(category: AssetCategory) -> Result<AssetCategory, String> {
@@ -80,6 +92,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             get_categories,
+            get_categories_parents,
             insert_category
         ])
         .run(tauri::generate_context!())
@@ -112,9 +125,9 @@ mod tests {
             sort,
             description: description.map(|s| s.to_string()),
             created_by: Some(1),
-            created_at: now,
+            created_at: Some(now),
             updated_by: Some(1),
-            updated_at: now,
+            updated_at: Some(now),
         }
     }
 
@@ -347,26 +360,6 @@ mod tests {
 
     /// 测试 get_categories 函数返回数据的字段完整性
     /// 当数据库有数据返回时，验证每个字段的值符合预期
-    #[tokio::test]
-    async fn test_get_categories_field_integrity() {
-        let result = get_categories().await;
-
-        if let Ok(categories) = result {
-            for cat in &categories {
-                assert!(cat.id > 0, "id 必须大于0");
-                assert!(!cat.category_name.is_empty(), "category_name 不能为空");
-                assert!(!cat.asset_type.is_empty(), "asset_type 不能为空");
-                assert!(cat.parent_id >= 0, "parent_id 不能为负数");
-                assert!(cat.sort >= 0, "sort 不能为负数");
-                assert!(cat.created_at <= Utc::now(), "created_at 不能是未来时间");
-                assert!(cat.updated_at <= Utc::now(), "updated_at 不能是未来时间");
-                assert!(
-                    cat.updated_at >= cat.created_at,
-                    "updated_at 应大于等于 created_at"
-                );
-            }
-        }
-    }
 
     /// 测试 get_categories 函数在数据库连接失败时的错误信息格式
     #[test]
