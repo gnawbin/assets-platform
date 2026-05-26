@@ -30,106 +30,6 @@ interface Category {
   updated_at: string;
 }
 
-// 模拟数据（与列表页保持一致）
-const mockCategories: Category[] = [
-  {
-    id: 1,
-    category_name: '服务器',
-    asset_type: '硬件资产',
-    parent_id: 0,
-    sort: 1,
-    description: '各类服务器设备，包括机架式、塔式服务器等',
-    created_by: 1,
-    created_at: '2024-01-15 10:00:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:00:00',
-  },
-  {
-    id: 2,
-    category_name: '网络设备',
-    asset_type: '硬件资产',
-    parent_id: 0,
-    sort: 2,
-    description: '交换机、路由器、防火墙等网络基础设施',
-    created_by: 1,
-    created_at: '2024-01-15 10:05:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:05:00',
-  },
-  {
-    id: 3,
-    category_name: '办公设备',
-    asset_type: '硬件资产',
-    parent_id: 0,
-    sort: 3,
-    description: '台式机、笔记本、打印机等日常办公设备',
-    created_by: 1,
-    created_at: '2024-01-15 10:10:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:10:00',
-  },
-  {
-    id: 4,
-    category_name: '操作系统',
-    asset_type: '软件资产',
-    parent_id: 0,
-    sort: 4,
-    description: 'Windows、Linux、macOS等操作系统软件',
-    created_by: 1,
-    created_at: '2024-01-15 10:15:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:15:00',
-  },
-  {
-    id: 5,
-    category_name: '办公软件',
-    asset_type: '软件资产',
-    parent_id: 0,
-    sort: 5,
-    description: 'Microsoft Office、WPS等办公套件',
-    created_by: 1,
-    created_at: '2024-01-15 10:20:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:20:00',
-  },
-  {
-    id: 6,
-    category_name: '开发工具',
-    asset_type: '软件资产',
-    parent_id: 0,
-    sort: 6,
-    description: 'IDE、数据库管理工具、版本控制等开发相关软件',
-    created_by: 1,
-    created_at: '2024-01-15 10:25:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:25:00',
-  },
-  {
-    id: 7,
-    category_name: '机架式服务器',
-    asset_type: '硬件资产',
-    parent_id: 1,
-    sort: 1,
-    description: '标准机架式安装的服务器设备',
-    created_by: 1,
-    created_at: '2024-01-15 11:00:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 11:00:00',
-  },
-  {
-    id: 8,
-    category_name: '塔式服务器',
-    asset_type: '硬件资产',
-    parent_id: 1,
-    sort: 2,
-    description: '独立放置的塔式服务器',
-    created_by: 1,
-    created_at: '2024-01-15 11:05:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 11:05:00',
-  },
-];
-
 const NewCategoryPage: React.FC = () => {
   const router = useRouter();
   const [categories, setParentCategories] = useState<Category[]>([]);
@@ -149,10 +49,9 @@ const NewCategoryPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const data = await invoke<Category[]>('get_categories');
+        const data = await invoke<Category[]>('get_categories_parents');
         console.log('获取类别数据:', data);
         setParentCategories(data);
-    //    setFilteredCategories(data);
       } catch (err) {
         console.error('获取类别列表失败:', err);
         setError(typeof err === 'string' ? err : '获取类别列表失败，请稍后重试');
@@ -163,13 +62,11 @@ const NewCategoryPage: React.FC = () => {
 
     fetchParentCategories();
   }, []);
-  // 构建父级类别选项（只显示顶级类别，即 parent_id === 0）
-  const parentOptions = mockCategories
-    .filter((c) => c.parent_id === 0)
-    .map((c) => ({
-      value: String(c.id),
-      label: c.category_name,
-    }));
+  // 构建父级类别选项（数据已从 Rust 后端获取，只包含顶级类别）
+  const parentOptions = categories.map((c) => ({
+    value: String(c.id),
+    label: c.category_name,
+  }));
 
   const handleSubmit = async () => {
     if (!formData.category_name.trim()) {
