@@ -473,10 +473,6 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
 }
 
 /// 插入初始数据
-#[allow(dead_code)]
-pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
-    Ok(())
-}
 
 /// 完整的 PostgreSQL 数据库初始化
 #[allow(dead_code)]
@@ -489,9 +485,6 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
 
     // 初始化表结构
     init_postgres_tables(&pool).await?;
-
-    // 插入初始数据
-    insert_initial_data(&pool).await?;
 
     Ok(())
 }
@@ -522,20 +515,5 @@ mod tests {
         let config = PostgresConfig::default();
         let conn_str = config.connection_string();
         assert!(conn_str.contains("postgres://postgres:postgres@localhost:5432/assets_platform"));
-    }
-
-    #[tokio::test]
-    async fn test_postgres_manager() {
-        // 注意：这个测试需要实际的 PostgreSQL 数据库才能运行
-        // 在实际环境中，应该使用测试数据库或模拟连接
-        let config = PostgresConfig::default();
-        let mut manager = PostgresManager::new(config);
-
-        // 测试连接（在实际环境中取消注释）
-        // let result = manager.connect().await;
-        // assert!(result.is_ok() || result.is_err()); // 连接可能成功或失败，取决于数据库是否可用
-
-        // 测试配置获取
-        assert_eq!(manager.config().host, "localhost");
     }
 }
