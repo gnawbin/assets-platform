@@ -43,7 +43,7 @@ impl DatabaseConfig {
 }
 
 /// 数据库管理器
-#[allow(dead_code)]
+
 pub struct DatabaseManager {
     /// 数据库连接池（PostgreSQL）
     pool: Option<PgPool>,
@@ -51,7 +51,6 @@ pub struct DatabaseManager {
     config: DatabaseConfig,
 }
 
-#[allow(dead_code)]
 impl DatabaseManager {
     /// 创建新的数据库管理器
     pub fn new(config: DatabaseConfig) -> Self {
