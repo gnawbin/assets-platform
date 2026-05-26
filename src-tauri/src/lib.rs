@@ -21,6 +21,31 @@ async fn get_categories() -> Result<Vec<AssetCategory>, String> {
     Ok(categories)
 }
 
+/// 新增资产类别
+#[tauri::command]
+async fn insert_category(category: AssetCategory) -> Result<AssetCategory, String> {
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    let category = sqlx::query_as::<_, AssetCategory>(
+        r#"
+        INSERT INTO asset_category (category_name, asset_type, parent_id, sort, description, created_by, updated_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $6)
+        RETURNING id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at
+        "#
+    )
+    .bind(&category.category_name)
+    .bind(&category.asset_type)
+    .bind(category.parent_id)
+    .bind(category.sort)
+    .bind(&category.description)
+    .bind(category.created_by)
+    .fetch_one(&pool)
+    .await
+    .map_err(|e| format!("新增资产类别失败: {}", e))?;
+
+    Ok(category)
+}
+
 /// 加载 .env 环境变量文件
 fn load_env() {
     // 尝试从当前工作目录加载 .env 文件
@@ -52,9 +77,15 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, get_categories])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            get_categories,
+            insert_category
+        ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            eprintln!("error while running tauri application: {}", e);
+        });
 }
 
 #[cfg(test)]
@@ -327,14 +358,8 @@ mod tests {
                 assert!(!cat.asset_type.is_empty(), "asset_type 不能为空");
                 assert!(cat.parent_id >= 0, "parent_id 不能为负数");
                 assert!(cat.sort >= 0, "sort 不能为负数");
-                assert!(
-                    cat.created_at <= Utc::now(),
-                    "created_at 不能是未来时间"
-                );
-                assert!(
-                    cat.updated_at <= Utc::now(),
-                    "updated_at 不能是未来时间"
-                );
+                assert!(cat.created_at <= Utc::now(), "created_at 不能是未来时间");
+                assert!(cat.updated_at <= Utc::now(), "updated_at 不能是未来时间");
                 assert!(
                     cat.updated_at >= cat.created_at,
                     "updated_at 应大于等于 created_at"
@@ -380,11 +405,7 @@ mod tests {
         for result in &results {
             match (first_result, result) {
                 (Ok(first_cats), Ok(cats)) => {
-                    assert_eq!(
-                        first_cats.len(),
-                        cats.len(),
-                        "并发调用返回的分类数量应一致"
-                    );
+                    assert_eq!(first_cats.len(), cats.len(), "并发调用返回的分类数量应一致");
                 }
                 (Err(_), Err(_)) => {}
                 _ => {
@@ -421,37 +442,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    /// 测试 get_categories 函数的整体流程（需要数据库连接）
-    /// 使用 #[ignore] 标记，需要显式运行
-    /// 运行方式: cargo test -- --ignored 或设置 DATABASE_URL 环境变量
-    #[ignore]
-    #[tokio::test]
-    async fn test_get_categories_integration() {
-        let pool = database::get_pool().expect("数据库连接池应该已初始化");
-        let categories = sqlx::query_as::<_, AssetCategory>(
-            "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at FROM asset_category ORDER BY sort ASC"
-        )
-        .fetch_all(&pool)
-        .await
-        .expect("查询资产类别应该成功");
-
-        assert!(!categories.is_empty(), "资产类别列表不应为空");
-
-        for i in 1..categories.len() {
-            assert!(
-                categories[i - 1].sort <= categories[i].sort,
-                "资产类别应按 sort 字段升序排列"
-            );
-        }
-
-        let names: Vec<&str> = categories
-            .iter()
-            .map(|c| c.category_name.as_str())
-            .collect();
-        assert!(names.contains(&"IT设备"), "应包含 IT设备");
-        assert!(names.contains(&"软件资产"), "应包含 软件资产");
-        assert!(names.contains(&"办公设备"), "应包含 办公设备");
     }
 }

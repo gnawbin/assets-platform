@@ -35,9 +35,9 @@ pub struct AssetCategory {
     pub sort: i16,
     pub description: Option<String>,
     pub created_by: Option<i64>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
     pub updated_by: Option<i64>,
-    pub updated_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[allow(dead_code)]

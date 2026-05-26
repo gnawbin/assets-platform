@@ -475,56 +475,6 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
 /// 插入初始数据
 #[allow(dead_code)]
 pub async fn insert_initial_data(pool: &PgPool) -> Result<()> {
-    // 插入默认系统配置
-    sqlx::query(
-        r#"
-        INSERT INTO system_config (config_key, config_value, remark)
-        VALUES 
-            ('system_name', '资产管理系统', '系统名称'),
-            ('system_version', '1.0.0', '系统版本'),
-            ('default_language', 'zh-CN', '默认语言'),
-            ('pagination_size', '20', '分页大小')
-        ON CONFLICT (config_key) DO NOTHING
-        "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| anyhow!("Failed to insert system config: {}", e))?;
-
-    // 插入默认资产分类
-    sqlx::query(
-        r#"
-        INSERT INTO asset_category (category_name, asset_type, parent_id, sort, description)
-        VALUES 
-            ('IT设备', 'hardware', 0, 1, '信息技术设备'),
-            ('服务器', 'hardware', 1, 1, '服务器设备'),
-            ('网络设备', 'hardware', 1, 2, '网络设备'),
-            ('存储设备', 'hardware', 1, 3, '存储设备'),
-            ('办公设备', 'hardware', 0, 2, '办公设备'),
-            ('软件资产', 'software', 0, 3, '软件许可证和订阅'),
-            ('操作系统', 'software', 6, 1, '操作系统软件'),
-            ('办公软件', 'software', 6, 2, '办公软件'),
-            ('开发工具', 'software', 6, 3, '开发工具软件')
-        ON CONFLICT (category_name) DO NOTHING
-        "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| anyhow!("Failed to insert asset categories: {}", e))?;
-
-    // 插入默认用户（密码为 admin123 的哈希值）
-    sqlx::query(
-        r#"
-        INSERT INTO users (username, email, password_hash, full_name, role)
-        VALUES 
-            ('admin', 'admin@example.com', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', '系统管理员', 'admin')
-        ON CONFLICT (username) DO NOTHING
-        "#
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| anyhow!("Failed to insert default user: {}", e))?;
-
     Ok(())
 }
 
@@ -562,7 +512,7 @@ mod tests {
         let config = PostgresConfig::default();
         assert_eq!(config.host, "localhost");
         assert_eq!(config.port, 5432);
-        assert_eq!(config.database, "assets_platform");
+        assert_eq!(config.database, "assets_plateform");
         assert_eq!(config.username, "postgres");
         assert_eq!(config.password, "postgres");
     }

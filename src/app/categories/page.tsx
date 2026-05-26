@@ -1,9 +1,10 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { invoke } from '@tauri-apps/api/core';
 import Layout from '@/components/Layout';
-import { Table, Title, Text, Card, Stack, Badge, Group, Button, Anchor } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { Table, Title, Text, Card, Stack, Badge, Group, Button, Anchor, Loader, Center, Alert, TextInput } from '@mantine/core';
+import { IconPlus, IconAlertCircle, IconSearch, IconDatabaseOff } from '@tabler/icons-react';
 
 interface Category {
   id: number;
@@ -18,111 +19,51 @@ interface Category {
   updated_at: string;
 }
 
-// 模拟数据
-const mockCategories: Category[] = [
-  {
-    id: 1,
-    category_name: '服务器',
-    asset_type: '硬件资产',
-    parent_id: 0,
-    sort: 1,
-    description: '各类服务器设备，包括机架式、塔式服务器等',
-    created_by: 1,
-    created_at: '2024-01-15 10:00:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:00:00',
-  },
-  {
-    id: 2,
-    category_name: '网络设备',
-    asset_type: '硬件资产',
-    parent_id: 0,
-    sort: 2,
-    description: '交换机、路由器、防火墙等网络基础设施',
-    created_by: 1,
-    created_at: '2024-01-15 10:05:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:05:00',
-  },
-  {
-    id: 3,
-    category_name: '办公设备',
-    asset_type: '硬件资产',
-    parent_id: 0,
-    sort: 3,
-    description: '台式机、笔记本、打印机等日常办公设备',
-    created_by: 1,
-    created_at: '2024-01-15 10:10:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:10:00',
-  },
-  {
-    id: 4,
-    category_name: '操作系统',
-    asset_type: '软件资产',
-    parent_id: 0,
-    sort: 4,
-    description: 'Windows、Linux、macOS等操作系统软件',
-    created_by: 1,
-    created_at: '2024-01-15 10:15:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:15:00',
-  },
-  {
-    id: 5,
-    category_name: '办公软件',
-    asset_type: '软件资产',
-    parent_id: 0,
-    sort: 5,
-    description: 'Microsoft Office、WPS等办公套件',
-    created_by: 1,
-    created_at: '2024-01-15 10:20:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:20:00',
-  },
-  {
-    id: 6,
-    category_name: '开发工具',
-    asset_type: '软件资产',
-    parent_id: 0,
-    sort: 6,
-    description: 'IDE、数据库管理工具、版本控制等开发相关软件',
-    created_by: 1,
-    created_at: '2024-01-15 10:25:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 10:25:00',
-  },
-  {
-    id: 7,
-    category_name: '机架式服务器',
-    asset_type: '硬件资产',
-    parent_id: 1,
-    sort: 1,
-    description: '标准机架式安装的服务器设备',
-    created_by: 1,
-    created_at: '2024-01-15 11:00:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 11:00:00',
-  },
-  {
-    id: 8,
-    category_name: '塔式服务器',
-    asset_type: '硬件资产',
-    parent_id: 1,
-    sort: 2,
-    description: '独立放置的塔式服务器',
-    created_by: 1,
-    created_at: '2024-01-15 11:05:00',
-    updated_by: 1,
-    updated_at: '2024-01-15 11:05:00',
-  },
-];
-
 const CategoriesPage: React.FC = () => {
   const router = useRouter();
-  const [categories] = useState<Category[]>(mockCategories);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [filteredCategories, setFilteredCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
 
-  const rows = categories.map((item) => (
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await invoke<Category[]>('get_categories');
+        console.log('获取类别数据:', data);
+        setCategories(data);
+        setFilteredCategories(data);
+      } catch (err) {
+        console.error('获取类别列表失败:', err);
+        setError(typeof err === 'string' ? err : '获取类别列表失败，请稍后重试');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCategories();
+  }, []);
+
+  const handleSearch = useCallback(() => {
+    if (!searchQuery.trim()) {
+      setFilteredCategories(categories);
+      return;
+    }
+    const query = searchQuery.trim().toLowerCase();
+    const filtered = categories.filter(
+      (item) =>
+        item.category_name.toLowerCase().includes(query) ||
+        item.asset_type.toLowerCase().includes(query) ||
+        (item.description && item.description.toLowerCase().includes(query))
+    );
+    setFilteredCategories(filtered);
+  }, [searchQuery, categories]);
+
+  const rows = filteredCategories.map((item) => (
     <Table.Tr key={item.id}>
       <Table.Td>{item.id}</Table.Td>
       <Table.Td>
@@ -142,6 +83,34 @@ const CategoriesPage: React.FC = () => {
     </Table.Tr>
   ));
 
+  if (loading) {
+    return (
+      <Layout>
+        <Center h={400}>
+          <Loader size="lg" />
+        </Center>
+      </Layout>
+    );
+  }
+
+  if (error) {
+    return (
+      <Layout>
+        <Stack gap="lg">
+          <Group justify="space-between" align="center">
+            <div>
+              <Title order={2}>类别管理</Title>
+              <Text c="dimmed">管理资产类别信息</Text>
+            </div>
+          </Group>
+          <Alert icon={<IconAlertCircle size={16} />} title="加载失败" color="red">
+            {error}
+          </Alert>
+        </Stack>
+      </Layout>
+    );
+  }
+
   return (
     <Layout>
       <Stack gap="lg">
@@ -150,9 +119,41 @@ const CategoriesPage: React.FC = () => {
             <Title order={2}>类别管理</Title>
             <Text c="dimmed">管理资产类别信息</Text>
           </div>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => router.push('/categories/new')}>
-            添加类别
-          </Button>
+          <Group>
+            {showSearch ? (
+              <TextInput
+                placeholder="搜索类别名称、资产类型或描述..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSearch();
+                  }
+                }}
+                rightSection={
+                  <Button size="compact-sm" variant="subtle" onClick={handleSearch}>
+                    查询
+                  </Button>
+                }
+                rightSectionWidth={60}
+              />
+            ) : null}
+            <Button
+              variant="light"
+              leftSection={<IconSearch size={16} />}
+              onClick={() => {
+                if (showSearch) {
+                  handleSearch();
+                }
+                setShowSearch(!showSearch);
+              }}
+            >
+              搜索
+            </Button>
+            <Button leftSection={<IconPlus size={16} />} onClick={() => router.push('/categories/new')}>
+              添加类别
+            </Button>
+          </Group>
         </Group>
 
         <Card withBorder padding="lg" radius="md">
