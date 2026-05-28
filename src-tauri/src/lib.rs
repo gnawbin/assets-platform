@@ -12,7 +12,7 @@ fn greet(name: &str) -> String {
 async fn get_categories() -> Result<Vec<AssetCategory>, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let categories = sqlx::query_as::<_, AssetCategory>(
-        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at FROM asset_category ORDER BY sort ASC"
+        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM asset_category ORDER BY sort ASC"
     )
     .fetch_all(&pool)
     .await
@@ -25,7 +25,7 @@ async fn get_categories() -> Result<Vec<AssetCategory>, String> {
 async fn get_categories_parents() -> Result<Vec<AssetCategory>, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let categories = sqlx::query_as::<_, AssetCategory>(
-        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at FROM asset_category where parent_id=0 ORDER BY sort ASC"
+        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted  FROM asset_category where parent_id=0 ORDER BY sort ASC"
     )
     .fetch_all(&pool)
     .await
@@ -129,6 +129,7 @@ mod tests {
             created_at: Some(now),
             updated_by: Some(1),
             updated_at: Some(now),
+            deleted: Some(0),
         }
     }
 

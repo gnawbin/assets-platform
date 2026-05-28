@@ -48,10 +48,10 @@ fn get_generator() -> &'static std::sync::Mutex<SnowflakeGenerator> {
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(0);
 
-        let datacenter_id = std::env::var("SNOWFLAKE_DATACENTER_ID")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(0);
+        //  let datacenter_id = std::env::var("SNOWFLAKE_DATACENTER_ID")
+        //    .ok()
+        //  .and_then(|v| v.parse::<u64>().ok())
+        //.unwrap_or(0);
 
         std::sync::Mutex::new(SnowflakeGenerator::new(worker_id))
     })
