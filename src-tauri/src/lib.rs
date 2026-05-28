@@ -1,5 +1,5 @@
 mod database;
-
+mod utils;
 use database::models::AssetCategory;
 
 #[tauri::command]
@@ -29,6 +29,7 @@ async fn get_categories_parents() -> Result<Vec<AssetCategory>, String> {
     )
     .fetch_all(&pool)
     .await
+
     .map_err(|e| format!("查询资产类别失败: {}", e))?;
 
     Ok(categories)

@@ -43,7 +43,7 @@ pub struct AssetCategory {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Assets {
-    pub id: i64,
+    pub id: i64, //主键，唯一标识一条资产记录
     pub asset_no: String,
     pub asset_type: String,
     pub category_id: i64,
