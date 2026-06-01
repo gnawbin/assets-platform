@@ -15,7 +15,7 @@ const meta: Meta<typeof ProcessManagement> = {
     docs: {
       description: {
         component:
-          '流程管理页面组件，通过 title 属性区分不同的流程模块（领用审批、归还确认、调拨流程、维修流程、报废流程、所有流程）。',
+          '流程管理页面组件，通过 title 属性区分不同的流程模块（领用审批、归还确认、调拨流程、维修流程、报废流程、采购流程、所有流程）。',
       },
     },
   },
