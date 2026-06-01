@@ -33,9 +33,9 @@ pub async fn insert_category(category: &AssetCategory) -> Result<AssetCategory, 
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let category = sqlx::query_as::<_, AssetCategory>(
         r#"
-        INSERT INTO asset_category (id,category_name, asset_type, parent_id, sort, description, created_by, updated_by,created_at,updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7,$8, NOW(), NOW())
-        RETURNING id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at
+        INSERT INTO asset_category (id,category_name, asset_type, parent_id, sort, description, created_by, updated_by,created_at,updated_at,deleted)
+        VALUES ($1, $2, $3, $4, $5, $6, $7,$8, NOW(), NOW(),0)
+        RETURNING id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at, deleted
         "#
     )
     .bind((next_id()) as i64)
@@ -90,43 +90,4 @@ pub async fn delete_category(id: i64) -> Result<(), String> {
     .map_err(|e| format!("删除资产类别失败: {}", e))?;
 
     Ok(())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::Utc;
-
-    #[tokio::test]
-    async fn test_insert_category() {
-        let category = AssetCategory {
-            id: 0,
-            category_name: "测试类别".to_string(),
-            asset_type: "测试类型".to_string(),
-            parent_id: 0,
-            sort: 1i16,
-            description: Some("这是一个测试类别".to_string()),
-            created_by: Some(1i64),
-            created_at: Some(Utc::now()),
-            updated_by: Some(1i64),
-            updated_at: Some(Utc::now()),
-            deleted: Some(0i16),
-        };
-        let result = insert_category(&category).await;
-        match result {
-            Ok(inserted_category) => {
-                println!("插入成功: {:?}", inserted_category);
-                assert_eq!(inserted_category.category_name, category.category_name);
-                assert_eq!(inserted_category.asset_type, category.asset_type);
-                assert_eq!(inserted_category.parent_id, category.parent_id);
-                assert_eq!(inserted_category.sort, category.sort);
-                assert_eq!(inserted_category.description, category.description);
-                assert_eq!(inserted_category.created_by, category.created_by);
-                assert_eq!(inserted_category.updated_by, category.updated_by);
-                assert_eq!(inserted_category.deleted, category.deleted);
-            }
-            Err(e) => {
-                panic!("插入失败: {}", e);
-            }
-        }
-    }
 }

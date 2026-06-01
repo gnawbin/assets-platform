@@ -79,13 +79,33 @@ const NewCategoryPage: React.FC = () => {
     }
 
     setSaving(true);
+    setError(null);
 
-    // 模拟保存延迟
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const categoryPayload = {
+      id: 0,
+      category_name: formData.category_name.trim(),
+      asset_type: formData.asset_type,
+      parent_id: formData.parent_id ?? 0,
+      sort: formData.sort,
+      description: formData.description || null,
+      created_by: null,
+      created_at: null,
+      updated_by: null,
+      updated_at: null,
+      deleted: 0,
+    };
 
-    // 模拟保存成功
-    alert('类别添加成功！');
-    router.push('/categories');
+    try {
+      await invoke<Category>('insert_category', { category: categoryPayload });
+      alert('类别添加成功！');
+      router.push('/categories');
+    } catch (err) {
+      console.error('新增类别失败:', err);
+      setError(typeof err === 'string' ? err : '新增类别失败，请稍后重试');
+      alert(typeof err === 'string' ? err : '新增类别失败，请稍后重试');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

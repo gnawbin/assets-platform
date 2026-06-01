@@ -1,6 +1,6 @@
 use std::str;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -13,9 +13,9 @@ pub struct AssetCategory {
     pub sort: i16,
     pub description: Option<String>,
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: Option<i16>,
 }
 
@@ -37,9 +37,9 @@ pub struct Assets {
     pub expire_date: Option<DateTime<Utc>>,
     pub description: String,
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: Option<i16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -51,15 +51,15 @@ pub struct HardAssets {
     pub location: Option<String>, //资产存放位置，如XX办公楼302室、机房A区01柜
     pub maintenance_vendor: Option<String>, //维保厂商，如联想售后、华为维保，关联维保管理
     pub maintenance_type: Option<String>, //维保方式，取值：上门维保、寄修、远程维保
-    pub maintenance_expire_date: Option<DateTime<Utc>>, //维保到期日期，用于维保到期提醒，优先级高于主表expire_date
+    pub maintenance_expire_date: Option<NaiveDateTime>, //维保到期日期，用于维保到期提醒，优先级高于主表expire_date
     pub hardware_config: Option<String>, //硬件配置详情，如CPU、内存、硬盘、显卡等，JSON格式存储（如{"cpu":"i7-13700H","memory":"16GB"}）
     pub use_user_id: Option<i64>, //外键，关联用户表（user）id，记录当前使用人，状态为“在用/借用”时必填
-    pub use_start_date: Option<DateTime<Utc>>, //使用开始日期，状态变更为“在用/借用”时自动记录
+    pub use_start_date: Option<NaiveDateTime>, //使用开始日期，状态变更为“在用/借用”时自动记录
     pub fault_desc: Option<String>, //故障描述，状态为“维修”时填写，记录故障详情
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: Option<i16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -74,14 +74,14 @@ pub struct SoftAssets {
     pub bind_type: Option<String>,         //绑定类型，记录授权绑定方式，如设备绑定、用户绑定等
     pub bind_info: Option<String>, //绑定信息，记录授权绑定的具体信息，如绑定设备的SN码或绑定用户的ID
     pub renew_record: Option<String>, //续费记录，记录授权续费历史，JSON格式存储（如[{"renew_date":"2024-01-01","expire_date":"2025-01-01","renew_cost":100}]）
-    pub renew_reminder: Option<DateTime<Utc>>, //续费提醒日期，记录授权到期前的续费提醒时间
+    pub renew_reminder: Option<NaiveDateTime>, //续费提醒日期，记录授权到期前的续费提醒时间
     pub version: Option<String>, //软件版本，记录软件的具体版本信息，如Windows 10 Pro、Office 365等
     pub download_link: Option<String>, //软件下载链接，记录软件的官方下载地址或内部下载地址
     pub authorize_contract: Option<String>, //授权合同信息，记录与软件供应商签订的授权合同详情，如合同编号、签订日期、合同附件链接等
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: Option<i16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -101,9 +101,9 @@ pub struct SysUser {
     pub person_code: Option<String>,       //工号，记录用户的工号或员工编号
     pub super_user_id: Option<i64>, //上级用户ID，外键，关联自身id，记录用户的直接上级领导，顶级用户super_user_id为null
     pub created_by: Option<i64>,    //创建人，记录创建该用户的管理员
-    pub created_at: Option<DateTime<Utc>>, //创建时间，记录用户的创建时间
+    pub created_at: Option<NaiveDateTime>, //创建时间，记录用户的创建时间
     pub updated_by: Option<i64>,    //更新人，记录最后一次修改该用户
-    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录用户的最后修改时间
+    pub updated_at: Option<NaiveDateTime>, //更新时间，记录用户的最后修改时间
     pub deleted: Option<i16>,       //删除标志，记录用户是否被删除，0=未删除，1=已删除，软删除使用
 }
 
@@ -114,9 +114,9 @@ pub struct Department {
     pub parent_id: Option<i64>, //父部门ID，外键，关联自身id，实现部门层级关系，顶级部门parent_id为null
     pub description: Option<String>, //描述，记录部门的详细描述信息
     pub created_by: Option<i64>, //创建人，记录创建该部门的管理员
-    pub created_at: Option<DateTime<Utc>>, //创建时间，记录部门的创建时间
+    pub created_at: Option<NaiveDateTime>, //创建时间，记录部门的创建时间
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该部门的管理员
-    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录部门的最后修改时间
+    pub updated_at: Option<NaiveDateTime>, //更新时间，记录部门的最后修改时间
     pub deleted: Option<i16>,   //删除标志，记录部门是否被删除，0=未删除，1=已删除，软删除使用
 }
 
@@ -165,13 +165,13 @@ pub struct SysMenu {
     pub created_by: Option<i64>,
 
     /// 创建时间
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
 
     /// 更新人ID
     pub updated_by: Option<i64>,
 
     /// 更新时间
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
 
     /// 软删除标志（0=未删除，1=已删除）
     pub deleted: i16,
@@ -183,9 +183,9 @@ pub struct Role {
     pub role_name: String,                 //角色名称，记录角色的名称
     pub description: Option<String>,       //描述，记录角色的详细描述信息
     pub created_by: Option<i64>,           //创建人，记录创建该角色的管理员
-    pub created_at: Option<DateTime<Utc>>, //创建时间，记录角色的创建时间
+    pub created_at: Option<NaiveDateTime>, //创建时间，记录角色的创建时间
     pub updated_by: Option<i64>,           //更新人，记录最后一次修改该角色的管理员
-    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录角色的最后修改时间
+    pub updated_at: Option<NaiveDateTime>, //更新时间，记录角色的最后修改时间
     pub deleted: Option<i16>, //删除标志，记录角色是否被删除，0=未删除，1=已删除，软删除使用
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -194,9 +194,9 @@ pub struct UserRole {
     pub user_id: i64,                      //用户ID，外键，关联用户表（sys_user）id
     pub role_id: i64,                      //角色ID，外键，关联角色表（role）id
     pub created_by: Option<i64>,           //创建人，记录创建该关联的管理员
-    pub created_at: Option<DateTime<Utc>>, //创建时间，记录该关联的创建时间
+    pub created_at: Option<NaiveDateTime>, //创建时间，记录该关联的创建时间
     pub updated_by: Option<i64>,           //更新人，记录最后一次修改该关联的管理员
-    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录该关联的最后修改时间
+    pub updated_at: Option<NaiveDateTime>, //更新时间，记录该关联的最后修改时间
     pub deleted: Option<bool>,             //主键，唯一标识一条角色菜单关联记录
 }
 
@@ -212,12 +212,12 @@ pub struct AssetReceive {
     pub reason: String,              // 领用原因
     pub status: i8,                  // 状态：0=待审批 1=已同意 2=已驳回 3=已领用 4=已归还
     pub approve_by: Option<i64>,     // 审批人
-    pub approve_time: Option<DateTime<Utc>>,
+    pub approve_time: Option<NaiveDateTime>,
     pub approve_remark: Option<String>,
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
 }
 
@@ -235,9 +235,9 @@ pub struct AssetReturn {
     pub confirm_by: i64,            // 确认人
     pub confirm_time: DateTime<Utc>,
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
 }
 
@@ -255,11 +255,11 @@ pub struct AssetTransfer {
     pub reason: String, // 调拨原因
     pub status: i8,     // 0=待审批 1=已调拨 2=已驳回
     pub approve_by: Option<i64>,
-    pub approve_time: Option<DateTime<Utc>>,
+    pub approve_time: Option<NaiveDateTime>,
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
 }
 
@@ -278,13 +278,13 @@ pub struct AssetRepair {
     pub vendor: Option<String>,          // 维修商
     pub cost: Option<f64>,               // 维修费用
     pub apply_date: DateTime<Utc>,       // 申请日期
-    pub repair_date: Option<DateTime<Utc>>, // 维修日期
-    pub finish_date: Option<DateTime<Utc>>, // 完成日期
+    pub repair_date: Option<NaiveDateTime>, // 维修日期
+    pub finish_date: Option<NaiveDateTime>, // 完成日期
     pub status: i8,                      // 0=待维修 1=维修中 2=已完成 3=无法维修
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
 }
 
@@ -298,12 +298,12 @@ pub struct AssetScrap {
     pub scrap_date: DateTime<Utc>,
     pub status: i8, // 0=待审批 1=已批准 2=已驳回 3=已报废
     pub approve_by: Option<i64>,
-    pub approve_time: Option<DateTime<Utc>>,
+    pub approve_time: Option<NaiveDateTime>,
     pub handle_user: Option<i64>, // 处理人
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
 }
 
@@ -324,12 +324,12 @@ pub struct AssetPurchase {
     pub reason: String,                       // 采购原因
     pub status: i8,                           // 0=待审批 1=采购中 2=已完成 3=已驳回
     pub supplier: Option<String>,             // 供应商
-    pub purchase_date: Option<DateTime<Utc>>, //购买时间
-    pub arrive_date: Option<DateTime<Utc>>,   //预计到货时间
+    pub purchase_date: Option<NaiveDateTime>, //购买时间
+    pub arrive_date: Option<NaiveDateTime>,   //预计到货时间
     pub created_by: Option<i64>,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
 }
 
@@ -343,6 +343,6 @@ pub struct AssetApproval {
     pub approver_id: i64,   // 审批人ID
     pub approve_status: i8, // 0=待审 1=同意 2=驳回
     pub remark: Option<String>,
-    pub approve_time: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
+    pub approve_time: Option<NaiveDateTime>,
+    pub created_at: Option<NaiveDateTime>,
 }
