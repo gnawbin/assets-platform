@@ -1,4 +1,5 @@
 mod database;
+mod service;
 mod utils;
 use database::models::AssetCategory;
 

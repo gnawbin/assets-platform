@@ -184,4 +184,6 @@ VALUES(1, 'admin', '$argon2id$v=19$m=19456,t=2,p=1$iBgqWh/LgwmCcfXByfgy/Q$s/j6aL
 
 select setval('sys_user_id_seq',(select max(id) from sys_user)) 
 
-
+INSERT INFO SYS_USER_ROLE(id,user_id,role_id,created_by,created_at,updated_by,updated_at,deleted )
+VALUES(1,1,1,1,now(),1,now(),0)
+select setval('sys_user_role_id_seq',(select max(id) from sys_user_role))
