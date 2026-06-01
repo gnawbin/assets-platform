@@ -197,7 +197,20 @@ pub struct UserRole {
     pub created_at: Option<NaiveDateTime>, //创建时间，记录该关联的创建时间
     pub updated_by: Option<i64>,           //更新人，记录最后一次修改该关联的管理员
     pub updated_at: Option<NaiveDateTime>, //更新时间，记录该关联的最后修改时间
-    pub deleted: Option<bool>,             //主键，唯一标识一条角色菜单关联记录
+    pub deleted: Option<bool>,             //删除标志
+}
+
+/// 角色菜单关联表
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct RoleMenu {
+    pub id: i64,
+    pub role_id: i64,
+    pub menu_id: i64,
+    pub created_by: Option<i64>,
+    pub created_at: Option<NaiveDateTime>,
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<NaiveDateTime>,
+    pub deleted: Option<i16>,
 }
 
 // ======================== 【1】资产领用申请表 ========================
@@ -345,4 +358,12 @@ pub struct AssetApproval {
     pub remark: Option<String>,
     pub approve_time: Option<NaiveDateTime>,
     pub created_at: Option<NaiveDateTime>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MantineTree {
+    pub value: String,                      // 必须：id 转字符串
+    pub label: String,                      // 必须：显示名称
+    pub children: Option<Vec<MantineTree>>, // 子节点
+    pub checked: Option<bool>,              // 可选：是否选中（权限分配时使用）
 }
