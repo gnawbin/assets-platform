@@ -25,6 +25,18 @@ async fn insert_category(category: AssetCategory) -> Result<AssetCategory, Strin
     service::assets_categories_service::insert_category(&category).await
 }
 
+/// 更新资产类别
+#[tauri::command]
+async fn update_category(category: AssetCategory) -> Result<AssetCategory, String> {
+    service::assets_categories_service::update_category(&category).await
+}
+
+/// 删除资产类别
+#[tauri::command]
+async fn delete_category(id: i64) -> Result<(), String> {
+    service::assets_categories_service::delete_category(id).await
+}
+
 // ======================== 角色权限管理 ========================
 
 /// 新增角色
@@ -243,6 +255,8 @@ pub fn run() {
             get_categories,
             get_categories_parents,
             insert_category,
+            update_category,
+            delete_category,
             insert_role,
             get_roles,
             get_role_menu_ids,

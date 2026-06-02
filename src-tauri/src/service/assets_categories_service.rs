@@ -57,7 +57,7 @@ pub async fn update_category(category: &AssetCategory) -> Result<AssetCategory, 
     let category = sqlx::query_as::<_, AssetCategory>(
         r#"
         UPDATE asset_category
-        SET category_name = $2, asset_type = $3, parent_id = $4, sort = $5, description = $6, updated_by = $7, updated_at = NOW()
+        SET category_name = $2, asset_type = $3, parent_id = $4, sort = $5, description = $6, updated_by = $7, updated_at = NOW(),deleted=0
         WHERE id = $1
         RETURNING id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at
         "#

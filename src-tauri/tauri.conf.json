@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "assets-platform",
+  "productName": "资产管理平台",
   "version": "0.1.0",
   "identifier": "com.it.assets",
   "build": {
@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "assets-platform",
-        "width": 800,
-        "height": 600
+        "title": "资产管理平台",
+        "width": 1280,
+        "height": 800
       }
     ],
     "security": {
