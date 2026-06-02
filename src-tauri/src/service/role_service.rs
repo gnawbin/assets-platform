@@ -68,6 +68,7 @@ pub async fn assign_role_menus(role_id: i64, menu_ids: Vec<i64>) -> Result<(), S
         .bind(next_id() as i64)
         .bind(role_id)
         .bind(menu_id)
+        .bind(1)
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("插入权限关联失败: {}", e))?;
