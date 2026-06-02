@@ -2,6 +2,9 @@ mod database;
 mod service;
 mod utils;
 use database::models::{AssetCategory, Department, MantineTree, Role};
+use service::assets_service::{
+    HardwareAssetInput, HardwareAssetView, IntangibleAssetInput, IntangibleAssetView,
+};
 use service::user_service::{LoginResponse, UserResponse};
 
 #[tauri::command]
@@ -219,6 +222,66 @@ async fn delete_department(id: i64) -> Result<(), String> {
     service::department_service::delete_department(id).await
 }
 
+// ======================== 固定资产管理 ========================
+
+/// 获取所有固定资产列表
+#[tauri::command]
+async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
+    service::assets_service::get_hardware_assets().await
+}
+
+/// 新增固定资产
+#[tauri::command]
+async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<HardwareAssetView, String> {
+    service::assets_service::insert_hardware_asset(input).await
+}
+
+/// 修改固定资产
+#[tauri::command]
+async fn update_hardware_asset(
+    id: i64,
+    input: HardwareAssetInput,
+) -> Result<HardwareAssetView, String> {
+    service::assets_service::update_hardware_asset(id, input).await
+}
+
+/// 删除固定资产（软删除）
+#[tauri::command]
+async fn delete_hardware_asset(id: i64) -> Result<(), String> {
+    service::assets_service::delete_hardware_asset(id).await
+}
+
+// ======================== 无形资产管理 ========================
+
+/// 获取所有无形资产列表
+#[tauri::command]
+async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String> {
+    service::assets_service::get_intangible_assets().await
+}
+
+/// 新增无形资产
+#[tauri::command]
+async fn insert_intangible_asset(
+    input: IntangibleAssetInput,
+) -> Result<IntangibleAssetView, String> {
+    service::assets_service::insert_intangible_asset(input).await
+}
+
+/// 修改无形资产
+#[tauri::command]
+async fn update_intangible_asset(
+    id: i64,
+    input: IntangibleAssetInput,
+) -> Result<IntangibleAssetView, String> {
+    service::assets_service::update_intangible_asset(id, input).await
+}
+
+/// 删除无形资产（软删除）
+#[tauri::command]
+async fn delete_intangible_asset(id: i64) -> Result<(), String> {
+    service::assets_service::delete_intangible_asset(id).await
+}
+
 /// 加载 .env 环境变量文件
 fn load_env() {
     // 尝试从当前工作目录加载 .env 文件
@@ -273,6 +336,14 @@ pub fn run() {
             insert_department,
             update_department,
             delete_department,
+            get_hardware_assets,
+            insert_hardware_asset,
+            update_hardware_asset,
+            delete_hardware_asset,
+            get_intangible_assets,
+            insert_intangible_asset,
+            update_intangible_asset,
+            delete_intangible_asset,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

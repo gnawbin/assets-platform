@@ -1,6 +1,6 @@
 [package]
 name = "assets-platform"
-version = "0.1.0"
+version = "0.0.1"
 description = "资产平台APP"
 authors = ["gengyuwangbin"]
 edition = "2021"
