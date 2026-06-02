@@ -761,7 +761,7 @@ pub async fn delete_intangible_asset(id: i64) -> Result<(), String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     sqlx::query(
-        "UPDATE assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'software'",
+        "UPDATE assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'intangible'",
     )
     .bind(id)
     .execute(&pool)
