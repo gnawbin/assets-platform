@@ -334,7 +334,7 @@ const CategoriesPage: React.FC = () => {
             color={node.asset_type === 'hardware' ? 'blue' : 'violet'}
             ml="auto"
           >
-            {node.asset_type === 'hardware' ? '硬件' : '软件'}
+            {node.asset_type === 'hardware' ? '固定资产' : '无形资产'}
           </Badge>
         </Box>
         {hasChildren && node.expanded && (
@@ -557,7 +557,7 @@ const CategoriesPage: React.FC = () => {
             required
             data={[
               { value: 'hardware', label: '硬件资产' },
-              { value: 'software', label: '软件资产' },
+              { value: 'intangible', label: '无形资产' },
             ]}
             value={formAssetType}
             onChange={(val) => setFormAssetType(val || 'hardware')}

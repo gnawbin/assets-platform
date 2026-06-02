@@ -20,29 +20,6 @@ pub struct AssetCategory {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct Assets {
-    pub id: i64, //主键，唯一标识一条资产记录
-    pub asset_no: String,
-    pub asset_type: String,
-    pub category_id: i64,
-    pub asset_name: String,
-    pub manufacturer: Option<String>,
-    pub model: Option<String>,
-    pub department_id: i64,
-    pub status: i8,
-    pub purchase_date: Option<DateTime<Utc>>,
-    pub purchase_price: Option<f64>,
-    pub quantity: i32,      //资产数量，硬资产默认1，软资产记录授权总数量
-    pub used_quantity: i32, //已使用数量，软资产记录已分配授权数
-    pub expire_date: Option<DateTime<Utc>>,
-    pub description: String,
-    pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
-    pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
-    pub deleted: Option<i16>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct HardAssets {
     pub id: i64,                                        //主键，唯一标识一条硬资产扩展记录
     pub asset_id: i64, //外键，关联资产主表（assets）id，一对一关联，软删除主表时同步软删除该记录
@@ -63,27 +40,31 @@ pub struct HardAssets {
     pub deleted: Option<i16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct SoftAssets {
-    pub id: i64,                               //主键，唯一标识一条软资产扩展记录
+pub struct IntangibleAssets {
+    pub id: i64,                                 //主键，唯一标识一条软资产扩展记录
     pub asset_id: i64, //外键，关联资产主表（assets）id，一对一关联，软删除主表时同步软删除该记录
-    pub license_key: Option<String>, //软件授权码，记录软件授权信息，如Office 365的25
-    pub license_type: Option<String>, //授权类型，取值：单机授权、企业授权、订阅授权等
-    pub license_period: Option<String>, //授权期限，记录授权有效期，如1年、永久等
-    pub authorized_scope: Option<String>, //授权范围，记录授权使用范围，如个人使用、部门使用、全公司使用等
-    pub assigned_user_ids: Option<String>, //已分配用户ID列表，记录已分配授权的用户，JSON格式存储（如[1,2,3]）
-    pub bind_type: Option<String>,         //绑定类型，记录授权绑定方式，如设备绑定、用户绑定等
-    pub bind_info: Option<String>, //绑定信息，记录授权绑定的具体信息，如绑定设备的SN码或绑定用户的ID
-    pub renew_record: Option<String>, //续费记录，记录授权续费历史，JSON格式存储（如[{"renew_date":"2024-01-01","expire_date":"2025-01-01","renew_cost":100}]）
-    pub renew_reminder: Option<NaiveDateTime>, //续费提醒日期，记录授权到期前的续费提醒时间
-    pub version: Option<String>, //软件版本，记录软件的具体版本信息，如Windows 10 Pro、Office 365等
-    pub download_link: Option<String>, //软件下载链接，记录软件的官方下载地址或内部下载地址
-    pub authorize_contract: Option<String>, //授权合同信息，记录与软件供应商签订的授权合同详情，如合同编号、签订日期、合同附件链接等
+    pub intangible_type: String, //无形资产类型：software/patent/trademark/copyright/franchise
+    pub register_no: Option<String>, //注册号，软件著作权登记号、专利号、商标注册号等，无形资产特有
+    pub register_owner: Option<String>, //权利人，无形资产特有，记录软件著作权的著作权人、专利的专利权人等
+    pub register_date: Option<NaiveDateTime>, //注册日期，无形资产特有
+    pub valid_start_date: Option<NaiveDateTime>, //生效开始日期，无形资产特有
+    pub valid_end_date: Option<NaiveDateTime>, //有效截止日期，无形资产特有
+    pub right_status: Option<String>, //权利状态，无形资产特有，记录软件著作权的权利状态、专利的专利权状态等
+    pub license_key: Option<String>,  //许可证密钥，软件资产特有，记录软件授权的许可证密钥
+    pub license_type: Option<String>, //许可证类型，软件资产特有，取值：permanent/subscription/device/user
+    pub authorized_scope: Option<String>, //授权范围，软件资产特有，记录软件授权的范围，如授权给哪个部门、哪个用户等
+    pub assigned_user_ids: Option<String>, //授权用户ID集合，软件资产特有，记录被授权的用户ID列表，逗号分隔
+    pub bind_type: Option<String>, //绑定类型，软件资产特有，取值：设备/用户/IP，记录软件授权的绑定方式
+    pub bind_info: Option<String>, //绑定信息，软件资产特有，记录软件授权的绑定详情，如绑定的设备ID、用户ID或IP地址等
+    pub version: Option<String>,   //版本号，软件资产特有，记录软件的版本信息
+    pub download_link: Option<String>, //下载地址，软件资产特有，记录软件下载链接或存储路径
     pub created_by: Option<i64>,
     pub created_at: Option<NaiveDateTime>,
     pub updated_by: Option<i64>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted: Option<i16>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct SysUser {
     pub id: i64,                           //主键，唯一标识一条用户记录
@@ -96,7 +77,7 @@ pub struct SysUser {
     pub department_id: Option<i64>,        //部门ID，外键，关联部门表
     pub status: i16,                       //状态，记录用户的当前状态，如1=正常、0=禁用
     pub nickname: Option<String>,          //昵称，记录用户的昵称或别名
-    pub avatar: Option<String>,            //头像，记录用户的头像URL或存储路径
+    pub avatar: Option<String>,            //头像
     pub person_id: Option<String>,         //身份证号，记录用户的身份证号码
     pub person_code: Option<String>,       //工号，记录用户的工号或员工编号
     pub super_user_id: Option<i64>, //上级用户ID，外键，关联自身id，记录用户的直接上级领导，顶级用户super_user_id为null
@@ -109,8 +90,8 @@ pub struct SysUser {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Department {
-    pub id: i64,                           //主键，唯一标识一条部门记录
-    pub department_name: String,           //部门名称，记录部门的名称
+    pub id: i64,                           //主键,唯一标识一条部门记录
+    pub department_name: String,           //部门名称,记录部门的名称
     pub parent_id: Option<i64>, //父部门ID，外键，关联自身id，实现部门层级关系，顶级部门parent_id为null
     pub description: Option<String>, //描述，记录部门的详细描述信息
     pub created_by: Option<i64>, //创建人，记录创建该部门的管理员
@@ -212,7 +193,50 @@ pub struct RoleMenu {
     pub updated_at: Option<NaiveDateTime>,
     pub deleted: Option<i16>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AssetDocuments {
+    pub id: i64,
+    pub asset_id: i64, //外键，关联资产主表（assets）id，一对多关联，软删除主表时同步软删除该记录
+    pub doc_type: String, //文档类型，如合同、发票、保修单等
+    pub doc_name: String, //文档名称，记录文档的名称或标题
+    pub doc_no: String, //文档编号
+    pub party_a: String, //甲方
+    pub party_b: String, //乙方
+    pub sign_date: Option<NaiveDateTime>, //签订日期
+    pub effective_date: Option<NaiveDateTime>, //生效日期
+    pub expire_date: Option<NaiveDateTime>, //到期日期
+    pub file_path: String, //文件存储路径
+    pub file_name: String, //文件原名
+    pub file_size: i64, //文件大小（字节）
+    pub remark: Option<String>, //备注
+    pub created_by: Option<i64>, //创建人，记录创建该文档的管理员
+    pub created_at: Option<NaiveDateTime>,
+    pub updated_by: Option<i64>, //更新人，记录最后一次修改该文档的管理员
+    pub updated_at: Option<NaiveDateTime>,
+    pub deleted: Option<i16>, //删除标志，记录文档是否被删除，0=未删除，1=已删除，软删除使用
+}
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AssetKnowledge {
+    pub id: i64,
+    pub asset_id: i64,                 //关联资产ID
+    pub doc_source: String,            //数据来源：asset/hardware/intangible/document
+    pub knowledge_type: String,        //知识类型：basic/contract/hardware/intangible
+    pub title: String,                 //知识标题
+    pub content: String,               //知识正文（用于向量化 + 微调）
+    pub chunk_index: i32,              //文本分块序号
+    pub vector_data: Option<Vec<f32>>, //向量数据（Embedding模型输出）
 
+    // 权限控制（对接OPA）
+    pub permission_level: String,   //权限等级：public/internal/secret
+    pub owner_type: Option<String>, //归属类型：user/dept/role
+    pub owner_id: Option<i64>,      //归属人/部门/角色ID
+
+    pub created_by: Option<i64>,
+    pub created_at: Option<NaiveDateTime>,
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<NaiveDateTime>,
+    pub deleted: i16,
+}
 // ======================== 【1】资产领用申请表 ========================
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct AssetReceive {
@@ -299,6 +323,30 @@ pub struct AssetRepair {
     pub updated_by: Option<i64>,
     pub updated_at: Option<NaiveDateTime>,
     pub deleted: i16,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Assets {
+    pub id: i64,                              //主键ID
+    pub asset_no: String,                     //资产编号
+    pub asset_type: String, //资产类型，取值：hardware（固定资产）、intangible（无形资产）
+    pub category_id: i64,   //分类ID，外键，关联资产分类表（asset_category）id
+    pub asset_name: String, //资产名称
+    pub manufacturer: Option<String>, //制造商
+    pub model: Option<String>, //型号
+    pub department_id: Option<i64>, //使用部门ID，外键，关联部门表（department）id
+    pub user_id: Option<i64>, //使用人ID，外键，关联用户表（sys_user）id
+    pub status: i16,        //状态：0=正常 1=借用 2=维修 3=报废 4=过期
+    pub purchase_date: Option<NaiveDateTime>, //购买日期 ；
+    pub purchase_price: Option<f64>, //购买价格
+    pub quantity: Option<i32>, //总数量，默认为1，针对批量采购的资产记录实际数量
+    pub used_quantity: Option<i32>, //已使用数量，针对批量采购的资产记录已领用的数量，默认为0
+    pub expire_date: Option<NaiveDateTime>, //过期日期，用于记录资产的过期时间，系统可根据该字段自动识别过期资产并进行提醒
+    pub description: Option<String>,        //描述，记录资产的详细描述信息
+    pub created_by: Option<i64>,            //创建人，记录创建该资产的管理员
+    pub created_at: Option<NaiveDateTime>,  //创建时间，记录资产的创建时间
+    pub updated_by: Option<i64>,            //更新人，记录最后一次修改该资产的管理员
+    pub updated_at: Option<NaiveDateTime>,  //更新时间，记录资产的最后修改时间
+    pub deleted: Option<i16>,               //删除标志
 }
 
 // ======================== 【5】资产报废表 ========================
