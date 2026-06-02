@@ -207,7 +207,7 @@ pub async fn ensure_database_exists(config: &PostgresConfig) -> Result<()> {
     .map_err(|e| anyhow!("检查数据库是否存在时出错: {}", e))?;
 
     if !db_exists {
-        println!("数据库 '{}' 不存在，正在自动创建...", config.database);
+        tracing::info!("数据库 '{}' 不存在，正在自动创建...", config.database);
 
         // CREATE DATABASE 不能使用参数化查询，需要对数据库名进行安全处理
         let create_sql = format!(
@@ -235,9 +235,9 @@ pub async fn ensure_database_exists(config: &PostgresConfig) -> Result<()> {
                 )
             })?;
 
-        println!("数据库 '{}' 创建成功！", config.database);
+        tracing::info!("数据库 '{}' 创建成功！", config.database);
     } else {
-        println!("数据库 '{}' 已存在，跳过创建。", config.database);
+        tracing::info!("数据库 '{}' 已存在，跳过创建。", config.database);
     }
 
     // 关闭管理连接池
@@ -252,7 +252,7 @@ pub async fn init_postgres_pool(config: PostgresConfig) -> Result<()> {
     match ensure_database_exists(&config).await {
         Ok(()) => {}
         Err(e) => {
-            eprintln!("警告: 自动创建数据库失败: {}", e);
+            tracing::warn!("自动创建数据库失败: {}", e);
             // 继续尝试连接，让连接池的错误提供更详细的信息
         }
     }
