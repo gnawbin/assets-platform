@@ -89,12 +89,12 @@ pub struct SysUser {
     pub id: i64,                           //主键，唯一标识一条用户记录
     pub username: String,                  //用户名，登录系统使用，唯一
     pub passwd: String,                    //密码，登录系统使用，存储加密后的密码
-    pub domain: String,                    //域，登录系统使用，记录用户所属域，如本地账户、公司域等
+    pub domain: Option<String>,            //域，登录系统使用，记录用户所属域，如本地账户、公司域等
     pub real_name: String,                 //真实姓名，记录用户的真实姓名
     pub email: Option<String>,             //邮箱，记录用户的电子邮件地址
     pub phone: Option<String>,             //电话，记录用户的联系电话号码
     pub department_id: Option<i64>,        //部门ID，外键，关联部门表
-    pub status: i8,                        //状态，记录用户的当前状态，如1=正常、0=禁用
+    pub status: i16,                       //状态，记录用户的当前状态，如1=正常、0=禁用
     pub nickname: Option<String>,          //昵称，记录用户的昵称或别名
     pub avatar: Option<String>,            //头像，记录用户的头像URL或存储路径
     pub person_id: Option<String>,         //身份证号，记录用户的身份证号码

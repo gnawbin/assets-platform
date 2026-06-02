@@ -19,7 +19,8 @@ pub struct DatabaseConfig {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            postgres_url: "postgres://postgres:postgres@localhost:5432/assets_platform".to_string(),
+            postgres_url: "postgres://postgres:postgres@localhost:5432/assets_plateform"
+                .to_string(),
         }
     }
 }

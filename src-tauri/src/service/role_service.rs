@@ -1,12 +1,13 @@
 use crate::database;
 use crate::database::models::{MantineTree, Role, RoleMenu, SysMenu};
-
+use crate::utils::snowflake::next_id;
 /// 新增角色
 pub async fn insert_role(role: &Role) -> Result<Role, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let inserted = sqlx::query_as::<_, Role>(
-        "INSERT INTO sys_role (role_key, role_name, description, created_by, created_at) VALUES ($1, $2, $3, $4, NOW()) RETURNING id, role_key, role_name, description, created_by, created_at, updated_by, updated_at, deleted"
+        "INSERT INTO sys_role (id,role_key, role_name, description, created_by, created_at) VALUES ($1, $2, $3, $4,$5, NOW()) RETURNING id, role_key, role_name, description, created_by, created_at, updated_by, updated_at, deleted"
     )
+    .bind(next_id() as i64)
     .bind(&role.role_key)
     .bind(&role.role_name)
     .bind(&role.description)
@@ -62,8 +63,9 @@ pub async fn assign_role_menus(role_id: i64, menu_ids: Vec<i64>) -> Result<(), S
     // 2. 插入新的菜单关联
     for menu_id in &menu_ids {
         sqlx::query(
-            "INSERT INTO sys_role_menu (role_id, menu_id, created_by, created_at) VALUES ($1, $2, 1, NOW())"
+            "INSERT INTO sys_role_menu (id ,role_id, menu_id, created_by, created_at) VALUES ($1, $2, $3,$4, NOW())"
         )
+        .bind(next_id() as i64)
         .bind(role_id)
         .bind(menu_id)
         .execute(&mut *tx)

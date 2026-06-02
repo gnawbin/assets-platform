@@ -2,6 +2,7 @@ mod database;
 mod service;
 mod utils;
 use database::models::{AssetCategory, MantineTree, Role};
+use service::user_service::LoginResponse;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -62,6 +63,14 @@ async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
     service::role_service::get_all_menus_tree().await
 }
 
+// ======================== 用户登录 ========================
+
+/// 用户登录
+#[tauri::command]
+async fn login(username: String, password: String) -> Result<LoginResponse, String> {
+    service::user_service::login(&username, &password).await
+}
+
 /// 加载 .env 环境变量文件
 fn load_env() {
     // 尝试从当前工作目录加载 .env 文件
@@ -103,7 +112,8 @@ pub fn run() {
             get_role_menu_ids,
             assign_role_menus,
             delete_role,
-            get_all_menus_tree
+            get_all_menus_tree,
+            login
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

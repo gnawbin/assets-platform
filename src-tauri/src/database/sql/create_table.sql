@@ -127,7 +127,7 @@ COMMENT ON TABLE sys_user IS '系统用户表';
 COMMENT ON COLUMN sys_user.person_code IS '工号';
 
 -- 6. 部门表
-CREATE TABLE IF NOT EXISTS department (
+CREATE TABLE IF NOT EXISTS sys_department (
     id bigserial PRIMARY KEY,
     department_name varchar(255) NOT NULL,
     parent_id int8 NULL,
@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS department (
     updated_at timestamp NULL,
     deleted int2 NULL
 );
-COMMENT ON TABLE department IS '部门表';
+COMMENT ON TABLE sys_department IS '部门表';
 
 -- 7. 系统菜单&权限表
 CREATE TABLE IF NOT EXISTS sys_menu (
