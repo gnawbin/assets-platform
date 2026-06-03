@@ -505,7 +505,7 @@ mod tests {
         let config = PostgresConfig::default();
         assert_eq!(config.host, "localhost");
         assert_eq!(config.port, 5432);
-        assert_eq!(config.database, "assets_plateform");
+        assert_eq!(config.database, "assets_platform");
         assert_eq!(config.username, "postgres");
         assert_eq!(config.password, "postgres");
     }

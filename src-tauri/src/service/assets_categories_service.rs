@@ -114,11 +114,6 @@ pub async fn update_category(category: &AssetCategory) -> Result<AssetCategory, 
 pub async fn delete_category(id: i64) -> Result<(), String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    // 开启事务
-    let mut tx = pool.begin().await.map_err(|e| {
-        error!("开启事务失败: id={}, error={}", id, e);
-        format!("开启事务失败: {}", e)
-    })?;
     info!("删除资产类别: id={}", id);
 
     sqlx::query(
@@ -134,11 +129,6 @@ pub async fn delete_category(id: i64) -> Result<(), String> {
     .map_err(|e| {
         error!("删除资产类别失败: id={}, error={}", id, e);
         format!("删除资产类别失败: {}", e)
-    })?;
-    // 提交事务
-    tx.commit().await.map_err(|e| {
-        error!("提交事务失败: id ={}, error={}", id, e);
-        format!("提交事务失败: {}", e)
     })?;
     info!("删除资产类别成功: id={}", id);
     Ok(())
