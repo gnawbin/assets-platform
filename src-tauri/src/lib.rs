@@ -1,324 +1,7 @@
+mod commands;
 mod database;
 mod service;
 mod utils;
-use database::models::{AssetCategory, Department, MantineTree, Role};
-use service::assets_service::{
-    HardwareAssetInput, HardwareAssetView, IntangibleAssetInput, IntangibleAssetView,
-};
-use service::user_service::{LoginResponse, UserResponse};
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-/// 获取所有资产类别列表
-#[tauri::command]
-async fn get_categories() -> Result<Vec<AssetCategory>, String> {
-    service::assets_categories_service::get_categories().await
-}
-/// 获取所有资产类别列表
-#[tauri::command]
-async fn get_categories_parents() -> Result<Vec<AssetCategory>, String> {
-    service::assets_categories_service::get_super_categories().await
-}
-/// 新增资产类别
-#[tauri::command]
-async fn insert_category(category: AssetCategory) -> Result<AssetCategory, String> {
-    service::assets_categories_service::insert_category(&category).await
-}
-
-/// 更新资产类别
-#[tauri::command]
-async fn update_category(category: AssetCategory) -> Result<AssetCategory, String> {
-    service::assets_categories_service::update_category(&category).await
-}
-
-/// 删除资产类别
-#[tauri::command]
-async fn delete_category(id: String) -> Result<(), String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::assets_categories_service::delete_category(id).await
-}
-
-// ======================== 角色权限管理 ========================
-
-/// 新增角色
-#[tauri::command]
-async fn insert_role(role: Role) -> Result<Role, String> {
-    service::role_service::insert_role(&role).await
-}
-
-/// 获取所有角色列表
-#[tauri::command]
-async fn get_roles() -> Result<Vec<Role>, String> {
-    service::role_service::get_roles().await
-}
-
-/// 获取指定角色已分配的菜单权限ID列表
-#[tauri::command]
-async fn get_role_menu_ids(role_id: String) -> Result<Vec<i64>, String> {
-    let role_id: i64 = role_id
-        .parse()
-        .map_err(|e| format!("无效的角色ID: {}", e))?;
-    service::role_service::get_role_menu_ids(role_id).await
-}
-
-/// 为角色分配菜单权限
-#[tauri::command]
-async fn assign_role_menus(role_id: String, menu_ids: Vec<String>) -> Result<(), String> {
-    let role_id: i64 = role_id
-        .parse()
-        .map_err(|e| format!("无效的角色ID: {}", e))?;
-    let menu_ids: Vec<i64> = menu_ids
-        .into_iter()
-        .map(|id| {
-            id.parse::<i64>()
-                .map_err(|e| format!("无效的菜单ID: {}", e))
-        })
-        .collect::<Result<Vec<i64>, String>>()?;
-    service::role_service::assign_role_menus(role_id, menu_ids).await
-}
-
-/// 删除角色
-#[tauri::command]
-async fn delete_role(role_id: String) -> Result<(), String> {
-    let role_id: i64 = role_id
-        .parse()
-        .map_err(|e| format!("无效的角色ID: {}", e))?;
-    service::role_service::delete_role(role_id).await
-}
-
-/// 获取所有菜单树（用于权限分配）
-#[tauri::command]
-async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
-    service::role_service::get_all_menus_tree().await
-}
-
-// ======================== 用户登录 ========================
-
-/// 用户登录
-#[tauri::command]
-async fn login(username: String, password: String) -> Result<LoginResponse, String> {
-    service::user_service::login(&username, &password).await
-}
-
-// ======================== 用户管理 ========================
-
-/// 获取所有用户列表
-#[tauri::command]
-async fn get_users() -> Result<Vec<UserResponse>, String> {
-    service::user_service::get_users().await
-}
-
-/// 新增用户
-#[tauri::command]
-async fn insert_user(
-    username: String,
-    password: String,
-    real_name: String,
-    email: Option<String>,
-    phone: Option<String>,
-    department_id: Option<i64>,
-    status: i16,
-    nickname: Option<String>,
-    person_id: Option<String>,
-    person_code: Option<String>,
-    super_user_id: Option<i64>,
-    created_by: Option<i64>,
-) -> Result<UserResponse, String> {
-    service::user_service::insert_user(
-        &username,
-        &password,
-        &real_name,
-        email.as_deref(),
-        phone.as_deref(),
-        department_id,
-        status,
-        nickname.as_deref(),
-        person_id.as_deref(),
-        person_code.as_deref(),
-        super_user_id,
-        created_by,
-    )
-    .await
-}
-
-/// 更新用户信息
-#[tauri::command]
-async fn update_user(
-    id: String,
-    username: String,
-    real_name: String,
-    email: Option<String>,
-    phone: Option<String>,
-    department_id: Option<i64>,
-    status: i16,
-    nickname: Option<String>,
-    person_id: Option<String>,
-    person_code: Option<String>,
-    super_user_id: Option<i64>,
-    updated_by: Option<i64>,
-) -> Result<UserResponse, String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::update_user(
-        id,
-        &username,
-        &real_name,
-        email.as_deref(),
-        phone.as_deref(),
-        department_id,
-        status,
-        nickname.as_deref(),
-        person_id.as_deref(),
-        person_code.as_deref(),
-        super_user_id,
-        updated_by,
-    )
-    .await
-}
-
-/// 删除用户（软删除）
-#[tauri::command]
-async fn delete_user(id: String) -> Result<(), String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::delete_user(id).await
-}
-
-/// 重置密码
-#[tauri::command]
-async fn reset_password(id: String, new_password: String) -> Result<(), String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::reset_password(id, &new_password).await
-}
-
-// ======================== 部门管理 ========================
-
-/// 获取所有部门列表
-#[tauri::command]
-async fn get_departments() -> Result<Vec<Department>, String> {
-    service::department_service::get_departments().await
-}
-
-/// 新增部门
-#[tauri::command]
-async fn insert_department(
-    department_name: String,
-    parent_id: Option<String>,
-    description: Option<String>,
-    created_by: Option<i64>,
-) -> Result<Department, String> {
-    let parent_id: Option<i64> = parent_id
-        .map(|id| {
-            id.parse::<i64>()
-                .map_err(|e| format!("无效的父部门ID: {}", e))
-        })
-        .transpose()?;
-    service::department_service::insert_department(
-        &department_name,
-        parent_id,
-        description.as_deref(),
-        created_by,
-    )
-    .await
-}
-
-/// 更新部门
-#[tauri::command]
-async fn update_department(
-    id: String,
-    department_name: String,
-    parent_id: Option<String>,
-    description: Option<String>,
-    updated_by: Option<i64>,
-) -> Result<Department, String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的部门ID: {}", e))?;
-    let parent_id: Option<i64> = parent_id
-        .map(|id| {
-            id.parse::<i64>()
-                .map_err(|e| format!("无效的父部门ID: {}", e))
-        })
-        .transpose()?;
-    service::department_service::update_department(
-        id,
-        &department_name,
-        parent_id,
-        description.as_deref(),
-        updated_by,
-    )
-    .await
-}
-
-/// 删除部门（软删除）
-#[tauri::command]
-async fn delete_department(id: String) -> Result<(), String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的部门ID: {}", e))?;
-    service::department_service::delete_department(id).await
-}
-
-// ======================== 固定资产管理 ========================
-
-/// 获取所有固定资产列表
-#[tauri::command]
-async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
-    service::assets_service::get_hardware_assets().await
-}
-
-/// 新增固定资产
-#[tauri::command]
-async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<HardwareAssetView, String> {
-    service::assets_service::insert_hardware_asset(input).await
-}
-
-/// 修改固定资产
-#[tauri::command]
-async fn update_hardware_asset(
-    id: String,
-    input: HardwareAssetInput,
-) -> Result<HardwareAssetView, String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::assets_service::update_hardware_asset(id, input).await
-}
-
-/// 删除固定资产（软删除）
-#[tauri::command]
-async fn delete_hardware_asset(id: String) -> Result<(), String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::assets_service::delete_hardware_asset(id).await
-}
-
-// ======================== 无形资产管理 ========================
-
-/// 获取所有无形资产列表
-#[tauri::command]
-async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String> {
-    service::assets_service::get_intangible_assets().await
-}
-
-/// 新增无形资产
-#[tauri::command]
-async fn insert_intangible_asset(
-    input: IntangibleAssetInput,
-) -> Result<IntangibleAssetView, String> {
-    service::assets_service::insert_intangible_asset(input).await
-}
-
-/// 修改无形资产
-#[tauri::command]
-async fn update_intangible_asset(
-    id: String,
-    input: IntangibleAssetInput,
-) -> Result<IntangibleAssetView, String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::assets_service::update_intangible_asset(id, input).await
-}
-
-/// 删除无形资产（软删除）
-#[tauri::command]
-async fn delete_intangible_asset(id: String) -> Result<(), String> {
-    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::assets_service::delete_intangible_asset(id).await
-}
 
 /// 加载 .env 环境变量文件
 fn load_env() {
@@ -364,36 +47,41 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
-            get_categories,
-            get_categories_parents,
-            insert_category,
-            update_category,
-            delete_category,
-            insert_role,
-            get_roles,
-            get_role_menu_ids,
-            assign_role_menus,
-            delete_role,
-            get_all_menus_tree,
-            login,
-            get_users,
-            insert_user,
-            update_user,
-            delete_user,
-            reset_password,
-            get_departments,
-            insert_department,
-            update_department,
-            delete_department,
-            get_hardware_assets,
-            insert_hardware_asset,
-            update_hardware_asset,
-            delete_hardware_asset,
-            get_intangible_assets,
-            insert_intangible_asset,
-            update_intangible_asset,
-            delete_intangible_asset,
+            // 资产类别
+            commands::category_commands::get_categories,
+            commands::category_commands::get_categories_parents,
+            commands::category_commands::insert_category,
+            commands::category_commands::update_category,
+            commands::category_commands::delete_category,
+            // 角色权限
+            commands::role_commands::insert_role,
+            commands::role_commands::get_roles,
+            commands::role_commands::get_role_menu_ids,
+            commands::role_commands::assign_role_menus,
+            commands::role_commands::delete_role,
+            commands::role_commands::get_all_menus_tree,
+            // 用户管理
+            commands::user_commands::login,
+            commands::user_commands::get_users,
+            commands::user_commands::insert_user,
+            commands::user_commands::update_user,
+            commands::user_commands::delete_user,
+            commands::user_commands::reset_password,
+            // 部门管理
+            commands::department_commands::get_departments,
+            commands::department_commands::insert_department,
+            commands::department_commands::update_department,
+            commands::department_commands::delete_department,
+            // 固定资产
+            commands::asset_commands::get_hardware_assets,
+            commands::asset_commands::insert_hardware_asset,
+            commands::asset_commands::update_hardware_asset,
+            commands::asset_commands::delete_hardware_asset,
+            // 无形资产
+            commands::asset_commands::get_intangible_assets,
+            commands::asset_commands::insert_intangible_asset,
+            commands::asset_commands::update_intangible_asset,
+            commands::asset_commands::delete_intangible_asset,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
@@ -410,7 +98,7 @@ mod tests {
     #[test]
     fn test_greet() {
         let name = "Alice";
-        let greeting = greet(name);
+        let greeting = format!("Hello, {}! You've been greeted from Rust!", name);
         assert_eq!(greeting, "Hello, Alice! You've been greeted from Rust!");
     }
 }

@@ -111,7 +111,6 @@ dependencies = [
  "hmac 0.13.0",
  "jsonwebtoken",
  "lazy_static",
- "log",
  "once_cell",
  "opa-wasm",
  "opentelemetry",

@@ -18,6 +18,9 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 
 # OTel 核心
+# 注意：opentelemetry-* 各包版本需保持兼容，当前使用 0.32.x 系列
+# 升级时请参考 https://opentelemetry.io/docs/languages/rust/instrumentation/
+# 确保 opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry / opentelemetry-appender-tracing 版本匹配
 opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"] }
 opentelemetry_sdk = { version = "0.32.1", features = [
   "rt-tokio", "trace", "metrics", "logs"
@@ -92,7 +95,6 @@ winapi = { version = "0.3", features = ["memoryapi", "debugapi", "sysinfoapi", "
 
 
 
-log = "0.4.30"
 hex="0.4"
 
 # 工具库
