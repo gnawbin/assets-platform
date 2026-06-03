@@ -113,13 +113,13 @@ pub struct AssetCategory {
         deserialize_with = "opt_i64_from_string"
     )]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(
         serialize_with = "opt_i64_to_string",
         deserialize_with = "opt_i64_from_string"
     )]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>,
 }
 
@@ -142,10 +142,10 @@ pub struct HardAssets {
     pub fault_desc: Option<String>,            //故障描述，状态为“维修”时填写，记录故障详情
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -171,10 +171,10 @@ pub struct IntangibleAssets {
     pub download_link: Option<String>, //下载地址，软件资产特有，记录软件下载链接或存储路径
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>,
 }
 
@@ -199,10 +199,10 @@ pub struct SysUser {
     pub super_user_id: Option<i64>, //上级用户ID，外键，关联自身id，记录用户的直接上级领导，顶级用户super_user_id为null
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该用户的管理员
-    pub created_at: Option<NaiveDateTime>, //创建时间，记录用户的创建时间
+    pub created_at: Option<DateTime<Utc>>, //创建时间，记录用户的创建时间
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该用户
-    pub updated_at: Option<NaiveDateTime>, //更新时间，记录用户的最后修改时间
+    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录用户的最后修改时间
     pub deleted: Option<i16>, //删除标志，记录用户是否被删除，0=未删除，1=已删除，软删除使用
 }
 
@@ -216,10 +216,10 @@ pub struct Department {
     pub description: Option<String>, //描述，记录部门的详细描述信息
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该部门的管理员
-    pub created_at: Option<NaiveDateTime>, //创建时间，记录部门的创建时间
+    pub created_at: Option<DateTime<Utc>>, //创建时间，记录部门的创建时间
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该部门的管理员
-    pub updated_at: Option<NaiveDateTime>, //更新时间，记录部门的最后修改时间
+    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录部门的最后修改时间
     pub deleted: Option<i16>,        //删除标志，记录部门是否被删除，0=未删除，1=已删除，软删除使用
 }
 
@@ -271,14 +271,14 @@ pub struct SysMenu {
     pub created_by: Option<i64>,
 
     /// 创建时间
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
 
     /// 更新人ID
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
 
     /// 更新时间
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
 
     /// 软删除标志（0=未删除，1=已删除）
     pub deleted: i16,
@@ -292,10 +292,10 @@ pub struct Role {
     pub description: Option<String>, //描述，记录角色的详细描述信息
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该角色的管理员
-    pub created_at: Option<NaiveDateTime>, //创建时间，记录角色的创建时间
+    pub created_at: Option<DateTime<Utc>>, //创建时间，记录角色的创建时间
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该角色的管理员
-    pub updated_at: Option<NaiveDateTime>, //更新时间，记录角色的最后修改时间
+    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录角色的最后修改时间
     pub deleted: Option<i16>, //删除标志，记录角色是否被删除，0=未删除，1=已删除，软删除使用
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -308,10 +308,10 @@ pub struct UserRole {
     pub role_id: i64, //角色ID，外键，关联角色表（role）id
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该关联的管理员
-    pub created_at: Option<NaiveDateTime>, //创建时间，记录该关联的创建时间
+    pub created_at: Option<DateTime<Utc>>, //创建时间，记录该关联的创建时间
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该关联的管理员
-    pub updated_at: Option<NaiveDateTime>, //更新时间，记录该关联的最后修改时间
+    pub updated_at: Option<DateTime<Utc>>, //更新时间，记录该关联的最后修改时间
     pub deleted: Option<bool>,             //删除标志
 }
 
@@ -326,10 +326,10 @@ pub struct RoleMenu {
     pub menu_id: i64,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -353,10 +353,10 @@ pub struct AssetDocuments {
     pub remark: Option<String>,                //备注
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该文档的管理员
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该文档的管理员
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>, //删除标志，记录文档是否被删除，0=未删除，1=已删除，软删除使用
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -380,10 +380,10 @@ pub struct AssetKnowledge {
 
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 // ======================== 【1】资产领用申请表 ========================
@@ -403,14 +403,14 @@ pub struct AssetReceive {
     pub status: i8,         // 状态：0=待审批 1=已同意 2=已驳回 3=已领用 4=已归还
     #[serde(serialize_with = "opt_i64_to_string")]
     pub approve_by: Option<i64>, // 审批人
-    pub approve_time: Option<NaiveDateTime>,
+    pub approve_time: Option<DateTime<Utc>>,
     pub approve_remark: Option<String>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 
@@ -434,10 +434,10 @@ pub struct AssetReturn {
     pub confirm_time: DateTime<Utc>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 
@@ -462,13 +462,13 @@ pub struct AssetTransfer {
     pub status: i8,     // 0=待审批 1=已调拨 2=已驳回
     #[serde(serialize_with = "opt_i64_to_string")]
     pub approve_by: Option<i64>,
-    pub approve_time: Option<NaiveDateTime>,
+    pub approve_time: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 
@@ -491,15 +491,15 @@ pub struct AssetRepair {
     pub vendor: Option<String>,          // 维修商
     pub cost: Option<f64>,               // 维修费用
     pub apply_date: DateTime<Utc>,       // 申请日期
-    pub repair_date: Option<NaiveDateTime>, // 维修日期
-    pub finish_date: Option<NaiveDateTime>, // 完成日期
+    pub repair_date: Option<DateTime<Utc>>, // 维修日期
+    pub finish_date: Option<DateTime<Utc>>, // 完成日期
     pub status: i8,                      // 0=待维修 1=维修中 2=已完成 3=无法维修
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -526,10 +526,10 @@ pub struct Assets {
     pub description: Option<String>,        //描述，记录资产的详细描述信息
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该资产的管理员
-    pub created_at: Option<NaiveDateTime>,  //创建时间，记录资产的创建时间
+    pub created_at: Option<DateTime<Utc>>,  //创建时间，记录资产的创建时间
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该资产的管理员
-    pub updated_at: Option<NaiveDateTime>,  //更新时间，记录资产的最后修改时间
+    pub updated_at: Option<DateTime<Utc>>,  //更新时间，记录资产的最后修改时间
     pub deleted: Option<i16>,               //删除标志
 }
 
@@ -546,15 +546,15 @@ pub struct AssetScrap {
     pub status: i8, // 0=待审批 1=已批准 2=已驳回 3=已报废
     #[serde(serialize_with = "opt_i64_to_string")]
     pub approve_by: Option<i64>,
-    pub approve_time: Option<NaiveDateTime>,
+    pub approve_time: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub handle_user: Option<i64>, // 处理人
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 
@@ -579,14 +579,14 @@ pub struct AssetPurchase {
     pub reason: String,           // 采购原因
     pub status: i8,               // 0=待审批 1=采购中 2=已完成 3=已驳回
     pub supplier: Option<String>, // 供应商
-    pub purchase_date: Option<NaiveDateTime>, //购买时间
-    pub arrive_date: Option<NaiveDateTime>, //预计到货时间
+    pub purchase_date: Option<DateTime<Utc>>, //购买时间
+    pub arrive_date: Option<DateTime<Utc>>, //预计到货时间
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
-    pub created_at: Option<NaiveDateTime>,
+    pub created_at: Option<DateTime<Utc>>,
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>,
-    pub updated_at: Option<NaiveDateTime>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
 
@@ -603,8 +603,8 @@ pub struct AssetApproval {
     pub approver_id: i64, // 审批人ID
     pub approve_status: i8, // 0=待审 1=同意 2=驳回
     pub remark: Option<String>,
-    pub approve_time: Option<NaiveDateTime>,
-    pub created_at: Option<NaiveDateTime>,
+    pub approve_time: Option<DateTime<Utc>>,
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

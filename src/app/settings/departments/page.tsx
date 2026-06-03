@@ -181,7 +181,7 @@ const DepartmentsPage: React.FC = () => {
       if (formMode === 'add') {
         await invoke('insert_department', {
           departmentName: formName.trim(),
-          parentId: formParentId,
+          parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
           createdBy: null,
         });
@@ -191,7 +191,7 @@ const DepartmentsPage: React.FC = () => {
         await invoke('update_department', {
           id: selectedDept.id,
           departmentName: formName.trim(),
-          parentId: formParentId,
+          parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
           updatedBy: null,
         });

@@ -99,7 +99,7 @@ const PermissionsPage: React.FC = () => {
       setMenuTree(tree);
       // 获取角色已分配的权限ID
       console.log('invoking get_role_menu_ids...');
-      const menuIds = await invoke<number[]>('get_role_menu_ids', { roleId: role.id });
+      const menuIds = await invoke<number[]>('get_role_menu_ids', { roleId: String(role.id) });
       console.log('get_role_menu_ids result:', menuIds);
       setCheckedMenuIds(new Set(menuIds.map(String)));
     } catch (err) {
@@ -115,8 +115,8 @@ const PermissionsPage: React.FC = () => {
     if (!selectedRole) return;
     setSavingPerms(true);
     try {
-      const menuIds = Array.from(checkedMenuIds).map(Number);
-      await invoke('assign_role_menus', { roleId: selectedRole.id, menuIds });
+      const menuIds = Array.from(checkedMenuIds);
+      await invoke('assign_role_menus', { roleId: String(selectedRole.id), menuIds });
       setPermModalOpen(false);
       alert('权限分配成功！');
     } catch (err) {
@@ -138,7 +138,7 @@ const PermissionsPage: React.FC = () => {
     if (!deleteRole) return;
     setDeleting(true);
     try {
-      await invoke('delete_role', { roleId: deleteRole.id });
+      await invoke('delete_role', { roleId: String(deleteRole.id) });
       setDeleteModalOpen(false);
       setDeleteRole(null);
       alert('角色删除成功！');
