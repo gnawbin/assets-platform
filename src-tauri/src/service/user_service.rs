@@ -2,10 +2,24 @@ use crate::database::get_pool;
 use crate::database::models::SysUser;
 use crate::utils::password_secret::{hash_password, verify_password};
 use crate::utils::snowflake::next_id;
-use serde::Serialize;
+use jsonwebtoken::{encode, EncodingKey, Header};
+use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-/// 登录响应（不包含密码）
+/// JWT 声明
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    /// 用户ID
+    pub sub: i64,
+    /// 用户名
+    pub username: String,
+    /// 过期时间（时间戳）
+    pub exp: usize,
+    /// 签发时间（时间戳）
+    pub iat: usize,
+}
+
+/// 登录响应（包含 JWT Token）
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub id: i64,
@@ -17,6 +31,8 @@ pub struct LoginResponse {
     pub status: i16,
     pub nickname: Option<String>,
     pub avatar: Option<String>,
+    /// JWT Token，用于后续请求的身份验证
+    pub token: String,
 }
 
 /// 用户列表响应（不包含密码）
@@ -108,7 +124,30 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         username, user.id, user.real_name
     );
 
-    // 返回用户信息（不含密码）
+    // 生成 JWT Token
+    let jwt_secret = std::env::var("JWT_SECRET")
+        .unwrap_or_else(|_| "assets-platform-default-secret-key".to_string());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("获取时间戳失败: {}", e))?
+        .as_secs() as usize;
+    let exp = now + 86400 * 7; // 7天过期
+
+    let claims = Claims {
+        sub: user.id,
+        username: user.username.clone(),
+        exp,
+        iat: now,
+    };
+
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .map_err(|e| format!("生成Token失败: {}", e))?;
+
+    // 返回用户信息（不含密码）+ JWT Token
     Ok(LoginResponse {
         id: user.id,
         username: user.username,
@@ -119,6 +158,7 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         status: user.status,
         nickname: user.nickname,
         avatar: user.avatar,
+        token,
     })
 }
 
