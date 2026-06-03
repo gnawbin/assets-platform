@@ -4,6 +4,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { useAuthStore } from '@/store/authStore';
+import { initTelemetry } from '@/utils/telemetry';
+import { logger } from '@/utils/logger';
 
 export default function RootLayout({
   children,
@@ -15,16 +17,24 @@ export default function RootLayout({
   const { isLoggedIn, init } = useAuthStore();
 
   useEffect(() => {
+    // 初始化 OpenTelemetry（应用最早阶段）
+    initTelemetry();
+    logger.info('应用启动', { page: pathname });
+  }, [pathname]);
+
+  useEffect(() => {
     init();
   }, [init]);
 
   useEffect(() => {
     // 如果未登录且不在登录页面，重定向到登录页
     if (!isLoggedIn && pathname !== '/login') {
+      logger.info('未登录，重定向到登录页');
       router.push('/login');
     }
     // 如果已登录且在登录页面，重定向到首页
     if (isLoggedIn && pathname === '/login') {
+      logger.info('已登录，重定向到首页');
       router.push('/');
     }
   }, [isLoggedIn, pathname, router]);
