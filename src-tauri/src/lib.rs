@@ -36,7 +36,8 @@ async fn update_category(category: AssetCategory) -> Result<AssetCategory, Strin
 
 /// 删除资产类别
 #[tauri::command]
-async fn delete_category(id: i64) -> Result<(), String> {
+async fn delete_category(id: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
     service::assets_categories_service::delete_category(id).await
 }
 
@@ -311,6 +312,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
+            // 初始化 OpenTelemetry（需要 Tokio 运行时上下文）
+            tauri::async_runtime::block_on(async {
+                if let Err(e) = utils::logging::init_otel() {
+                    tracing::warn!("OpenTelemetry 初始化失败: {}", e);
+                }
+            });
+
             // 应用启动时自动初始化数据库
             tauri::async_runtime::block_on(async {
                 database::init_database().await.expect("数据库初始化失败");

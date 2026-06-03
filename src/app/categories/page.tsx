@@ -38,25 +38,25 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 
 interface Category {
-  id: number;
+  id: string;
   category_name: string;
   asset_type: string;
-  parent_id: number;
+  parent_id: string;
   sort: number;
   description: string | null;
-  created_by: number | null;
+  created_by: string | null;
   created_at: string | null;
-  updated_by: number | null;
+  updated_by: string | null;
   updated_at: string | null;
   deleted: number | null;
 }
 
 // 树节点接口
 interface TreeNode {
-  id: number;
+  id: string;
   category_name: string;
   asset_type: string;
-  parent_id: number;
+  parent_id: string;
   sort: number;
   description: string | null;
   children: TreeNode[];
@@ -75,7 +75,7 @@ const CategoriesPage: React.FC = () => {
   // 新增/编辑弹窗
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
-  const [formParentId, setFormParentId] = useState<number>(0);
+  const [formParentId, setFormParentId] = useState<string>("0");
   const [formName, setFormName] = useState('');
   const [formAssetType, setFormAssetType] = useState('hardware');
   const [formSort, setFormSort] = useState<number>(0);
@@ -107,7 +107,7 @@ const CategoriesPage: React.FC = () => {
 
   // 构建树结构
   const buildTree = (cats: Category[]) => {
-    const map = new Map<number, TreeNode>();
+    const map = new Map<string, TreeNode>();
     const roots: TreeNode[] = [];
 
     // 先创建所有节点
@@ -127,7 +127,7 @@ const CategoriesPage: React.FC = () => {
     // 构建父子关系
     cats.forEach((cat) => {
       const node = map.get(cat.id)!;
-      if (cat.parent_id !== 0 && map.has(cat.parent_id)) {
+      if (cat.parent_id !== "0" && map.has(cat.parent_id)) {
         map.get(cat.parent_id)!.children.push(node);
       } else {
         roots.push(node);
@@ -148,10 +148,10 @@ const CategoriesPage: React.FC = () => {
   const getCategoryPath = (cat: Category): string => {
     const parts: string[] = [cat.category_name];
     let current = cat;
-    const visited = new Set<number>();
+    const visited = new Set<string>();
     visited.add(current.id);
 
-    while (current.parent_id !== 0) {
+    while (current.parent_id !== "0") {
       const parent = categories.find((c) => c.id === current.parent_id);
       if (!parent || visited.has(parent.id)) break;
       parts.unshift(parent.category_name);
@@ -162,14 +162,14 @@ const CategoriesPage: React.FC = () => {
   };
 
   // 获取父分类名称
-  const getParentName = (parentId: number): string => {
-    if (parentId === 0) return '（顶级分类）';
+  const getParentName = (parentId: string): string => {
+    if (parentId === "0") return '（顶级分类）';
     const parent = categories.find((c) => c.id === parentId);
     return parent ? parent.category_name : '（未知）';
   };
 
   // 打开新增弹窗
-  const openAddModal = (parentId: number = 0) => {
+  const openAddModal = (parentId: string = "0") => {
     setFormMode('add');
     setFormParentId(parentId);
     setFormName('');
@@ -202,7 +202,7 @@ const CategoriesPage: React.FC = () => {
     try {
       if (formMode === 'add') {
         const newCategory: Category = {
-          id: 0,
+          id: "0",
           category_name: formName.trim(),
           asset_type: formAssetType,
           parent_id: formParentId,
@@ -365,7 +365,7 @@ const CategoriesPage: React.FC = () => {
             </Button>
             <Button
               leftSection={<IconPlus size={16} />}
-              onClick={() => openAddModal(0)}
+              onClick={() => openAddModal("0")}
             >
               新增根分类
             </Button>
@@ -539,7 +539,7 @@ const CategoriesPage: React.FC = () => {
         size="md"
       >
         <Stack gap="md">
-          {formMode === 'add' && formParentId !== 0 && (
+          {formMode === 'add' && formParentId !== "0" && (
             <Text size="sm" c="dimmed">
               父级分类：{getParentName(formParentId)}
             </Text>
