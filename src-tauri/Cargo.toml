@@ -1,6 +1,6 @@
 [package]
 name = "assets-platform"
-version = "0.0.1"
+version = "0.0.2"
 description = "资产平台APP"
 authors = ["gengyuwangbin"]
 edition = "2021"
@@ -14,6 +14,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.6", default-features = false , features = [] }  # 关闭默认特性
 
 [dependencies]
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+
+# OTel 核心
+opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.32.1", features = [
+  "rt-tokio", "trace", "metrics", "logs"
+] }
+opentelemetry-otlp = { version ="0.32.0", features = [
+  "grpc-tonic", "http-proto", "trace", "logs", "metrics"
+] }
+tracing-opentelemetry = "0.33.0"   # tracing ↔ OTel 桥接
+opentelemetry-appender-tracing = "0.32.0"  # 日志桥接
+
 argon2 = "0.5.3"          # 最强密码哈希
 password-hash = "0.6.1"   # 哈希工具
 rand = "0.10.1"    
@@ -78,7 +92,7 @@ winapi = { version = "0.3", features = ["memoryapi", "debugapi", "sysinfoapi", "
 
 
 
-log = "0.4"
+log = "0.4.30"
 hex="0.4"
 
 # 工具库

@@ -3,6 +3,7 @@ use crate::database::models::SysUser;
 use crate::utils::password_secret::{hash_password, verify_password};
 use crate::utils::snowflake::next_id;
 use serde::Serialize;
+use tracing::{error, info, warn};
 
 /// 登录响应（不包含密码）
 #[derive(Debug, Serialize)]
@@ -66,6 +67,8 @@ impl From<SysUser> for UserResponse {
 pub async fn login(username: &str, password: &str) -> Result<LoginResponse, String> {
     let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
+    info!("用户登录尝试: username={}", username);
+
     // 查询用户
     let user = sqlx::query_as::<_, SysUser>(
         "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE username = $1 AND (deleted IS NULL OR deleted = 0)"
@@ -73,11 +76,21 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
     .bind(username)
     .fetch_optional(&pool)
     .await
-    .map_err(|e| format!("查询用户失败: {}", e))?
-    .ok_or_else(|| "用户名或密码错误".to_string())?;
+    .map_err(|e| {
+        error!("查询用户失败: username={}, error={}", username, e);
+        format!("查询用户失败: {}", e)
+    })?
+    .ok_or_else(|| {
+        warn!("登录失败，用户不存在: username={}", username);
+        "用户名或密码错误".to_string()
+    })?;
 
     // 检查用户状态
     if user.status == 0 {
+        warn!(
+            "登录失败，用户已被禁用: username={}, id={}",
+            username, user.id
+        );
         return Err("该用户已被禁用".to_string());
     }
 
@@ -86,8 +99,14 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         verify_password(password, &user.passwd).map_err(|e| format!("密码验证失败: {}", e))?;
 
     if !valid {
+        warn!("登录失败，密码错误: username={}", username);
         return Err("用户名或密码错误".to_string());
     }
+
+    info!(
+        "用户登录成功: username={}, id={}, real_name={}",
+        username, user.id, user.real_name
+    );
 
     // 返回用户信息（不含密码）
     Ok(LoginResponse {
@@ -111,8 +130,13 @@ pub async fn get_users() -> Result<Vec<UserResponse>, String> {
     )
     .fetch_all(&pool)
     .await
-    .map_err(|e| format!("查询用户列表失败: {}", e))?;
+    .map_err(|e| {
+        error!("查询用户列表失败: {}", e);
+        format!("查询用户列表失败: {}", e)
+    })?;
 
+    let count = users.len();
+    info!("查询用户列表成功: 共 {} 条记录", count);
     Ok(users.into_iter().map(|u| u.into()).collect())
 }
 
@@ -133,6 +157,8 @@ pub async fn insert_user(
 ) -> Result<UserResponse, String> {
     let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
+    info!("新增用户: username={}, real_name={}", username, real_name);
+
     // 检查用户名是否已存在
     let existing = sqlx::query_as::<_, SysUser>(
         "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE username = $1 AND (deleted IS NULL OR deleted = 0)"
@@ -140,9 +166,13 @@ pub async fn insert_user(
     .bind(username)
     .fetch_optional(&pool)
     .await
-    .map_err(|e| format!("查询用户失败: {}", e))?;
+    .map_err(|e| {
+        error!("查询用户是否存在失败: username={}, error={}", username, e);
+        format!("查询用户失败: {}", e)
+    })?;
 
     if existing.is_some() {
+        warn!("新增用户失败，用户名已存在: username={}", username);
         return Err("用户名已存在".to_string());
     }
 
@@ -174,8 +204,12 @@ pub async fn insert_user(
     .bind(created_by) // updated_by
     .fetch_one(&pool)
     .await
-    .map_err(|e| format!("新增用户失败: {}", e))?;
+    .map_err(|e| {
+        error!("新增用户数据库操作失败: username={}, error={}", username, e);
+        format!("新增用户失败: {}", e)
+    })?;
 
+    info!("新增用户成功: id={}, username={}", user.id, user.username);
     Ok(user.into())
 }
 
@@ -195,6 +229,8 @@ pub async fn update_user(
     updated_by: Option<i64>,
 ) -> Result<UserResponse, String> {
     let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+
+    info!("更新用户信息: id={}, username={}", id, username);
 
     let user = sqlx::query_as::<_, SysUser>(
         r#"
@@ -218,8 +254,12 @@ pub async fn update_user(
     .bind(updated_by)
     .fetch_one(&pool)
     .await
-    .map_err(|e| format!("更新用户失败: {}", e))?;
+    .map_err(|e| {
+        error!("更新用户失败: id={}, error={}", id, e);
+        format!("更新用户失败: {}", e)
+    })?;
 
+    info!("更新用户成功: id={}, username={}", id, username);
     Ok(user.into())
 }
 
@@ -227,18 +267,26 @@ pub async fn update_user(
 pub async fn delete_user(id: i64) -> Result<(), String> {
     let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
+    info!("删除用户: id={}", id);
+
     sqlx::query("UPDATE sys_user SET deleted = 1, updated_at = NOW() WHERE id = $1")
         .bind(id)
         .execute(&pool)
         .await
-        .map_err(|e| format!("删除用户失败: {}", e))?;
+        .map_err(|e| {
+            error!("删除用户失败: id={}, error={}", id, e);
+            format!("删除用户失败: {}", e)
+        })?;
 
+    info!("删除用户成功: id={}", id);
     Ok(())
 }
 
 /// 重置密码
 pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
     let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+
+    info!("重置用户密码: id={}", id);
 
     let hashed_password = hash_password(new_password)?;
 
@@ -247,7 +295,11 @@ pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
         .bind(&hashed_password)
         .execute(&pool)
         .await
-        .map_err(|e| format!("重置密码失败: {}", e))?;
+        .map_err(|e| {
+            error!("重置密码失败: id={}, error={}", id, e);
+            format!("重置密码失败: {}", e)
+        })?;
 
+    info!("重置用户密码成功: id={}", id);
     Ok(())
 }

@@ -2,6 +2,7 @@ use crate::database;
 use crate::utils::snowflake::next_id;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use tracing::{error, info, warn};
 
 // ======================== 固定资产（JOIN 视图） ========================
 
@@ -268,12 +269,14 @@ pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let sql = format!("{} ORDER BY a.created_at DESC", HARDWARE_SELECT_SQL);
-    let rows = sqlx::query(&sql)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| format!("查询固定资产失败: {}", e))?;
+    let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
+        error!("查询固定资产列表失败: {}", e);
+        format!("查询固定资产失败: {}", e)
+    })?;
 
-    let result = rows.iter().map(|r| row_to_hardware_view(r)).collect();
+    let result: Vec<HardwareAssetView> = rows.iter().map(|r| row_to_hardware_view(r)).collect();
+    let count = result.len();
+    info!("查询固定资产列表成功: 共 {} 条记录", count);
     Ok(result)
 }
 
@@ -283,6 +286,11 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
     let asset_id = next_id() as i64;
     let hard_id = next_id() as i64;
     let asset_no = format!("{}", next_id());
+
+    info!(
+        "新增固定资产: name={}, category_id={}",
+        input.asset_name, input.category_id
+    );
 
     // 插入 assets 主表
     sqlx::query(
@@ -343,7 +351,14 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
     .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
 
     // 返回刚插入的数据
-    get_hardware_asset_by_id(asset_id).await
+    let result = get_hardware_asset_by_id(asset_id).await;
+    if let Ok(ref asset) = result {
+        info!(
+            "新增固定资产成功: id={}, name={}, asset_no={}",
+            asset.id, asset.asset_name, asset.asset_no
+        );
+    }
+    result
 }
 
 /// 根据ID查询单个固定资产
@@ -355,8 +370,14 @@ async fn get_hardware_asset_by_id(asset_id: i64) -> Result<HardwareAssetView, St
         .bind(asset_id)
         .fetch_optional(&pool)
         .await
-        .map_err(|e| format!("查询固定资产失败: {}", e))?
-        .ok_or_else(|| "固定资产不存在".to_string())?;
+        .map_err(|e| {
+            error!("查询固定资产失败: id={}, error={}", asset_id, e);
+            format!("查询固定资产失败: {}", e)
+        })?
+        .ok_or_else(|| {
+            warn!("固定资产不存在: id={}", asset_id);
+            "固定资产不存在".to_string()
+        })?;
 
     Ok(row_to_hardware_view(&row))
 }
@@ -367,6 +388,8 @@ pub async fn update_hardware_asset(
     input: HardwareAssetInput,
 ) -> Result<HardwareAssetView, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("更新固定资产: id={}, name={}", id, input.asset_name);
 
     // 更新 assets 主表
     sqlx::query(
@@ -465,12 +488,18 @@ pub async fn update_hardware_asset(
         .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
     }
 
-    get_hardware_asset_by_id(id).await
+    let result = get_hardware_asset_by_id(id).await;
+    if let Ok(ref asset) = result {
+        info!("更新固定资产成功: id={}, name={}", id, asset.asset_name);
+    }
+    result
 }
 
 /// 删除固定资产（软删除）
 pub async fn delete_hardware_asset(id: i64) -> Result<(), String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("删除固定资产: id={}", id);
 
     sqlx::query(
         "UPDATE assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'fixed'",
@@ -478,8 +507,12 @@ pub async fn delete_hardware_asset(id: i64) -> Result<(), String> {
     .bind(id)
     .execute(&pool)
     .await
-    .map_err(|e| format!("删除固定资产失败: {}", e))?;
+    .map_err(|e| {
+        error!("删除固定资产失败: id={}, error={}", id, e);
+        format!("删除固定资产失败: {}", e)
+    })?;
 
+    info!("删除固定资产成功: id={}", id);
     Ok(())
 }
 
@@ -508,12 +541,14 @@ pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String>
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let sql = format!("{} ORDER BY a.created_at DESC", INTANGIBLE_SELECT_SQL);
-    let rows = sqlx::query(&sql)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| format!("查询无形资产失败: {}", e))?;
+    let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
+        error!("查询无形资产列表失败: {}", e);
+        format!("查询无形资产失败: {}", e)
+    })?;
 
-    let result = rows.iter().map(|r| row_to_intangible_view(r)).collect();
+    let result: Vec<IntangibleAssetView> = rows.iter().map(|r| row_to_intangible_view(r)).collect();
+    let count = result.len();
+    info!("查询无形资产列表成功: 共 {} 条记录", count);
     Ok(result)
 }
 
@@ -525,6 +560,11 @@ pub async fn insert_intangible_asset(
     let asset_id = next_id() as i64;
     let intangible_id = next_id() as i64;
     let asset_no = format!("{}", next_id());
+
+    info!(
+        "新增无形资产: name={}, category_id={}",
+        input.asset_name, input.category_id
+    );
 
     // 插入 assets 主表
     sqlx::query(
@@ -601,7 +641,14 @@ pub async fn insert_intangible_asset(
     .await
     .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
 
-    get_intangible_asset_by_id(asset_id).await
+    let result = get_intangible_asset_by_id(asset_id).await;
+    if let Ok(ref asset) = result {
+        info!(
+            "新增无形资产成功: id={}, name={}, asset_no={}",
+            asset.id, asset.asset_name, asset.asset_no
+        );
+    }
+    result
 }
 
 /// 根据ID查询单个无形资产
@@ -613,8 +660,14 @@ async fn get_intangible_asset_by_id(asset_id: i64) -> Result<IntangibleAssetView
         .bind(asset_id)
         .fetch_optional(&pool)
         .await
-        .map_err(|e| format!("查询无形资产失败: {}", e))?
-        .ok_or_else(|| "无形资产不存在".to_string())?;
+        .map_err(|e| {
+            error!("查询无形资产失败: id={}, error={}", asset_id, e);
+            format!("查询无形资产失败: {}", e)
+        })?
+        .ok_or_else(|| {
+            warn!("无形资产不存在: id={}", asset_id);
+            "无形资产不存在".to_string()
+        })?;
 
     Ok(row_to_intangible_view(&row))
 }
@@ -625,6 +678,8 @@ pub async fn update_intangible_asset(
     input: IntangibleAssetInput,
 ) -> Result<IntangibleAssetView, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("更新无形资产: id={}, name={}", id, input.asset_name);
 
     // 更新 assets 主表
     sqlx::query(
@@ -753,12 +808,18 @@ pub async fn update_intangible_asset(
         .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
     }
 
-    get_intangible_asset_by_id(id).await
+    let result = get_intangible_asset_by_id(id).await;
+    if let Ok(ref asset) = result {
+        info!("更新无形资产成功: id={}, name={}", id, asset.asset_name);
+    }
+    result
 }
 
 /// 删除无形资产（软删除）
 pub async fn delete_intangible_asset(id: i64) -> Result<(), String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("删除无形资产: id={}", id);
 
     sqlx::query(
         "UPDATE assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'intangible'",
@@ -766,7 +827,11 @@ pub async fn delete_intangible_asset(id: i64) -> Result<(), String> {
     .bind(id)
     .execute(&pool)
     .await
-    .map_err(|e| format!("删除无形资产失败: {}", e))?;
+    .map_err(|e| {
+        error!("删除无形资产失败: id={}, error={}", id, e);
+        format!("删除无形资产失败: {}", e)
+    })?;
 
+    info!("删除无形资产成功: id={}", id);
     Ok(())
 }

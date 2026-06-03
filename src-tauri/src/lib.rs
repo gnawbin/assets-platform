@@ -36,7 +36,8 @@ async fn update_category(category: AssetCategory) -> Result<AssetCategory, Strin
 
 /// 删除资产类别
 #[tauri::command]
-async fn delete_category(id: i64) -> Result<(), String> {
+async fn delete_category(id: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
     service::assets_categories_service::delete_category(id).await
 }
 
@@ -56,19 +57,35 @@ async fn get_roles() -> Result<Vec<Role>, String> {
 
 /// 获取指定角色已分配的菜单权限ID列表
 #[tauri::command]
-async fn get_role_menu_ids(role_id: i64) -> Result<Vec<i64>, String> {
+async fn get_role_menu_ids(role_id: String) -> Result<Vec<i64>, String> {
+    let role_id: i64 = role_id
+        .parse()
+        .map_err(|e| format!("无效的角色ID: {}", e))?;
     service::role_service::get_role_menu_ids(role_id).await
 }
 
 /// 为角色分配菜单权限
 #[tauri::command]
-async fn assign_role_menus(role_id: i64, menu_ids: Vec<i64>) -> Result<(), String> {
+async fn assign_role_menus(role_id: String, menu_ids: Vec<String>) -> Result<(), String> {
+    let role_id: i64 = role_id
+        .parse()
+        .map_err(|e| format!("无效的角色ID: {}", e))?;
+    let menu_ids: Vec<i64> = menu_ids
+        .into_iter()
+        .map(|id| {
+            id.parse::<i64>()
+                .map_err(|e| format!("无效的菜单ID: {}", e))
+        })
+        .collect::<Result<Vec<i64>, String>>()?;
     service::role_service::assign_role_menus(role_id, menu_ids).await
 }
 
 /// 删除角色
 #[tauri::command]
-async fn delete_role(role_id: i64) -> Result<(), String> {
+async fn delete_role(role_id: String) -> Result<(), String> {
+    let role_id: i64 = role_id
+        .parse()
+        .map_err(|e| format!("无效的角色ID: {}", e))?;
     service::role_service::delete_role(role_id).await
 }
 
@@ -130,7 +147,7 @@ async fn insert_user(
 /// 更新用户信息
 #[tauri::command]
 async fn update_user(
-    id: i64,
+    id: String,
     username: String,
     real_name: String,
     email: Option<String>,
@@ -143,6 +160,7 @@ async fn update_user(
     super_user_id: Option<i64>,
     updated_by: Option<i64>,
 ) -> Result<UserResponse, String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
     service::user_service::update_user(
         id,
         &username,
@@ -162,13 +180,15 @@ async fn update_user(
 
 /// 删除用户（软删除）
 #[tauri::command]
-async fn delete_user(id: i64) -> Result<(), String> {
+async fn delete_user(id: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
     service::user_service::delete_user(id).await
 }
 
 /// 重置密码
 #[tauri::command]
-async fn reset_password(id: i64, new_password: String) -> Result<(), String> {
+async fn reset_password(id: String, new_password: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
     service::user_service::reset_password(id, &new_password).await
 }
 
@@ -184,10 +204,16 @@ async fn get_departments() -> Result<Vec<Department>, String> {
 #[tauri::command]
 async fn insert_department(
     department_name: String,
-    parent_id: Option<i64>,
+    parent_id: Option<String>,
     description: Option<String>,
     created_by: Option<i64>,
 ) -> Result<Department, String> {
+    let parent_id: Option<i64> = parent_id
+        .map(|id| {
+            id.parse::<i64>()
+                .map_err(|e| format!("无效的父部门ID: {}", e))
+        })
+        .transpose()?;
     service::department_service::insert_department(
         &department_name,
         parent_id,
@@ -200,12 +226,19 @@ async fn insert_department(
 /// 更新部门
 #[tauri::command]
 async fn update_department(
-    id: i64,
+    id: String,
     department_name: String,
-    parent_id: Option<i64>,
+    parent_id: Option<String>,
     description: Option<String>,
     updated_by: Option<i64>,
 ) -> Result<Department, String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的部门ID: {}", e))?;
+    let parent_id: Option<i64> = parent_id
+        .map(|id| {
+            id.parse::<i64>()
+                .map_err(|e| format!("无效的父部门ID: {}", e))
+        })
+        .transpose()?;
     service::department_service::update_department(
         id,
         &department_name,
@@ -218,7 +251,8 @@ async fn update_department(
 
 /// 删除部门（软删除）
 #[tauri::command]
-async fn delete_department(id: i64) -> Result<(), String> {
+async fn delete_department(id: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的部门ID: {}", e))?;
     service::department_service::delete_department(id).await
 }
 
@@ -239,15 +273,17 @@ async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<HardwareAsse
 /// 修改固定资产
 #[tauri::command]
 async fn update_hardware_asset(
-    id: i64,
+    id: String,
     input: HardwareAssetInput,
 ) -> Result<HardwareAssetView, String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
     service::assets_service::update_hardware_asset(id, input).await
 }
 
 /// 删除固定资产（软删除）
 #[tauri::command]
-async fn delete_hardware_asset(id: i64) -> Result<(), String> {
+async fn delete_hardware_asset(id: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
     service::assets_service::delete_hardware_asset(id).await
 }
 
@@ -270,15 +306,17 @@ async fn insert_intangible_asset(
 /// 修改无形资产
 #[tauri::command]
 async fn update_intangible_asset(
-    id: i64,
+    id: String,
     input: IntangibleAssetInput,
 ) -> Result<IntangibleAssetView, String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
     service::assets_service::update_intangible_asset(id, input).await
 }
 
 /// 删除无形资产（软删除）
 #[tauri::command]
-async fn delete_intangible_asset(id: i64) -> Result<(), String> {
+async fn delete_intangible_asset(id: String) -> Result<(), String> {
+    let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
     service::assets_service::delete_intangible_asset(id).await
 }
 
@@ -286,13 +324,13 @@ async fn delete_intangible_asset(id: i64) -> Result<(), String> {
 fn load_env() {
     // 尝试从当前工作目录加载 .env 文件
     match dotenvy::dotenv() {
-        Ok(_) => println!("已加载 .env 环境变量文件"),
+        Ok(_) => tracing::info!("已加载 .env 环境变量文件"),
         Err(e) => {
             // 如果 .env 文件不存在，尝试从 src-tauri 目录加载
             if let Err(e2) = dotenvy::from_filename("src-tauri/.env") {
-                println!("未找到 .env 文件，将使用默认环境变量: {} / {}", e, e2);
+                tracing::warn!("未找到 .env 文件，将使用默认环境变量: {} / {}", e, e2);
             } else {
-                println!("已从 src-tauri/.env 加载环境变量");
+                tracing::info!("已从 src-tauri/.env 加载环境变量");
             }
         }
     }
@@ -303,13 +341,25 @@ pub fn run() {
     // 应用启动时加载 .env 环境变量
     load_env();
 
+    // 初始化 tracing 日志系统
+    if let Err(e) = utils::logging::init_tracing() {
+        eprintln!("日志系统初始化失败: {}", e);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
+            // 初始化 OpenTelemetry（需要 Tokio 运行时上下文）
+            tauri::async_runtime::block_on(async {
+                if let Err(e) = utils::logging::init_otel() {
+                    tracing::warn!("OpenTelemetry 初始化失败: {}", e);
+                }
+            });
+
             // 应用启动时自动初始化数据库
             tauri::async_runtime::block_on(async {
                 database::init_database().await.expect("数据库初始化失败");
-                println!("数据库初始化完成");
+                tracing::info!("数据库初始化完成");
             });
             Ok(())
         })
@@ -347,7 +397,7 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
-            eprintln!("error while running tauri application: {}", e);
+            tracing::error!("Tauri 应用运行出错: {}", e);
         });
 }
 
