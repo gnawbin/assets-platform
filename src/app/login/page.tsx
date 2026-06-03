@@ -41,7 +41,7 @@ const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      const user = await invoke<{
+      const result = await invoke<{
         id: number;
         username: string;
         real_name: string;
@@ -51,9 +51,10 @@ const LoginPage: React.FC = () => {
         status: number;
         nickname: string | null;
         avatar: string | null;
+        token: string;
       }>('login', { username: username.trim(), password });
 
-      login(user);
+      login(result);
       router.push('/');
     } catch (err) {
       console.error('登录失败:', err);

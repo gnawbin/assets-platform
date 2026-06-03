@@ -179,11 +179,11 @@ VALUES(1,1,1,1,NOW(),1,NOW(),0),
 (53,1,149,1,NOW(),1,NOW(),0);  
 select setval('sys_role_menu_id_seq', (select max(id) from sys_role_menu));
 
-INSERT INTO SYS_USER(id,  username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted)
+INSERT INTO sys_user(id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted)
 VALUES(1, 'admin', '$argon2id$v=19$m=19456,t=2,p=1$iBgqWh/LgwmCcfXByfgy/Q$s/j6aLm9NzqlouAPvYehwEMjIN7CfOjBS7kcQKjoee0', NULL, '系统管理员', 'admin@example.com', '13800138000', NULL, 1, '管理员', NULL, NULL, NULL, NULL, 1, NOW(), 1, NOW(), 0);
 
-select setval('sys_user_id_seq',(select max(id) from sys_user)) 
+select setval('sys_user_id_seq',(select max(id) from sys_user));
 
-INSERT INFO SYS_USER_ROLE(id,user_id,role_id,created_by,created_at,updated_by,updated_at,deleted )
-VALUES(1,1,1,1,now(),1,now(),0)
-select setval('sys_user_role_id_seq',(select max(id) from sys_user_role))
+INSERT INTO sys_user_role(id,user_id,role_id,created_by,created_at,updated_by,updated_at,deleted )
+VALUES(1,1,1,1,now(),1,now(),0);
+select setval('sys_user_role_id_seq',(select max(id) from sys_user_role));
