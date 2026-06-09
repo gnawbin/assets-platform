@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS asset_category (
     sort int2 NOT NULL,
     description text NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptztz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptztz NULL,
     deleted int2 NULL
 );
 COMMENT ON TABLE asset_category IS '资产分类表';
@@ -38,17 +38,17 @@ CREATE TABLE IF NOT EXISTS assets (
     department_id int8  NULL,
     user_id int8 NULL,
     status int2 NOT NULL DEFAULT 0,
-    purchase_date timestamp,
+    purchase_date timestamptz,
     purchase_price numeric(12,2) DEFAULT 0.00,
     quantity int4 NOT NULL DEFAULT 1,
     used_quantity int4 NOT NULL DEFAULT 0,
-    expire_date timestamp,
+    expire_date timestamptz,
     description text,
 
     created_by int8,
-    created_at timestamp NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_by int8,
-    updated_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
     deleted int2 NOT NULL DEFAULT 0,
 
     CONSTRAINT uk_asset_no UNIQUE (asset_no)
@@ -89,16 +89,16 @@ CREATE TABLE IF NOT EXISTS hard_assets (
     location varchar(255),
     hardware_config text,
     use_user_id int8,
-    use_start_date timestamp,
+    use_start_date timestamptz,
     maintenance_vendor varchar(255),
     maintenance_type varchar(100),
-    maintenance_expire_date timestamp,
+    maintenance_expire_date timestamptz,
     fault_desc text,
 
     created_by int8,
-    created_at timestamp NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_by int8,
-    updated_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
     deleted int2 NOT NULL DEFAULT 0
 );
 
@@ -132,9 +132,9 @@ CREATE TABLE IF NOT EXISTS intangible_assets (
     intangible_type varchar(50) NOT NULL,
     register_no varchar(100),
     register_owner varchar(255),
-    register_date timestamp,
-    valid_start_date timestamp,
-    valid_end_date timestamp,
+    register_date timestamptz,
+    valid_start_date timestamptz,
+    valid_end_date timestamptz,
     right_status varchar(100),
 
     license_key varchar(255),
@@ -152,9 +152,9 @@ CREATE TABLE IF NOT EXISTS intangible_assets (
     residual_rate numeric(5,2) DEFAULT 0.05,
 
     created_by int8,
-    created_at timestamp NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_by int8,
-    updated_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
     deleted int2 NOT NULL DEFAULT 0
 );
 
@@ -202,9 +202,9 @@ CREATE TABLE IF NOT EXISTS asset_documents (
     doc_no varchar(100),
     party_a varchar(255),
     party_b varchar(255),
-    sign_date timestamp,
-    effective_date timestamp,
-    expire_date timestamp,
+    sign_date timestamptz,
+    effective_date timestamptz,
+    expire_date timestamptz,
 
     file_path text,
     file_name varchar(255),
@@ -212,9 +212,9 @@ CREATE TABLE IF NOT EXISTS asset_documents (
     remark text,
 
     created_by int8,
-    created_at timestamp NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_by int8,
-    updated_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
     deleted int2 NOT NULL DEFAULT 0
 );
 
@@ -261,9 +261,9 @@ CREATE TABLE IF NOT EXISTS asset_knowledge (
 
     -- 基础字段
     created_by int8,
-    created_at timestamp NOT NULL DEFAULT now(),
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_by int8,
-    updated_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
     deleted int2 NOT NULL DEFAULT 0
 );
 
@@ -308,9 +308,9 @@ CREATE TABLE IF NOT EXISTS sys_user (
     person_code varchar(50) NULL,
     super_user_id int8 NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NULL
 );
 COMMENT ON TABLE sys_user IS '系统用户表';
@@ -323,9 +323,9 @@ CREATE TABLE IF NOT EXISTS sys_department (
     parent_id int8 NULL,
     description text NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NULL
 );
 COMMENT ON TABLE sys_department IS '部门表';
@@ -344,9 +344,9 @@ CREATE TABLE IF NOT EXISTS sys_menu (
     menu_type int2 NOT NULL,
     hidden_button bool NOT NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE sys_menu IS '系统菜单&权限表';
@@ -361,9 +361,9 @@ CREATE TABLE IF NOT EXISTS sys_role (
     role_name varchar(100) NOT NULL,
     description text NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NULL
 );
 COMMENT ON TABLE sys_role IS '角色表';
@@ -374,9 +374,9 @@ CREATE TABLE IF NOT EXISTS sys_user_role (
     user_id int8 NOT NULL,
     role_id int8 NOT NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NULL
 );
 COMMENT ON TABLE sys_user_role IS '用户角色关联表';
@@ -387,9 +387,9 @@ CREATE TABLE IF NOT EXISTS sys_role_menu (
     role_id int8 NOT NULL,
     menu_id int8 NOT NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NULL
 );
 COMMENT ON TABLE sys_role_menu IS '角色菜单关联表';
@@ -401,16 +401,16 @@ CREATE TABLE IF NOT EXISTS asset_receive (
     asset_id int8 NOT NULL,
     user_id int8 NOT NULL,
     department_id int8 NOT NULL,
-    receive_date timestamp NOT NULL,
+    receive_date timestamptz NOT NULL,
     reason text NOT NULL,
     status int2 NOT NULL,
     approve_by int8 NULL,
-    approve_time timestamp NULL,
+    approve_time timestamptz NULL,
     approve_remark text NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE asset_receive IS '资产领用申请表';
@@ -422,15 +422,15 @@ CREATE TABLE IF NOT EXISTS asset_return (
     receive_id int8 NOT NULL,
     asset_id int8 NOT NULL,
     user_id int8 NOT NULL,
-    return_date timestamp NOT NULL,
+    return_date timestamptz NOT NULL,
     asset_status int2 NOT NULL,
     remark text NULL,
     confirm_by int8 NOT NULL,
-    confirm_time timestamp NOT NULL,
+    confirm_time timestamptz NOT NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE asset_return IS '资产归还确认表';
@@ -444,15 +444,15 @@ CREATE TABLE IF NOT EXISTS asset_transfer (
     in_dept_id int8 NOT NULL,
     out_user_id int8 NOT NULL,
     in_user_id int8 NOT NULL,
-    transfer_date timestamp NOT NULL,
+    transfer_date timestamptz NOT NULL,
     reason text NOT NULL,
     status int2 NOT NULL,
     approve_by int8 NULL,
-    approve_time timestamp NULL,
+    approve_time timestamptz NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE asset_transfer IS '资产调拨表';
@@ -470,14 +470,14 @@ CREATE TABLE IF NOT EXISTS asset_repair (
     repair_type int2 NOT NULL,
     vendor varchar(255) NULL,
     cost numeric(12,2) NULL,
-    apply_date timestamp NOT NULL,
-    repair_date timestamp NULL,
-    finish_date timestamp NULL,
+    apply_date timestamptz NOT NULL,
+    repair_date timestamptz NULL,
+    finish_date timestamptz NULL,
     status int2 NOT NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE asset_repair IS '资产维修表';
@@ -488,15 +488,15 @@ CREATE TABLE IF NOT EXISTS asset_scrap (
     scrap_no varchar(100) NOT NULL,
     asset_id int8 NOT NULL,
     reason text NOT NULL,
-    scrap_date timestamp NOT NULL,
+    scrap_date timestamptz NOT NULL,
     status int2 NOT NULL,
     approve_by int8 NULL,
-    approve_time timestamp NULL,
+    approve_time timestamptz NULL,
     handle_user int8 NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE asset_scrap IS '资产报废表';
@@ -517,12 +517,12 @@ CREATE TABLE IF NOT EXISTS asset_purchase (
     reason text NOT NULL,
     status int2 NOT NULL,
     supplier varchar(255) NULL,
-    purchase_date timestamp NULL,
-    arrive_date timestamp NULL,
+    purchase_date timestamptz NULL,
+    arrive_date timestamptz NULL,
     created_by int8 NULL,
-    created_at timestamp NULL,
+    created_at timestamptz NULL,
     updated_by int8 NULL,
-    updated_at timestamp NULL,
+    updated_at timestamptz NULL,
     deleted int2 NOT NULL
 );
 COMMENT ON TABLE asset_purchase IS '资产采购申请表';
