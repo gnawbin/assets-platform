@@ -1,0 +1,42 @@
+# OpenTelemetry Collector 开发环境配置
+# 接收前端 OTLP HTTP 数据（端口 4318）和后端 OTLP gRPC 数据（端口 4317）
+# 输出到控制台（stdout）用于开发调试
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - http://localhost:1480
+            - http://localhost:3000
+            - tauri://localhost
+            - https://tauri.localhost
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+exporters:
+  logging:
+    verbosity: detailed
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, debug]

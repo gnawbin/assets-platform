@@ -16,9 +16,12 @@ export default function RootLayout({
   const router = useRouter();
   const { isLoggedIn, init } = useAuthStore();
 
+  // 仅在应用启动时初始化一次 OpenTelemetry
   useEffect(() => {
-    // 初始化 OpenTelemetry（应用最早阶段）
     initTelemetry();
+  }, []);
+
+  useEffect(() => {
     logger.info('应用启动', { page: pathname });
   }, [pathname]);
 
