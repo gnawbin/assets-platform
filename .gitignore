@@ -16,3 +16,4 @@ pnpm-lock.yaml
 .env.local
 .env.*.local
 .ra-target
+package-lock.yaml

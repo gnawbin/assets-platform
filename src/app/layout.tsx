@@ -3,6 +3,8 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
+import { Notifications } from '@mantine/notifications';
+import '@mantine/notifications/styles.css';
 import { useAuthStore } from '@/store/authStore';
 import { initTelemetry } from '@/utils/telemetry';
 import { logger } from '@/utils/logger';
@@ -45,7 +47,10 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body style={{ margin: 0, padding: 0 }}>
-        <MantineProvider>{children}</MantineProvider>
+        <MantineProvider>
+          <Notifications />
+          {children}
+        </MantineProvider>
       </body>
     </html>
   );

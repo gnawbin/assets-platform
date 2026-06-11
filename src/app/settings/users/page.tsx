@@ -28,6 +28,7 @@ import {
   IconRefresh,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
+import { notifySuccess, notifyError } from '@/utils/notify';
 
 interface User {
   id: number;
@@ -139,15 +140,15 @@ const UsersPage: React.FC = () => {
   // 新增用户
   const handleAddUser = async () => {
     if (!newUser.username.trim()) {
-      alert('请输入用户名');
+      notifyError('验证失败', '请输入用户名');
       return;
     }
     if (!newUser.password.trim()) {
-      alert('请输入密码');
+      notifyError('验证失败', '请输入密码');
       return;
     }
     if (!newUser.real_name.trim()) {
-      alert('请输入真实姓名');
+      notifyError('验证失败', '请输入真实姓名');
       return;
     }
 
@@ -179,11 +180,11 @@ const UsersPage: React.FC = () => {
         nickname: '',
         person_code: '',
       });
-      alert('用户添加成功！');
+      notifySuccess('用户添加成功');
       fetchUsers();
     } catch (err) {
       console.error('新增用户失败:', err);
-      alert(typeof err === 'string' ? err : '新增用户失败');
+      notifyError('新增用户失败', typeof err === 'string' ? err : undefined);
     } finally {
       setAdding(false);
     }
@@ -209,11 +210,11 @@ const UsersPage: React.FC = () => {
   const handleEditUser = async () => {
     if (!editingUser) return;
     if (!editForm.username.trim()) {
-      alert('请输入用户名');
+      notifyError('验证失败', '请输入用户名');
       return;
     }
     if (!editForm.real_name.trim()) {
-      alert('请输入真实姓名');
+      notifyError('验证失败', '请输入真实姓名');
       return;
     }
 
@@ -235,11 +236,11 @@ const UsersPage: React.FC = () => {
       });
       setEditModalOpen(false);
       setEditingUser(null);
-      alert('用户更新成功！');
+      notifySuccess('用户更新成功');
       fetchUsers();
     } catch (err) {
       console.error('更新用户失败:', err);
-      alert(typeof err === 'string' ? err : '更新用户失败');
+      notifyError('更新用户失败', typeof err === 'string' ? err : undefined);
     } finally {
       setEditing(false);
     }
@@ -259,11 +260,11 @@ const UsersPage: React.FC = () => {
       await invoke('delete_user', { id: deleteUser.id });
       setDeleteModalOpen(false);
       setDeleteUser(null);
-      alert('用户删除成功！');
+      notifySuccess('用户删除成功');
       fetchUsers();
     } catch (err) {
       console.error('删除用户失败:', err);
-      alert(typeof err === 'string' ? err : '删除用户失败');
+      notifyError('删除用户失败', typeof err === 'string' ? err : undefined);
     } finally {
       setDeleting(false);
     }
@@ -280,11 +281,11 @@ const UsersPage: React.FC = () => {
   const handleResetPassword = async () => {
     if (!resetPwdUser) return;
     if (!newPassword.trim()) {
-      alert('请输入新密码');
+      notifyError('验证失败', '请输入新密码');
       return;
     }
     if (newPassword.length < 6) {
-      alert('密码长度不能少于6位');
+      notifyError('验证失败', '密码长度不能少于6位');
       return;
     }
 
@@ -297,10 +298,10 @@ const UsersPage: React.FC = () => {
       setResetPwdModalOpen(false);
       setResetPwdUser(null);
       setNewPassword('');
-      alert('密码重置成功！');
+      notifySuccess('密码重置成功');
     } catch (err) {
       console.error('重置密码失败:', err);
-      alert(typeof err === 'string' ? err : '重置密码失败');
+      notifyError('重置密码失败', typeof err === 'string' ? err : undefined);
     } finally {
       setResetting(false);
     }

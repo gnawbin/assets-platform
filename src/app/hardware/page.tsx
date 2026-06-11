@@ -34,6 +34,7 @@ import {
   IconDeviceDesktop,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
+import { notifySuccess, notifyError } from '@/utils/notify';
 
 // ======================== 类型定义 ========================
 
@@ -271,11 +272,11 @@ const HardwarePage: React.FC = () => {
   // 保存
   const handleSave = async () => {
     if (!formAssetName.trim()) {
-      alert('请输入资产名称');
+      notifyError('验证失败', '请输入资产名称');
       return;
     }
     if (!formCategoryId) {
-      alert('请选择资产分类');
+      notifyError('验证失败', '请选择资产分类');
       return;
     }
 
@@ -309,17 +310,17 @@ const HardwarePage: React.FC = () => {
 
       if (formMode === 'add') {
         await invoke('insert_hardware_asset', { input });
-        alert('固定资产添加成功！');
+        notifySuccess('固定资产添加成功');
       } else if (editingId) {
         await invoke('update_hardware_asset', { id: editingId, input });
-        alert('固定资产更新成功！');
+        notifySuccess('固定资产更新成功');
       }
 
       setFormModalOpen(false);
       fetchAssets();
     } catch (err) {
       console.error('保存固定资产失败:', err);
-      alert(typeof err === 'string' ? err : '保存固定资产失败');
+      notifyError('保存固定资产失败', typeof err === 'string' ? err : undefined);
     } finally {
       setSaving(false);
     }
@@ -339,11 +340,11 @@ const HardwarePage: React.FC = () => {
       await invoke('delete_hardware_asset', { id: deleteTarget.id });
       setDeleteModalOpen(false);
       setDeleteTarget(null);
-      alert('固定资产删除成功！');
+      notifySuccess('固定资产删除成功');
       fetchAssets();
     } catch (err) {
       console.error('删除固定资产失败:', err);
-      alert(typeof err === 'string' ? err : '删除固定资产失败');
+      notifyError('删除固定资产失败', typeof err === 'string' ? err : undefined);
     } finally {
       setDeleting(false);
     }
@@ -833,8 +834,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.purchase_date
                       ? new Date(detailAsset.purchase_date).toLocaleDateString(
-                          'zh-CN'
-                        )
+                        'zh-CN'
+                      )
                       : '-'}
                   </Text>
                 </Group>
@@ -855,8 +856,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.expire_date
                       ? new Date(detailAsset.expire_date).toLocaleDateString(
-                          'zh-CN'
-                        )
+                        'zh-CN'
+                      )
                       : '-'}
                   </Text>
                 </Group>
@@ -899,8 +900,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.use_start_date
                       ? new Date(
-                          detailAsset.use_start_date
-                        ).toLocaleDateString('zh-CN')
+                        detailAsset.use_start_date
+                      ).toLocaleDateString('zh-CN')
                       : '-'}
                   </Text>
                 </Group>
@@ -935,8 +936,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.maintenance_expire_date
                       ? new Date(
-                          detailAsset.maintenance_expire_date
-                        ).toLocaleDateString('zh-CN')
+                        detailAsset.maintenance_expire_date
+                      ).toLocaleDateString('zh-CN')
                       : '-'}
                   </Text>
                 </Group>

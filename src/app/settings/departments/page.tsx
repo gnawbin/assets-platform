@@ -33,6 +33,7 @@ import {
   IconChevronDown,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
+import { notifySuccess, notifyError } from '@/utils/notify';
 
 interface Department {
   id: number;
@@ -172,7 +173,7 @@ const DepartmentsPage: React.FC = () => {
   // 保存部门
   const handleSave = async () => {
     if (!formName.trim()) {
-      alert('请输入部门名称');
+      notifyError('验证失败', '请输入部门名称');
       return;
     }
 
@@ -185,7 +186,7 @@ const DepartmentsPage: React.FC = () => {
           description: formDesc.trim() || null,
           createdBy: null,
         });
-        alert('部门添加成功！');
+        notifySuccess('部门添加成功');
       } else {
         if (!selectedDept) return;
         await invoke('update_department', {
@@ -195,13 +196,13 @@ const DepartmentsPage: React.FC = () => {
           description: formDesc.trim() || null,
           updatedBy: null,
         });
-        alert('部门更新成功！');
+        notifySuccess('部门更新成功');
       }
       setFormModalOpen(false);
       fetchDepartments();
     } catch (err) {
       console.error('保存部门失败:', err);
-      alert(typeof err === 'string' ? err : '保存部门失败');
+      notifyError('保存部门失败', typeof err === 'string' ? err : undefined);
     } finally {
       setSaving(false);
     }
@@ -220,11 +221,11 @@ const DepartmentsPage: React.FC = () => {
       await invoke('delete_department', { id: selectedDept.id });
       setDeleteModalOpen(false);
       setSelectedDept(null);
-      alert('部门删除成功！');
+      notifySuccess('部门删除成功');
       fetchDepartments();
     } catch (err) {
       console.error('删除部门失败:', err);
-      alert(typeof err === 'string' ? err : '删除部门失败');
+      notifyError('删除部门失败', typeof err === 'string' ? err : undefined);
     } finally {
       setDeleting(false);
     }

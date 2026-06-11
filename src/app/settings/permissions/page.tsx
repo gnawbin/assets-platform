@@ -17,6 +17,7 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconTrash, IconShield } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
+import { notifySuccess, notifyError } from '@/utils/notify';
 
 interface Role {
   id: number;
@@ -118,10 +119,10 @@ const PermissionsPage: React.FC = () => {
       const menuIds = Array.from(checkedMenuIds);
       await invoke('assign_role_menus', { roleId: String(selectedRole.id), menuIds });
       setPermModalOpen(false);
-      alert('权限分配成功！');
+      notifySuccess('权限分配成功');
     } catch (err) {
       console.error('分配权限失败:', err);
-      alert(typeof err === 'string' ? err : '分配权限失败');
+      notifyError('分配权限失败', typeof err === 'string' ? err : undefined);
     } finally {
       setSavingPerms(false);
     }
@@ -141,11 +142,11 @@ const PermissionsPage: React.FC = () => {
       await invoke('delete_role', { roleId: String(deleteRole.id) });
       setDeleteModalOpen(false);
       setDeleteRole(null);
-      alert('角色删除成功！');
+      notifySuccess('角色删除成功');
       fetchRoles();
     } catch (err) {
       console.error('删除角色失败:', err);
-      alert(typeof err === 'string' ? err : '删除角色失败');
+      notifyError('删除角色失败', typeof err === 'string' ? err : undefined);
     } finally {
       setDeleting(false);
     }
@@ -154,7 +155,7 @@ const PermissionsPage: React.FC = () => {
   // 新增角色
   const handleAddRole = async () => {
     if (!newRoleKey.trim() || !newRoleName.trim()) {
-      alert('请输入角色标识和角色名称');
+      notifyError('验证失败', '请输入角色标识和角色名称');
       return;
     }
     setAdding(true);
@@ -176,11 +177,11 @@ const PermissionsPage: React.FC = () => {
       setNewRoleKey('');
       setNewRoleName('');
       setNewRoleDesc('');
-      alert('角色添加成功！');
+      notifySuccess('角色添加成功');
       fetchRoles();
     } catch (err) {
       console.error('新增角色失败:', err);
-      alert(typeof err === 'string' ? err : '新增角色失败');
+      notifyError('新增角色失败', typeof err === 'string' ? err : undefined);
     } finally {
       setAdding(false);
     }

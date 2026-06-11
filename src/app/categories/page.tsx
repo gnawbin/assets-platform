@@ -36,6 +36,7 @@ import {
   IconChevronDown,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
+import { notifySuccess, notifyError } from '@/utils/notify';
 
 interface Category {
   id: string;
@@ -194,7 +195,7 @@ const CategoriesPage: React.FC = () => {
   // 保存分类
   const handleSave = async () => {
     if (!formName.trim()) {
-      alert('请输入分类名称');
+      notifyError('验证失败', '请输入分类名称');
       return;
     }
 
@@ -215,7 +216,7 @@ const CategoriesPage: React.FC = () => {
           deleted: null,
         };
         await invoke('insert_category', { category: newCategory });
-        alert('分类添加成功！');
+        notifySuccess('分类添加成功');
       } else {
         if (!selectedCategory) return;
         const updatedCategory: Category = {
@@ -227,13 +228,13 @@ const CategoriesPage: React.FC = () => {
           description: formDesc.trim() || null,
         };
         await invoke('update_category', { category: updatedCategory });
-        alert('分类更新成功！');
+        notifySuccess('分类更新成功');
       }
       setFormModalOpen(false);
       fetchCategories();
     } catch (err) {
       console.error('保存分类失败:', err);
-      alert(typeof err === 'string' ? err : '保存分类失败');
+      notifyError('保存分类失败', typeof err === 'string' ? err : undefined);
     } finally {
       setSaving(false);
     }
@@ -252,11 +253,11 @@ const CategoriesPage: React.FC = () => {
       await invoke('delete_category', { id: selectedCategory.id });
       setDeleteModalOpen(false);
       setSelectedCategory(null);
-      alert('分类删除成功！');
+      notifySuccess('分类删除成功');
       fetchCategories();
     } catch (err) {
       console.error('删除分类失败:', err);
-      alert(typeof err === 'string' ? err : '删除分类失败');
+      notifyError('删除分类失败', typeof err === 'string' ? err : undefined);
     } finally {
       setDeleting(false);
     }
@@ -508,16 +509,16 @@ const CategoriesPage: React.FC = () => {
                   创建时间:{' '}
                   {selectedCategory.created_at
                     ? new Date(selectedCategory.created_at).toLocaleString(
-                        'zh-CN'
-                      )
+                      'zh-CN'
+                    )
                     : '-'}
                 </Text>
                 <Text size="xs" c="dimmed">
                   更新时间:{' '}
                   {selectedCategory.updated_at
                     ? new Date(selectedCategory.updated_at).toLocaleString(
-                        'zh-CN'
-                      )
+                      'zh-CN'
+                    )
                     : '-'}
                 </Text>
               </Stack>

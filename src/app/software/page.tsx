@@ -33,6 +33,7 @@ import {
   IconLicense,
 } from '@tabler/icons-react';
 import { invoke } from '@tauri-apps/api/core';
+import { notifySuccess, notifyError } from '@/utils/notify';
 
 // ======================== 类型定义 ========================
 
@@ -337,11 +338,11 @@ const SoftwarePage: React.FC = () => {
   // 保存
   const handleSave = async () => {
     if (!formAssetName.trim()) {
-      alert('请输入资产名称');
+      notifyError('验证失败', '请输入资产名称');
       return;
     }
     if (!formCategoryId) {
-      alert('请选择资产分类');
+      notifyError('验证失败', '请选择资产分类');
       return;
     }
 
@@ -384,17 +385,17 @@ const SoftwarePage: React.FC = () => {
 
       if (formMode === 'add') {
         await invoke('insert_intangible_asset', { input });
-        alert('无形资产添加成功！');
+        notifySuccess('无形资产添加成功');
       } else if (editingId) {
         await invoke('update_intangible_asset', { id: editingId, input });
-        alert('无形资产更新成功！');
+        notifySuccess('无形资产更新成功');
       }
 
       setFormModalOpen(false);
       fetchAssets();
     } catch (err) {
       console.error('保存无形资产失败:', err);
-      alert(typeof err === 'string' ? err : '保存无形资产失败');
+      notifyError('保存无形资产失败', typeof err === 'string' ? err : undefined);
     } finally {
       setSaving(false);
     }
@@ -414,11 +415,11 @@ const SoftwarePage: React.FC = () => {
       await invoke('delete_intangible_asset', { id: deleteTarget.id });
       setDeleteModalOpen(false);
       setDeleteTarget(null);
-      alert('无形资产删除成功！');
+      notifySuccess('无形资产删除成功');
       fetchAssets();
     } catch (err) {
       console.error('删除无形资产失败:', err);
-      alert(typeof err === 'string' ? err : '删除无形资产失败');
+      notifyError('删除无形资产失败', typeof err === 'string' ? err : undefined);
     } finally {
       setDeleting(false);
     }
@@ -547,8 +548,8 @@ const SoftwarePage: React.FC = () => {
                         <Text size="sm">
                           {asset.valid_end_date
                             ? new Date(
-                                asset.valid_end_date
-                              ).toLocaleDateString('zh-CN')
+                              asset.valid_end_date
+                            ).toLocaleDateString('zh-CN')
                             : '-'}
                         </Text>
                       </Table.Td>
@@ -967,271 +968,271 @@ const SoftwarePage: React.FC = () => {
       >
         {detailAsset && (
           <Stack gap="md">
-             <Paper p="md" withBorder radius="sm">
-               <Text fw={600} size="sm" mb="sm">
-                 基本信息
-               </Text>
-               <Stack gap="sm">
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     资产编号
-                   </Text>
-                   <Text size="sm" fw={500}>
-                     {detailAsset.asset_no}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     资产名称
-                   </Text>
-                   <Text size="sm" fw={500}>
-                     {detailAsset.asset_name}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     分类
-                   </Text>
-                   <Text size="sm">
-                     {getCategoryName(detailAsset.category_id)}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     类型
-                   </Text>
-                   <Badge variant="light" color="violet">
-                     {INTANGIBLE_TYPE_MAP[
-                       detailAsset.intangible_type || ''
-                     ] || detailAsset.intangible_type || '-'}
-                   </Badge>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     供应商
-                   </Text>
-                   <Text size="sm">{detailAsset.manufacturer || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     版本
-                   </Text>
-                   <Text size="sm">{detailAsset.version || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     状态
-                   </Text>
-                   <Badge
-                     variant="light"
-                     color={STATUS_MAP[detailAsset.status]?.color || 'gray'}
-                   >
-                     {STATUS_MAP[detailAsset.status]?.label || '未知'}
-                   </Badge>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     授权状态
-                   </Text>
-                   <Badge
-                     variant="light"
-                     color={
-                       RIGHT_STATUS_MAP[detailAsset.right_status || '']?.color ||
-                       'gray'
-                     }
-                   >
-                     {RIGHT_STATUS_MAP[detailAsset.right_status || '']?.label ||
-                       detailAsset.right_status ||
-                       '未知'}
-                   </Badge>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     购买价格
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.purchase_price
-                       ? `¥${detailAsset.purchase_price.toFixed(2)}`
-                       : '-'}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     购买日期
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.purchase_date
-                       ? new Date(
-                           detailAsset.purchase_date
-                         ).toLocaleDateString('zh-CN')
-                       : '-'}
-                   </Text>
-                 </Group>
-               </Stack>
-             </Paper>
+            <Paper p="md" withBorder radius="sm">
+              <Text fw={600} size="sm" mb="sm">
+                基本信息
+              </Text>
+              <Stack gap="sm">
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    资产编号
+                  </Text>
+                  <Text size="sm" fw={500}>
+                    {detailAsset.asset_no}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    资产名称
+                  </Text>
+                  <Text size="sm" fw={500}>
+                    {detailAsset.asset_name}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    分类
+                  </Text>
+                  <Text size="sm">
+                    {getCategoryName(detailAsset.category_id)}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    类型
+                  </Text>
+                  <Badge variant="light" color="violet">
+                    {INTANGIBLE_TYPE_MAP[
+                      detailAsset.intangible_type || ''
+                    ] || detailAsset.intangible_type || '-'}
+                  </Badge>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    供应商
+                  </Text>
+                  <Text size="sm">{detailAsset.manufacturer || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    版本
+                  </Text>
+                  <Text size="sm">{detailAsset.version || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    状态
+                  </Text>
+                  <Badge
+                    variant="light"
+                    color={STATUS_MAP[detailAsset.status]?.color || 'gray'}
+                  >
+                    {STATUS_MAP[detailAsset.status]?.label || '未知'}
+                  </Badge>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    授权状态
+                  </Text>
+                  <Badge
+                    variant="light"
+                    color={
+                      RIGHT_STATUS_MAP[detailAsset.right_status || '']?.color ||
+                      'gray'
+                    }
+                  >
+                    {RIGHT_STATUS_MAP[detailAsset.right_status || '']?.label ||
+                      detailAsset.right_status ||
+                      '未知'}
+                  </Badge>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    购买价格
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.purchase_price
+                      ? `¥${detailAsset.purchase_price.toFixed(2)}`
+                      : '-'}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    购买日期
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.purchase_date
+                      ? new Date(
+                        detailAsset.purchase_date
+                      ).toLocaleDateString('zh-CN')
+                      : '-'}
+                  </Text>
+                </Group>
+              </Stack>
+            </Paper>
 
-             <Paper p="md" withBorder radius="sm">
-               <Text fw={600} size="sm" mb="sm">
-                 知识产权信息
-               </Text>
-               <Stack gap="sm">
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     注册号/登记号
-                   </Text>
-                   <Text size="sm">{detailAsset.register_no || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     注册人/权利人
-                   </Text>
-                   <Text size="sm">{detailAsset.register_owner || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     注册日期
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.register_date
-                       ? new Date(detailAsset.register_date).toLocaleDateString('zh-CN')
-                       : '-'}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     有效期开始
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.valid_start_date
-                       ? new Date(detailAsset.valid_start_date).toLocaleDateString('zh-CN')
-                       : '-'}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     有效期结束
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.valid_end_date
-                       ? new Date(detailAsset.valid_end_date).toLocaleDateString('zh-CN')
-                       : '-'}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     授权范围
-                   </Text>
-                   <Text size="sm">{detailAsset.authorized_scope || '-'}</Text>
-                 </Group>
-               </Stack>
-             </Paper>
+            <Paper p="md" withBorder radius="sm">
+              <Text fw={600} size="sm" mb="sm">
+                知识产权信息
+              </Text>
+              <Stack gap="sm">
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    注册号/登记号
+                  </Text>
+                  <Text size="sm">{detailAsset.register_no || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    注册人/权利人
+                  </Text>
+                  <Text size="sm">{detailAsset.register_owner || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    注册日期
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.register_date
+                      ? new Date(detailAsset.register_date).toLocaleDateString('zh-CN')
+                      : '-'}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    有效期开始
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.valid_start_date
+                      ? new Date(detailAsset.valid_start_date).toLocaleDateString('zh-CN')
+                      : '-'}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    有效期结束
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.valid_end_date
+                      ? new Date(detailAsset.valid_end_date).toLocaleDateString('zh-CN')
+                      : '-'}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    授权范围
+                  </Text>
+                  <Text size="sm">{detailAsset.authorized_scope || '-'}</Text>
+                </Group>
+              </Stack>
+            </Paper>
 
-             <Paper p="md" withBorder radius="sm">
-               <Text fw={600} size="sm" mb="sm">
-                 许可证信息
+            <Paper p="md" withBorder radius="sm">
+              <Text fw={600} size="sm" mb="sm">
+                许可证信息
 
-               </Text>
-               <Stack gap="sm">
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     许可证密钥
-                   </Text>
-                   <Text size="sm">{detailAsset.license_key || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     许可证类型
-                   </Text>
-                   <Text size="sm">{detailAsset.license_type || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     绑定类型
-                   </Text>
-                   <Text size="sm">{detailAsset.bind_type || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     绑定信息
-                   </Text>
-                   <Text size="sm">{detailAsset.bind_info || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     分配用户
-                   </Text>
-                   <Text size="sm">{detailAsset.assigned_user_ids || '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     下载链接
-                   </Text>
-                   <Text size="sm">{detailAsset.download_link || '-'}</Text>
-                 </Group>
-               </Stack>
-             </Paper>
+              </Text>
+              <Stack gap="sm">
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    许可证密钥
+                  </Text>
+                  <Text size="sm">{detailAsset.license_key || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    许可证类型
+                  </Text>
+                  <Text size="sm">{detailAsset.license_type || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    绑定类型
+                  </Text>
+                  <Text size="sm">{detailAsset.bind_type || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    绑定信息
+                  </Text>
+                  <Text size="sm">{detailAsset.bind_info || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    分配用户
+                  </Text>
+                  <Text size="sm">{detailAsset.assigned_user_ids || '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    下载链接
+                  </Text>
+                  <Text size="sm">{detailAsset.download_link || '-'}</Text>
+                </Group>
+              </Stack>
+            </Paper>
 
-             <Paper p="md" withBorder radius="sm">
-               <Text fw={600} size="sm" mb="sm">
-                 摊销信息
-               </Text>
-               <Stack gap="sm">
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     摊销方法
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.amortization_method === 'straight_line' ? '直线法' :
+            <Paper p="md" withBorder radius="sm">
+              <Text fw={600} size="sm" mb="sm">
+                摊销信息
+              </Text>
+              <Stack gap="sm">
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    摊销方法
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.amortization_method === 'straight_line' ? '直线法' :
                       detailAsset.amortization_method === 'double_declining' ? '双倍余额递减法' :
-                      detailAsset.amortization_method === 'sum_of_years' ? '年数总和法' :
-                      detailAsset.amortization_method === 'none' ? '不计提' :
-                      detailAsset.amortization_method || '-'}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     使用年限
-                   </Text>
-                   <Text size="sm">{detailAsset.useful_life ? `${detailAsset.useful_life} 年` : '-'}</Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     摊销金额
-                   </Text>
-                   <Text size="sm">
-                     {detailAsset.amortization_amount
-                       ? `¥${detailAsset.amortization_amount.toFixed(2)}`
-                       : '-'}
-                   </Text>
-                 </Group>
-                 <Group>
-                   <Text size="sm" c="dimmed" w={100}>
-                     残值率
-                   </Text>
-                   <Text size="sm">{detailAsset.residual_rate ? `${detailAsset.residual_rate}%` : '-'}</Text>
-                 </Group>
-               </Stack>
-             </Paper>
+                        detailAsset.amortization_method === 'sum_of_years' ? '年数总和法' :
+                          detailAsset.amortization_method === 'none' ? '不计提' :
+                            detailAsset.amortization_method || '-'}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    使用年限
+                  </Text>
+                  <Text size="sm">{detailAsset.useful_life ? `${detailAsset.useful_life} 年` : '-'}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    摊销金额
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.amortization_amount
+                      ? `¥${detailAsset.amortization_amount.toFixed(2)}`
+                      : '-'}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    残值率
+                  </Text>
+                  <Text size="sm">{detailAsset.residual_rate ? `${detailAsset.residual_rate}%` : '-'}</Text>
+                </Group>
+              </Stack>
+            </Paper>
 
-             <Group gap="xs">
-               <Text size="xs" c="dimmed">
-                 创建时间:{' '}
-                 {detailAsset.created_at
-                   ? new Date(detailAsset.created_at).toLocaleString('zh-CN')
-                   : '-'}
-               </Text>
-               <Text size="xs" c="dimmed">
-                 | 更新时间:{' '}
-                 {detailAsset.updated_at
-                   ? new Date(detailAsset.updated_at).toLocaleString('zh-CN')
-                   : '-'}
-               </Text>
-             </Group>
-           </Stack>
-         )}
-       </Modal>
-     </Layout>
-   );
- };
+            <Group gap="xs">
+              <Text size="xs" c="dimmed">
+                创建时间:{' '}
+                {detailAsset.created_at
+                  ? new Date(detailAsset.created_at).toLocaleString('zh-CN')
+                  : '-'}
+              </Text>
+              <Text size="xs" c="dimmed">
+                | 更新时间:{' '}
+                {detailAsset.updated_at
+                  ? new Date(detailAsset.updated_at).toLocaleString('zh-CN')
+                  : '-'}
+              </Text>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+    </Layout>
+  );
+};
 
- export default SoftwarePage;
+export default SoftwarePage;

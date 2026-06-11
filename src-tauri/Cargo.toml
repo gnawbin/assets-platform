@@ -3,7 +3,7 @@ authors = ["gengyuwangbin"]
 description = "资产平台APP"
 edition = "2021"
 name = "assets-platform"
-version = "0.0.2"
+version = "0.0.3"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
