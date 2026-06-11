@@ -23,7 +23,8 @@ import { XMLHttpRequestInstrumentation } from '@opentelemetry/instrumentation-xm
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { LoggerProvider, SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
-import { Resource } from '@opentelemetry/resources';
+// @ts-expect-error - resourceFromAttributes exists at runtime but type defs may not export it
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import {
   SEMRESATTRS_SERVICE_NAME,
   SEMRESATTRS_SERVICE_VERSION,
@@ -31,6 +32,7 @@ import {
 } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor, WebTracerProvider } from '@opentelemetry/sdk-trace-web';
 import { ZoneContextManager } from '@opentelemetry/context-zone';
+import { logger } from './logger';
 
 // ======================== 环境变量常量 ========================
 
@@ -50,12 +52,12 @@ const DEFAULT_SERVICE_NAME = 'assets-platform';
 
 /** 检查 OTel 是否启用 */
 function isOtelEnabled(): boolean {
-  if (typeof process !== 'undefined' && process.env?.[ENV_OTEL_ENABLED]) {
-    const val = process.env[ENV_OTEL_ENABLED]!;
+  const val = getEnv(ENV_OTEL_ENABLED);
+  if (val !== undefined) {
     return val === '1' || val.toLowerCase() === 'true';
   }
-  // 默认启用
-  return true;
+  // 无法读取环境变量时，默认禁用（保守策略）
+  return false;
 }
 
 /** 获取 OTLP 端点 */
@@ -84,19 +86,48 @@ function getBrowserInfo(): Record<string, string> {
   };
 }
 
+/** 转义字符串中的正则特殊字符 */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 安全获取环境变量（兼容浏览器端运行时） */
+function getEnv(key: string): string | undefined {
+  if (typeof process !== 'undefined' && process.env) {
+    return (process.env as Record<string, string | undefined>)[key];
+  }
+  // 在浏览器端，NEXT_PUBLIC_* 变量在构建时已被内联替换
+  // 通过全局 __NEXT_DATA__ 或直接访问 process.env（如果存在）
+  return undefined;
+}
+
+/** 获取当前环境：'production' | 'development' | 'test' */
+function getNodeEnv(): string {
+  // 优先从 process.env 获取（构建时内联）
+  const env = getEnv('NODE_ENV');
+  if (env) return env;
+  // 浏览器端回退：检查 hostname
+  if (typeof location !== 'undefined') {
+    return location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+      ? 'development'
+      : 'production';
+  }
+  return 'development';
+}
+
 // ======================== 资源创建 ========================
 
 /** 创建 OTel 资源 */
-function createResource(): Resource {
+function createResource() {
   const attributes: Record<string, string> = {
     [SEMRESATTRS_SERVICE_NAME]: getServiceName(),
-    [SEMRESATTRS_SERVICE_VERSION]: process.env.NEXT_PUBLIC_APP_VERSION || '0.0.2',
+    [SEMRESATTRS_SERVICE_VERSION]: getEnv('NEXT_PUBLIC_APP_VERSION') || '0.0.2',
     [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]:
-      process.env.NODE_ENV === 'production' ? 'production' : 'development',
+      getNodeEnv() === 'production' ? 'production' : 'development',
     ...getBrowserInfo(),
   };
 
-  return new Resource(attributes);
+  return resourceFromAttributes(attributes);
 }
 
 // ======================== 初始化函数 ========================
@@ -130,7 +161,7 @@ export function initTelemetry(): void {
   (window as any).__OTEL_INITIALIZED__ = true;
 
   // 开发环境启用详细日志
-  if (process.env.NODE_ENV !== 'production') {
+  if (getNodeEnv() !== 'production') {
     diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG);
   }
 
@@ -162,9 +193,8 @@ export function initTelemetry(): void {
 
     const loggerProvider = new LoggerProvider({
       resource,
-    });
-    // 使用 addLogRecordProcessor 方法添加处理器
-    loggerProvider.addLogRecordProcessor(new SimpleLogRecordProcessor(logExporter));
+      processors: [new SimpleLogRecordProcessor(logExporter)],
+    } as any);
 
     // ==================== 3. 初始化 MeterProvider（指标） ====================
     const metricExporter = new OTLPMetricExporter({
@@ -188,7 +218,7 @@ export function initTelemetry(): void {
         new DocumentLoadInstrumentation(),
         new FetchInstrumentation({
           ignoreUrls: [/localhost:4318/, /127.0.0.1:4318/],
-          propagateTraceHeaderCorsUrls: [new RegExp(endpoint.replace(/\/$/, ''))],
+          propagateTraceHeaderCorsUrls: [new RegExp(escapeRegex(endpoint.replace(/\/$/, '')))],
         }),
         new XMLHttpRequestInstrumentation({
           ignoreUrls: [/localhost:4318/, /127.0.0.1:4318/],
@@ -200,6 +230,9 @@ export function initTelemetry(): void {
     (window as any).__OTEL_TRACER_PROVIDER__ = tracerProvider;
     (window as any).__OTEL_LOGGER_PROVIDER__ = loggerProvider;
     (window as any).__OTEL_METER_PROVIDER__ = meterProvider;
+
+    // 初始化 LoggerService 的 OTel Logger 实例（修复 Bug 3）
+    logger.init(loggerProvider.getLogger('assets-platform'));
 
     console.info('[OTel] OpenTelemetry 初始化完成');
   } catch (error) {
