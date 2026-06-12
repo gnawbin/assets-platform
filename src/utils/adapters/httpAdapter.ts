@@ -78,6 +78,8 @@ const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     update_user: { method: 'PUT', path: '/api/users/{id}' },
     delete_user: { method: 'DELETE', path: '/api/users/{id}' },
     reset_password: { method: 'POST', path: '/api/users/{id}/reset-password' },
+    get_user_role_ids: { method: 'GET', path: '/api/users/{id}/roles' },
+    assign_user_roles: { method: 'POST', path: '/api/users/{id}/roles' },
 
     // ======================== 角色 ========================
     get_roles: { method: 'GET', path: '/api/roles' },

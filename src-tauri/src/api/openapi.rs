@@ -7,7 +7,7 @@ use utoipa::{Modify, OpenApi};
 
 use crate::api::category_routes::{CreateCategoryRequest, UpdateCategoryRequest};
 use crate::api::department_routes::{CreateDepartmentRequest, UpdateDepartmentRequest};
-use crate::api::role_routes::{CreateRoleRequest, UpdateRoleRequest};
+use crate::api::role_routes::{AssignUserRolesRequest, CreateRoleRequest, UpdateRoleRequest};
 use crate::api::user_routes::{CreateUserRequest, LoginRequest, LoginResponse, UpdateUserRequest};
 use crate::database::models::{AssetCategory, Department, Role};
 use crate::service::assets_service::{
@@ -51,6 +51,8 @@ use crate::service::user_service::UserResponse;
         crate::api::role_routes::get_roles,
         crate::api::role_routes::insert_role,
         crate::api::role_routes::delete_role,
+        crate::api::role_routes::get_user_role_ids,
+        crate::api::role_routes::assign_user_roles,
         // 菜单
         crate::api::role_routes::get_all_menus_tree,
         crate::api::role_routes::get_user_menus,
@@ -68,6 +70,7 @@ use crate::service::user_service::UserResponse;
             LoginResponse,
             CreateRoleRequest,
             UpdateRoleRequest,
+            AssignUserRolesRequest,
             HardwareAssetInput,
             HardwareAssetView,
             IntangibleAssetInput,

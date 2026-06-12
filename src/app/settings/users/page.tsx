@@ -17,6 +17,7 @@ import {
   Alert,
   Badge,
   PasswordInput,
+  Checkbox,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -25,6 +26,7 @@ import {
   IconUserPlus,
   IconKey,
   IconRefresh,
+  IconShield,
 } from '@tabler/icons-react';
 import { notifySuccess, notifyError } from '@/utils/notify';
 import { useApi } from '@/hooks/useApi';
@@ -37,6 +39,7 @@ import {
   type User,
 } from '@/services/userService';
 import { getDepartments, type Department } from '@/services/departmentService';
+import { getRoles, getUserRoleIds, assignUserRoles, type Role } from '@/services/permissionService';
 
 const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -92,6 +95,14 @@ const UsersPage: React.FC = () => {
   const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
+
+  // 分配角色弹窗
+  const [roleModalOpen, setRoleModalOpen] = useState(false);
+  const [roleModalUser, setRoleModalUser] = useState<User | null>(null);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [roleModalLoading, setRoleModalLoading] = useState(false);
+  const { execute: doAssignUserRoles, loading: assigningRoles } = useApi(assignUserRoles);
 
   // 当 fetchedUsers 变化时更新本地状态
   useEffect(() => {
@@ -282,6 +293,40 @@ const UsersPage: React.FC = () => {
     return <Badge color="red">禁用</Badge>;
   };
 
+  // 打开分配角色弹窗
+  const openAssignRoleModal = async (user: User) => {
+    setRoleModalUser(user);
+    setRoleModalOpen(true);
+    setRoleModalLoading(true);
+
+    try {
+      const roleList = await getRoles();
+      setRoles(roleList);
+      const userRoleIds = await getUserRoleIds(String(user.id));
+      setSelectedRoleIds(userRoleIds.map(String));
+    } catch (err) {
+      console.error('获取角色数据失败:', err);
+      notifyError('获取角色数据失败');
+    } finally {
+      setRoleModalLoading(false);
+    }
+  };
+
+  // 保存分配角色
+  const handleAssignRoles = async () => {
+    if (!roleModalUser) return;
+    try {
+      await doAssignUserRoles(String(roleModalUser.id), selectedRoleIds);
+      setRoleModalOpen(false);
+      setRoleModalUser(null);
+      setSelectedRoleIds([]);
+      notifySuccess('角色分配成功');
+    } catch (err) {
+      console.error('分配角色失败:', err);
+      notifyError('分配角色失败', typeof err === 'string' ? err : undefined);
+    }
+  };
+
   return (
     <Layout>
       <Stack gap="lg">
@@ -329,7 +374,7 @@ const UsersPage: React.FC = () => {
                   <Table.Th>邮箱</Table.Th>
                   <Table.Th>手机</Table.Th>
                   <Table.Th>状态</Table.Th>
-                  <Table.Th style={{ width: 280 }}>操作</Table.Th>
+                  <Table.Th style={{ width: 380 }}>操作</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -362,6 +407,15 @@ const UsersPage: React.FC = () => {
                       <Table.Td>{getStatusBadge(user.status)}</Table.Td>
                       <Table.Td>
                         <Group gap="xs">
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="violet"
+                            leftSection={<IconShield size={14} />}
+                            onClick={() => openAssignRoleModal(user)}
+                          >
+                            分配角色
+                          </Button>
                           <Button
                             size="xs"
                             variant="light"
@@ -625,6 +679,65 @@ const UsersPage: React.FC = () => {
             </Button>
             <Button color="red" onClick={handleDeleteUser} loading={deleting}>
               确认删除
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* 分配角色弹窗 */}
+      <Modal
+        opened={roleModalOpen}
+        onClose={() => setRoleModalOpen(false)}
+        title={`分配角色 - ${roleModalUser?.real_name || ''}`}
+        size="md"
+      >
+        <Stack gap="md">
+          {roleModalLoading ? (
+            <Group justify="center" py="xl">
+              <Loader />
+            </Group>
+          ) : (
+            <>
+              <Text size="sm" c="dimmed">
+                请选择要分配给该用户的角色：
+              </Text>
+              {roles.length === 0 ? (
+                <Text ta="center" c="dimmed" py="md">
+                  暂无可用角色
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {roles.map((role) => (
+                    <Checkbox
+                      key={role.id}
+                      label={role.role_name}
+                      description={role.description || ''}
+                      checked={selectedRoleIds.includes(role.id)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        if (e.currentTarget.checked) {
+                          setSelectedRoleIds([...selectedRoleIds, role.id]);
+                        } else {
+                          setSelectedRoleIds(
+                            selectedRoleIds.filter((id) => id !== role.id)
+                          );
+                        }
+                      }}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </>
+          )}
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setRoleModalOpen(false)}>
+              取消
+            </Button>
+            <Button
+              color="violet"
+              onClick={handleAssignRoles}
+              loading={assigningRoles}
+            >
+              保存
             </Button>
           </Group>
         </Stack>

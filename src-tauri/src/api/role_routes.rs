@@ -109,6 +109,68 @@ pub async fn delete_role(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>
     }
 }
 
+// ======================== 用户角色关联 ========================
+
+/// 分配用户角色请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AssignUserRolesRequest {
+    pub role_ids: Vec<i64>,
+}
+
+/// 获取用户已分配的角色 ID 列表
+#[utoipa::path(
+    get,
+    path = "/api/users/{id}/roles",
+    tag = "角色管理",
+    responses(
+        (status = 200, description = "获取成功", body = ApiResponse<Vec<i64>>),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_user_role_ids(
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Vec<i64>>>, ApiError> {
+    let user_id: i64 = id
+        .parse()
+        .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
+
+    match service::role_service::get_user_role_ids(user_id).await {
+        Ok(role_ids) => Ok(Json(ApiResponse::success(role_ids))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 为用户分配角色
+#[utoipa::path(
+    post,
+    path = "/api/users/{id}/roles",
+    tag = "角色管理",
+    request_body = AssignUserRolesRequest,
+    responses(
+        (status = 200, description = "分配成功"),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn assign_user_roles(
+    Path(id): Path<String>,
+    Json(req): Json<AssignUserRolesRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let user_id: i64 = id
+        .parse()
+        .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
+
+    match service::role_service::assign_user_roles(user_id, req.role_ids).await {
+        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
 // ======================== 菜单 ========================
 
 /// 获取所有菜单树（用于权限分配）
