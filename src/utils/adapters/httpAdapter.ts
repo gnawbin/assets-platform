@@ -84,6 +84,7 @@ const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     insert_role: { method: 'POST', path: '/api/roles' },
     delete_role: { method: 'DELETE', path: '/api/roles/{id}' },
     get_all_menus_tree: { method: 'GET', path: '/api/menus/tree' },
+    get_user_menus: { method: 'GET', path: '/api/menus/user' },
     get_role_menu_ids: { method: 'GET', path: '/api/roles/{id}/menus' },
     assign_role_menus: { method: 'POST', path: '/api/roles/{id}/menus' },
 };

@@ -29,10 +29,18 @@ let currentAdapterType: AdapterType | null = null;
 
 /**
  * 检测是否运行在 Tauri 环境中
+ *
+ * Tauri v2 不再暴露 window.__TAURI__ 全局对象，
+ * 改用 window.__TAURI_INTERNALS__ 作为运行环境标记。
+ * 也可使用 @tauri-apps/api/core 的 isTauri() 方法，
+ * 但为避免模块导入问题，这里直接检测 window 属性。
  */
 function isTauriEnvironment(): boolean {
     try {
-        return typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+        return typeof window !== 'undefined' && (
+            window.__TAURI_INTERNALS__ !== undefined ||
+            window.__TAURI__ !== undefined
+        );
     } catch {
         return false;
     }
@@ -42,10 +50,16 @@ function isTauriEnvironment(): boolean {
  * 获取默认适配器类型
  *
  * 优先级：
- * 1. 运行时已设置的适配器
- * 2. 环境变量 NEXT_PUBLIC_API_ADAPTER
- * 3. 自动检测 Tauri 环境
- * 4. 兜底使用 'tauri'
+ * 1. 环境变量 NEXT_PUBLIC_API_ADAPTER（最高优先级，强制指定）
+ * 2. 自动检测 Tauri 环境（桌面版用 tauri，浏览器用 http）
+ * 3. 兜底使用 'http'
+ *
+ * 只需设置一个环境变量即可控制：
+ * ```bash
+ * NEXT_PUBLIC_API_ADAPTER=http   # 强制使用 HTTP API
+ * NEXT_PUBLIC_API_ADAPTER=tauri  # 强制使用 Tauri invoke
+ * # 不设置则自动检测
+ * ```
  */
 function getDefaultAdapterType(): AdapterType {
     const envAdapter = process.env.NEXT_PUBLIC_API_ADAPTER as AdapterType | undefined;
@@ -59,8 +73,8 @@ function getDefaultAdapterType(): AdapterType {
         return 'tauri';
     }
 
-    // 兜底：默认使用 tauri（HTTP 后端服务尚未就绪时更安全）
-    return 'tauri';
+    // 兜底：浏览器环境默认使用 HTTP 适配器
+    return 'http';
 
 }
 

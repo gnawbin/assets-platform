@@ -4,18 +4,56 @@ mod database;
 mod service;
 mod utils;
 
-/// 加载 .env 环境变量文件
+/// 加载 .env TOML 配置文件，将值设置为环境变量
 fn load_env() {
-    // 尝试从当前工作目录加载 .env 文件
-    match dotenvy::dotenv() {
-        Ok(_) => tracing::info!("已加载 .env 环境变量文件"),
-        Err(e) => {
-            // 如果 .env 文件不存在，尝试从 src-tauri 目录加载
-            if let Err(e2) = dotenvy::from_filename("src-tauri/.env") {
-                tracing::warn!("未找到 .env 文件，将使用默认环境变量: {} / {}", e, e2);
-            } else {
-                tracing::info!("已从 src-tauri/.env 加载环境变量");
+    // 尝试多个路径查找 .env.toml 文件
+    // 1. 当前工作目录（可能是项目根目录或 src-tauri 目录）
+    // 2. src-tauri/.env.toml（相对于当前工作目录）
+    // 3. 项目根目录（通过 CARGO_MANIFEST_DIR 定位）
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_dir = manifest_dir.parent().unwrap_or(manifest_dir);
+    let root_env = root_dir.join(".env.toml");
+
+    let content = std::fs::read_to_string(".env.toml")
+        .or_else(|_| std::fs::read_to_string("src-tauri/.env.toml"))
+        .or_else(|_| std::fs::read_to_string(&root_env));
+
+    match content {
+        Ok(text) => match text.parse::<toml::Table>() {
+            Ok(table) => {
+                for (section, values) in &table {
+                    if let Some(sub_table) = values.as_table() {
+                        for (key, value) in sub_table {
+                            let env_value = match value {
+                                toml::Value::String(s) => s.clone(),
+                                toml::Value::Integer(i) => i.to_string(),
+                                toml::Value::Float(f) => f.to_string(),
+                                toml::Value::Boolean(b) => b.to_string(),
+                                _ => continue,
+                            };
+                            // 生成标准环境变量名：SECTION_KEY
+                            let env_key =
+                                format!("{}_{}", section.to_uppercase(), key.to_uppercase());
+                            std::env::set_var(&env_key, &env_value);
+
+                            // 兼容旧版环境变量名（postgres 段映射为 PG_ 前缀）
+                            if section == "postgres" {
+                                let legacy_key = format!("PG_{}", key.to_uppercase());
+                                std::env::set_var(&legacy_key, &env_value);
+                            } else if section == "auth" && key == "jwt_secret" {
+                                std::env::set_var("JWT_SECRET", &env_value);
+                            }
+                        }
+                    }
+                }
+                tracing::info!("已加载 .env TOML 配置文件");
             }
+            Err(e) => {
+                tracing::warn!(".env 文件解析失败: {}", e);
+            }
+        },
+        Err(e) => {
+            tracing::warn!("未找到 .env 文件，将使用默认环境变量: {}", e);
         }
     }
 }
