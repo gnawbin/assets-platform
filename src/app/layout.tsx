@@ -25,7 +25,7 @@ export default function RootLayout({
   }, []);
 
   // 自动检测运行环境并设置适配器
-  // 优先级：环境变量 > 自动检测 > 默认值
+  // 优先级：环境变量 NEXT_PUBLIC_API_ADAPTER > 自动检测 > 默认 HTTP
   useEffect(() => {
     const envAdapter = process.env.NEXT_PUBLIC_API_ADAPTER;
     if (envAdapter === 'tauri' || envAdapter === 'http') {
@@ -35,12 +35,16 @@ export default function RootLayout({
     }
 
     // 未设置环境变量时，自动检测
-    const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+    // Tauri v2 使用 __TAURI_INTERNALS__ 作为运行环境标记，兼容 v1 的 __TAURI__
+    const isTauri = typeof window !== 'undefined' && (
+      (window as Window).__TAURI_INTERNALS__ !== undefined ||
+      (window as Window).__TAURI__ !== undefined
+    );
     if (isTauri) {
       logger.info('[Adapter] 检测到 Tauri 环境，使用 Tauri 适配器');
       setAdapter('tauri');
     } else {
-      logger.info('[Adapter] 未检测到 Tauri 环境，默认使用 HTTP 适配器');
+      logger.info('[Adapter] 未检测到 Tauri 环境，使用 HTTP 适配器');
       setAdapter('http');
     }
   }, []);
@@ -52,7 +56,9 @@ export default function RootLayout({
   }, [pathname]);
 
   useEffect(() => {
-    init();
+    init().catch((err) => {
+      logger.error('初始化认证状态失败', err);
+    });
   }, [init]);
 
   useEffect(() => {

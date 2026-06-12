@@ -313,7 +313,7 @@ pub struct UserRole {
     #[serde(serialize_with = "opt_i64_to_string")]
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该关联的管理员
     pub updated_at: Option<DateTime<Utc>>, //更新时间，记录该关联的最后修改时间
-    pub deleted: Option<bool>,             //删除标志
+    pub deleted: Option<i16>,              //删除标志
 }
 
 /// 角色菜单关联表

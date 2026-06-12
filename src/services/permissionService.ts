@@ -59,3 +59,14 @@ export function getRoleMenuIds(roleId: string) {
 export function assignRoleMenus(roleId: string, menuIds: string[]) {
     return api.post<string>('assign_role_menus', { roleId, menuIds });
 }
+
+
+/** 获取用户已分配的角色 ID 列表 */
+export function getUserRoleIds(userId: string) {
+    return api.get<number[]>('get_user_role_ids', { id: userId });
+}
+
+/** 为用户分配角色 */
+export function assignUserRoles(userId: string, roleIds: string[]) {
+    return api.post<string>('assign_user_roles', { id: userId, roleIds });
+}

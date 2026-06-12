@@ -73,17 +73,21 @@ const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     delete_department: { method: 'DELETE', path: '/api/departments/{id}' },
 
     // ======================== 用户 ========================
+    get_current_user: { method: 'GET', path: '/api/users/me' },
     get_users: { method: 'GET', path: '/api/users' },
     insert_user: { method: 'POST', path: '/api/users' },
     update_user: { method: 'PUT', path: '/api/users/{id}' },
     delete_user: { method: 'DELETE', path: '/api/users/{id}' },
     reset_password: { method: 'POST', path: '/api/users/{id}/reset-password' },
+    get_user_role_ids: { method: 'GET', path: '/api/users/{id}/roles' },
+    assign_user_roles: { method: 'POST', path: '/api/users/{id}/roles' },
 
     // ======================== 角色 ========================
     get_roles: { method: 'GET', path: '/api/roles' },
     insert_role: { method: 'POST', path: '/api/roles' },
     delete_role: { method: 'DELETE', path: '/api/roles/{id}' },
     get_all_menus_tree: { method: 'GET', path: '/api/menus/tree' },
+    get_user_menus: { method: 'GET', path: '/api/menus/user' },
     get_role_menu_ids: { method: 'GET', path: '/api/roles/{id}/menus' },
     assign_role_menus: { method: 'POST', path: '/api/roles/{id}/menus' },
 };

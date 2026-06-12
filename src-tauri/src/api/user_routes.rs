@@ -2,13 +2,14 @@
 //!
 //! 提供用户的 RESTful 接口。
 
-use axum::{extract::Path, Json};
+use axum::{extract::Path, Extension, Json};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::service;
 use crate::service::user_service::UserResponse;
 
+use super::auth;
 use super::response::{ApiError, ApiResponse};
 
 /// 创建用户请求
@@ -198,6 +199,28 @@ pub async fn delete_user(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>
 
     match service::user_service::delete_user(id).await {
         Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 获取当前登录用户信息
+#[utoipa::path(
+    get,
+    path = "/api/users/me",
+    tag = "用户管理",
+    responses(
+        (status = 200, description = "获取成功", body = ApiResponse<UserResponse>),
+        (status = 401, description = "认证失败", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_current_user(
+    Extension(claims): Extension<auth::Claims>,
+) -> Result<Json<ApiResponse<UserResponse>>, ApiError> {
+    match service::user_service::get_user_by_id(claims.sub).await {
+        Ok(user) => Ok(Json(ApiResponse::success(user))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }

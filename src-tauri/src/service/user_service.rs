@@ -323,6 +323,32 @@ pub async fn delete_user(id: i64) -> Result<(), String> {
     Ok(())
 }
 
+/// 根据用户ID获取用户信息
+pub async fn get_user_by_id(id: i64) -> Result<UserResponse, String> {
+    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+
+    let user = sqlx::query_as::<_, SysUser>(
+        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)"
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| {
+        error!("查询用户失败: id={}, error={}", id, e);
+        format!("查询用户失败: {}", e)
+    })?
+    .ok_or_else(|| {
+        warn!("用户不存在: id={}", id);
+        "用户不存在".to_string()
+    })?;
+
+    info!(
+        "获取用户信息成功: id={}, username={}",
+        user.id, user.username
+    );
+    Ok(user.into())
+}
+
 /// 重置密码
 pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
     let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;

@@ -229,6 +229,85 @@ fn build_menu_node(menu: &SysMenu, all_menus: &[SysMenu]) -> MantineTree {
     }
 }
 
+/// 获取用户已分配的角色 ID 列表
+pub async fn get_user_role_ids(user_id: i64) -> Result<Vec<i64>, String> {
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("查询用户角色关联: user_id={}", user_id);
+
+    let roles = sqlx::query_as::<_, database::models::UserRole>(
+        "SELECT id, user_id, role_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user_role WHERE user_id = $1 AND (deleted IS NULL OR deleted = 0)"
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        error!("查询用户角色失败: user_id={}, error={}", user_id, e);
+        format!("查询用户角色失败: {}", e)
+    })?;
+
+    let role_ids: Vec<i64> = roles.into_iter().map(|r| r.role_id).collect();
+    info!(
+        "查询用户角色成功: user_id={}, 角色数={}",
+        user_id,
+        role_ids.len()
+    );
+    Ok(role_ids)
+}
+
+/// 为用户分配角色（先删除旧关联，再插入新关联）
+pub async fn assign_user_roles(user_id: i64, role_ids: Vec<i64>) -> Result<(), String> {
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!(
+        "分配用户角色: user_id={}, 角色数={}",
+        user_id,
+        role_ids.len()
+    );
+
+    // 开启事务
+    let mut tx = pool.begin().await.map_err(|e| {
+        error!("开启事务失败: user_id={}, error={}", user_id, e);
+        format!("开启事务失败: {}", e)
+    })?;
+
+    // 1. 删除该用户所有旧的角色关联
+    sqlx::query("DELETE FROM sys_user_role WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            error!("删除用户旧角色关联失败: user_id={}, error={}", user_id, e);
+            format!("删除用户旧角色关联失败: {}", e)
+        })?;
+
+    // 2. 插入新的角色关联
+    for role_id in &role_ids {
+        sqlx::query(
+            "INSERT INTO sys_user_role (id, user_id, role_id, created_by, created_at) VALUES ($1, $2, $3, $4, NOW())"
+        )
+        .bind(next_id() as i64)
+        .bind(user_id)
+        .bind(role_id)
+        .bind(1)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            error!("插入用户角色关联失败: user_id={}, role_id={}, error={}", user_id, role_id, e);
+            format!("插入用户角色关联失败: {}", e)
+        })?;
+    }
+
+    // 提交事务
+    tx.commit().await.map_err(|e| {
+        error!("提交事务失败: user_id={}, error={}", user_id, e);
+        format!("提交事务失败: {}", e)
+    })?;
+
+    info!("分配用户角色成功: user_id={}", user_id);
+    Ok(())
+}
+
 /// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
 pub async fn get_user_menus() -> Result<Vec<SidebarMenuItem>, String> {
     info!("获取侧边栏菜单被调用");

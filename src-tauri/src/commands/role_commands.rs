@@ -62,3 +62,24 @@ pub async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
 pub async fn get_user_menus() -> Result<Vec<SidebarMenuItem>, String> {
     service::role_service::get_user_menus().await
 }
+
+/// 获取用户已分配的角色 ID 列表
+#[tauri::command]
+pub async fn get_user_role_ids(id: String) -> Result<Vec<i64>, String> {
+    let user_id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+    service::role_service::get_user_role_ids(user_id).await
+}
+
+/// 为用户分配角色
+#[tauri::command]
+pub async fn assign_user_roles(id: String, role_ids: Vec<String>) -> Result<(), String> {
+    let user_id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+    let role_ids: Vec<i64> = role_ids
+        .into_iter()
+        .map(|rid| {
+            rid.parse::<i64>()
+                .map_err(|e| format!("无效的角色ID: {}", e))
+        })
+        .collect::<Result<Vec<i64>, String>>()?;
+    service::role_service::assign_user_roles(user_id, role_ids).await
+}
