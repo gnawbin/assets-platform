@@ -1,7 +1,7 @@
 use crate::database;
 use crate::database::models::{MantineTree, Role, RoleMenu, SysMenu};
 use crate::utils::snowflake::next_id;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// 新增角色
 pub async fn insert_role(role: &Role) -> Result<Role, String> {
