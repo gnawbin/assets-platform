@@ -615,3 +615,12 @@ pub struct MantineTree {
     pub children: Option<Vec<MantineTree>>, // 子节点
     pub checked: Option<bool>,              // 可选：是否选中（权限分配时使用）
 }
+
+/// 侧边栏菜单项（用于前端动态渲染）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SidebarMenuItem {
+    pub label: String,                          // 菜单名称
+    pub path: Option<String>,                   // 路由路径
+    pub icon: Option<String>,                   // 图标名称
+    pub children: Option<Vec<SidebarMenuItem>>, // 子菜单
+}

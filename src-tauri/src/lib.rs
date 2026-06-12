@@ -68,6 +68,7 @@ pub fn run() {
             commands::role_commands::assign_role_menus,
             commands::role_commands::delete_role,
             commands::role_commands::get_all_menus_tree,
+            commands::role_commands::get_user_menus,
             // 用户管理
             commands::user_commands::login,
             commands::user_commands::get_users,

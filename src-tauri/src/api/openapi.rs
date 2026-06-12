@@ -51,6 +51,9 @@ use crate::service::user_service::UserResponse;
         crate::api::role_routes::get_roles,
         crate::api::role_routes::insert_role,
         crate::api::role_routes::delete_role,
+        // 菜单
+        crate::api::role_routes::get_all_menus_tree,
+        crate::api::role_routes::get_user_menus,
     ),
     components(
         schemas(
@@ -84,6 +87,7 @@ use crate::service::user_service::UserResponse;
         (name = "部门管理", description = "部门管理接口"),
         (name = "用户管理", description = "用户管理接口"),
         (name = "角色管理", description = "角色管理接口"),
+        (name = "菜单管理", description = "菜单管理接口"),
     ),
     modifiers(&SecurityAddon),
 )]

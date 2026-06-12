@@ -12,44 +12,59 @@ import {
   Collapse,
   Box,
   Paper,
+  Loader,
+  Center,
 } from '@mantine/core';
 import {
   IconDashboard,
+  IconBooks,
   IconDeviceDesktop,
   IconLicense,
   IconListCheck,
   IconChartBar,
   IconSettings,
   IconChevronDown,
-  IconBooks,
 } from '@tabler/icons-react';
+import { getUserMenus, type MenuItem } from '@/services/menuService';
 
-interface SubLink {
-  label: string;
-  path: string;
+// ======================== 图标映射 ========================
+
+/** 数据库图标名称 → React 组件映射 */
+const ICON_MAP: Record<string, React.ReactNode> = {
+  IconDashboard: <IconDashboard size={18} />,
+  IconBooks: <IconBooks size={18} />,
+  IconDeviceDesktop: <IconDeviceDesktop size={18} />,
+  IconLicense: <IconLicense size={18} />,
+  IconListCheck: <IconListCheck size={18} />,
+  IconChartBar: <IconChartBar size={18} />,
+  IconSettings: <IconSettings size={18} />,
+};
+
+/** 根据图标名称获取图标组件 */
+function getIcon(iconName?: string): React.ReactNode {
+  if (!iconName) return null;
+  return ICON_MAP[iconName] ?? <IconDeviceDesktop size={18} />;
 }
+
+// ======================== 导航项组件 ========================
 
 interface NavItemProps {
-  icon: React.ReactNode;
-  label: string;
-  path?: string;
-  initiallyOpened?: boolean;
-  links?: SubLink[];
+  item: MenuItem;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, links }) => {
+const NavItem: React.FC<NavItemProps> = ({ item }) => {
   const pathname = usePathname();
   const router = useRouter();
-  const hasLinks = Array.isArray(links) && links.length > 0;
+  const hasLinks = Array.isArray(item.children) && item.children.length > 0;
 
   // 判断当前路由是否匹配此菜单项或其子菜单
-  const isActive = path ? pathname === path : false;
+  const isActive = item.path ? pathname === item.path : false;
   const isChildActive = hasLinks
-    ? links!.some((link) => pathname === link.path)
+    ? item.children!.some((link) => pathname === link.path)
     : false;
 
   // 如果子菜单中有激活项，自动展开
-  const [opened, setOpened] = useState(initiallyOpened || isChildActive || false);
+  const [opened, setOpened] = useState(isChildActive || false);
 
   useEffect(() => {
     if (isChildActive) {
@@ -60,10 +75,12 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, l
   const handleClick = () => {
     if (hasLinks) {
       setOpened((o) => !o);
-    } else if (path) {
-      router.push(path);
+    } else if (item.path) {
+      router.push(item.path);
     }
   };
+
+  const icon = getIcon(item.icon);
 
   const ItemContent = (
     <Group justify="space-between" gap={0}>
@@ -80,7 +97,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, l
           fw={500}
           c={isActive || isChildActive ? 'blue' : 'dark'}
         >
-          {label}
+          {item.label}
         </Text>
       </Group>
       {hasLinks && (
@@ -111,14 +128,14 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, l
           {ItemContent}
         </UnstyledButton>
         <Collapse expanded={opened}>
-          {links.map((linkItem) => {
-            const isLinkActive = pathname === linkItem.path;
+          {item.children!.map((child) => {
+            const isLinkActive = pathname === child.path;
             return (
               <NavLink
-                key={linkItem.label}
-                label={linkItem.label}
+                key={child.label}
+                label={child.label}
                 active={isLinkActive}
-                onClick={() => router.push(linkItem.path)}
+                onClick={() => child.path && router.push(child.path)}
                 style={{
                   paddingLeft: 50,
                   borderRadius: 8,
@@ -145,7 +162,7 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, l
       }
       label={
         <Text fw={500} c={isActive ? 'blue' : 'dark'}>
-          {label}
+          {item.label}
         </Text>
       }
       active={isActive}
@@ -159,76 +176,70 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, path, initiallyOpened, l
   );
 };
 
+// ======================== 侧边栏组件 ========================
+
 const Sidebar: React.FC = () => {
-  const navItems: NavItemProps[] = [
-    {
-      icon: <IconDashboard size={18} />,
-      label: '仪表盘',
-      path: '/',
-    },
-    {
-      icon: <IconBooks size={18} />,
-      label: '资产台账',
-      links: [
-        { label: '资产分类', path: '/categories' },
-        { label: '固定资产', path: '/hardware' },
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-        { label: '无形资产', path: '/software' },
+  useEffect(() => {
+    let mounted = true;
 
-      ],
-    },
-    {
-      icon: <IconListCheck size={18} />,
-      label: '流程管理',
-      links: [
-        { label: '领用审批', path: '/process/approval' },
-        { label: '归还确认', path: '/process/return' },
-        { label: '调拨流程', path: '/process/transfer' },
-        { label: '维修流程', path: '/process/maintenance' },
-        { label: '报废流程', path: '/process/scrap' },
-        { label: '所有流程', path: '/process/all' },
-      ],
-    },
-    {
-      icon: <IconChartBar size={18} />,
-      label: '统计分析',
-      links: [
-        { label: '资产统计', path: '/statistics/assets' },
-        { label: '部门分布', path: '/statistics/department' },
-        { label: '状态分析', path: '/statistics/status' },
-        { label: '维保统计', path: '/statistics/maintenance' },
-        { label: '授权统计', path: '/statistics/license' },
-        { label: '报表导出', path: '/statistics/export' },
-      ],
-    },
-    {
-      icon: <IconSettings size={18} />,
-      label: '系统配置',
-      links: [
-        { label: '权限管理', path: '/settings/permissions' },
+    async function fetchMenus() {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await getUserMenus();
+        if (mounted) {
+          setMenuItems(data);
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(err instanceof Error ? err.message : '加载菜单失败');
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
 
-        { label: '部门管理', path: '/settings/departments' },
-        { label: '用户管理', path: '/settings/users' },
-        { label: '流程设计', path: '/settings/process-design' },
-        { label: '系统日志', path: '/settings/logs' },
-      ],
-    },
-  ];
+    fetchMenus();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <Paper withBorder h="100%" w={280} style={{ overflow: 'hidden' }}>
       <ScrollArea h="100%">
         <Box p="md">
           <Box py="md">
-            {navItems.map((item, index) => (
-              <NavItem key={index} {...item} />
-            ))}
+            {loading ? (
+              <Center py="xl">
+                <Loader size="sm" />
+              </Center>
+            ) : error ? (
+              <Text c="red" size="sm" ta="center" py="xl">
+                {error}
+              </Text>
+            ) : menuItems.length === 0 ? (
+              <Text c="dimmed" size="sm" ta="center" py="xl">
+                暂无菜单
+              </Text>
+            ) : (
+              menuItems.map((item, index) => (
+                <NavItem key={item.label + index} item={item} />
+              ))
+            )}
           </Box>
         </Box>
 
         <Box
           p="md"
-          style={{ borderTop: '1px solid #e9ecef', marginTop: 'auto' }}
+          style={{ borderTop: '1px solid var(--mantine-color-gray-3)', marginTop: 'auto' }}
         >
           <Text size="xs" c="dimmed" mb={5}>
             IT设备资产管理系统

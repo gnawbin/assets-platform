@@ -1,7 +1,7 @@
 use crate::database;
-use crate::database::models::{MantineTree, Role, RoleMenu, SysMenu};
+use crate::database::models::{MantineTree, Role, RoleMenu, SidebarMenuItem, SysMenu};
 use crate::utils::snowflake::next_id;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// 新增角色
 pub async fn insert_role(role: &Role) -> Result<Role, String> {
@@ -226,5 +226,56 @@ fn build_menu_node(menu: &SysMenu, all_menus: &[SysMenu]) -> MantineTree {
             Some(children)
         },
         checked: Some(true),
+    }
+}
+
+/// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
+pub async fn get_user_menus() -> Result<Vec<SidebarMenuItem>, String> {
+    info!("获取侧边栏菜单被调用");
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let all_menus = sqlx::query_as::<_, SysMenu>(
+        "SELECT id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, created_by, created_at, updated_by, updated_at, deleted FROM sys_menu WHERE deleted = 0 AND menu_type IN (1, 2) AND visible = true ORDER BY order_num ASC"
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        error!("查询侧边栏菜单失败: {}", e);
+        format!("查询侧边栏菜单失败: {}", e)
+    })?;
+
+    info!("查询到 {} 条侧边栏菜单记录", all_menus.len());
+
+    // 构建树形结构
+    let root_menus: Vec<&SysMenu> = all_menus
+        .iter()
+        .filter(|m| m.parent_id.is_none() || m.parent_id == Some(0))
+        .collect();
+    info!("顶级侧边栏菜单 {} 条", root_menus.len());
+
+    let result = root_menus
+        .iter()
+        .map(|root| build_sidebar_node(root, &all_menus))
+        .collect::<Vec<_>>();
+    info!("侧边栏菜单树构建完成，返回 {} 个根节点", result.len());
+
+    Ok(result)
+}
+
+fn build_sidebar_node(menu: &SysMenu, all_menus: &[SysMenu]) -> SidebarMenuItem {
+    let children: Vec<SidebarMenuItem> = all_menus
+        .iter()
+        .filter(|m| m.parent_id == Some(menu.id))
+        .map(|child| build_sidebar_node(child, all_menus))
+        .collect();
+
+    SidebarMenuItem {
+        label: menu.menu_name.clone(),
+        path: menu.path.clone(),
+        icon: menu.icon.clone(),
+        children: if children.is_empty() {
+            None
+        } else {
+            Some(children)
+        },
     }
 }

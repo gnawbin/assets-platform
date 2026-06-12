@@ -6,7 +6,7 @@ use axum::{extract::Path, Json};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
-use crate::database::models::Role;
+use crate::database::models::{MantineTree, Role, SidebarMenuItem};
 use crate::service;
 use crate::utils::snowflake::next_id;
 
@@ -105,6 +105,48 @@ pub async fn delete_role(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>
 
     match service::role_service::delete_role(id).await {
         Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+// ======================== 菜单 ========================
+
+/// 获取所有菜单树（用于权限分配）
+#[utoipa::path(
+    get,
+    path = "/api/menus/tree",
+    tag = "菜单管理",
+    responses(
+        (status = 200, description = "获取成功"),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_all_menus_tree() -> Result<Json<ApiResponse<Vec<MantineTree>>>, ApiError> {
+    match service::role_service::get_all_menus_tree().await {
+        Ok(menus) => Ok(Json(ApiResponse::success(menus))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
+#[utoipa::path(
+    get,
+    path = "/api/menus/user",
+    tag = "菜单管理",
+    responses(
+        (status = 200, description = "获取成功"),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_user_menus() -> Result<Json<ApiResponse<Vec<SidebarMenuItem>>>, ApiError> {
+    match service::role_service::get_user_menus().await {
+        Ok(menus) => Ok(Json(ApiResponse::success(menus))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
