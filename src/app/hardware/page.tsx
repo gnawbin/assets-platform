@@ -22,7 +22,6 @@ import {
   Divider,
   Grid,
   Paper,
-  Switch,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -57,15 +56,25 @@ const STATUS_MAP: Record<number, { label: string; color: string }> = {
 const HardwarePage: React.FC = () => {
   const [assets, setAssets] = useState<HardwareAssetView[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedAssets,
+    loading,
+    error,
+    execute: fetchAssets,
+  } = useApi(getHardwareAssets);
+
+  // 使用 useApi 管理增删改操作
+  const { execute: doInsert, loading: saving } = useApi(insertHardwareAsset);
+  const { execute: doUpdate } = useApi(updateHardwareAsset);
+  const { execute: doDelete, loading: deleting } = useApi(deleteHardwareAsset);
 
   // 表单弹窗
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
 
   // 表单字段
   const [formCategoryId, setFormCategoryId] = useState<number>(0);
@@ -93,30 +102,22 @@ const HardwarePage: React.FC = () => {
   // 删除确认
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<HardwareAssetView | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // 详情弹窗
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailAsset, setDetailAsset] = useState<HardwareAssetView | null>(null);
 
+  // 当 fetchedAssets 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedAssets) {
+      setAssets(fetchedAssets);
+    }
+  }, [fetchedAssets]);
+
   useEffect(() => {
     fetchAssets();
     fetchCategories();
   }, []);
-
-  const fetchAssets = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getHardwareAssets();
-      setAssets(data);
-    } catch (err) {
-      console.error('获取固定资产列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取固定资产列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchCategories = async () => {
     try {
@@ -205,6 +206,33 @@ const HardwarePage: React.FC = () => {
     setFormFaultDesc('');
   };
 
+  // 构建表单输入对象
+  const buildInput = (): HardwareAssetInput => ({
+    category_id: formCategoryId,
+    asset_name: formAssetName.trim(),
+    manufacturer: formManufacturer.trim() || null,
+    model: formModel.trim() || null,
+    department_id: null,
+    user_id: null,
+    status: parseInt(formStatus),
+    purchase_date: formPurchaseDate || null,
+    purchase_price: formPurchasePrice || null,
+    quantity: formQuantity,
+    used_quantity: formUsedQuantity,
+    expire_date: formExpireDate || null,
+    description: formDescription.trim() || null,
+    sn: formSn.trim() || null,
+    mac_address: formMacAddress.trim() || null,
+    location: formLocation.trim() || null,
+    hardware_config: formHardwareConfig.trim() || null,
+    use_user_id: null,
+    use_start_date: formUseStartDate || null,
+    maintenance_vendor: formMaintenanceVendor.trim() || null,
+    maintenance_type: formMaintenanceType.trim() || null,
+    maintenance_expire_date: formMaintenanceExpireDate || null,
+    fault_desc: formFaultDesc.trim() || null,
+  });
+
   // 保存
   const handleSave = async () => {
     if (!formAssetName.trim()) {
@@ -216,39 +244,14 @@ const HardwarePage: React.FC = () => {
       return;
     }
 
-    setSaving(true);
     try {
-      const input: HardwareAssetInput = {
-        category_id: formCategoryId,
-        asset_name: formAssetName.trim(),
-        manufacturer: formManufacturer.trim() || null,
-        model: formModel.trim() || null,
-        department_id: null,
-        user_id: null,
-        status: parseInt(formStatus),
-        purchase_date: formPurchaseDate || null,
-        purchase_price: formPurchasePrice || null,
-        quantity: formQuantity,
-        used_quantity: formUsedQuantity,
-        expire_date: formExpireDate || null,
-        description: formDescription.trim() || null,
-        sn: formSn.trim() || null,
-        mac_address: formMacAddress.trim() || null,
-        location: formLocation.trim() || null,
-        hardware_config: formHardwareConfig.trim() || null,
-        use_user_id: null,
-        use_start_date: formUseStartDate || null,
-        maintenance_vendor: formMaintenanceVendor.trim() || null,
-        maintenance_type: formMaintenanceType.trim() || null,
-        maintenance_expire_date: formMaintenanceExpireDate || null,
-        fault_desc: formFaultDesc.trim() || null,
-      };
+      const input = buildInput();
 
       if (formMode === 'add') {
-        await insertHardwareAsset(input);
+        await doInsert({ input });
         notifySuccess('固定资产添加成功');
       } else if (editingId) {
-        await updateHardwareAsset(editingId, input);
+        await doUpdate({ id: editingId, input });
         notifySuccess('固定资产更新成功');
       }
 
@@ -257,8 +260,6 @@ const HardwarePage: React.FC = () => {
     } catch (err) {
       console.error('保存固定资产失败:', err);
       notifyError('保存固定资产失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -271,9 +272,8 @@ const HardwarePage: React.FC = () => {
   // 确认删除
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    setDeleting(true);
     try {
-      await deleteHardwareAsset(deleteTarget.id);
+      await doDelete(deleteTarget.id);
       setDeleteModalOpen(false);
       setDeleteTarget(null);
       notifySuccess('固定资产删除成功');
@@ -281,8 +281,6 @@ const HardwarePage: React.FC = () => {
     } catch (err) {
       console.error('删除固定资产失败:', err);
       notifyError('删除固定资产失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setDeleting(false);
     }
   };
 

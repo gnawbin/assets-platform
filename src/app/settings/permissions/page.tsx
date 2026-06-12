@@ -32,8 +32,14 @@ import {
 const PermissionsPage: React.FC = () => {
   console.log('PermissionsPage RENDERED');
   const [roles, setRoles] = useState<Role[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedRoles,
+    loading,
+    error,
+    execute: fetchRoles,
+  } = useApi(getRoles);
 
   // 分配权限弹窗
   const [permModalOpen, setPermModalOpen] = useState(false);
@@ -42,37 +48,32 @@ const PermissionsPage: React.FC = () => {
   const [menuTreeLoading, setMenuTreeLoading] = useState(false);
   const [menuTreeError, setMenuTreeError] = useState<string | null>(null);
   const [checkedMenuIds, setCheckedMenuIds] = useState<Set<string>>(new Set());
-  const [savingPerms, setSavingPerms] = useState(false);
+
+  // 使用 useApi 管理操作
+  const { execute: doAssignRoleMenus, loading: savingPerms } = useApi(assignRoleMenus);
+  const { execute: doDeleteRole, loading: deleting } = useApi(deleteRole);
+  const { execute: doInsertRole, loading: adding } = useApi(insertRole);
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTargetRole, setDeleteTargetRole] = useState<Role | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // 新增角色弹窗
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newRoleKey, setNewRoleKey] = useState('');
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDesc, setNewRoleDesc] = useState('');
-  const [adding, setAdding] = useState(false);
+
+  // 当 fetchedRoles 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedRoles) {
+      setRoles(fetchedRoles);
+    }
+  }, [fetchedRoles]);
 
   useEffect(() => {
     fetchRoles();
   }, []);
-
-  const fetchRoles = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getRoles();
-      setRoles(data);
-    } catch (err) {
-      console.error('获取角色列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取角色列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // 打开分配权限弹窗
   const openAssignPermModal = async (role: Role) => {
@@ -105,17 +106,14 @@ const PermissionsPage: React.FC = () => {
   // 保存权限分配
   const handleSavePerms = async () => {
     if (!selectedRole) return;
-    setSavingPerms(true);
     try {
       const menuIds = Array.from(checkedMenuIds);
-      await assignRoleMenus(String(selectedRole.id), menuIds);
+      await doAssignRoleMenus(String(selectedRole.id), menuIds);
       setPermModalOpen(false);
       notifySuccess('权限分配成功');
     } catch (err) {
       console.error('分配权限失败:', err);
       notifyError('分配权限失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setSavingPerms(false);
     }
   };
 
@@ -128,9 +126,8 @@ const PermissionsPage: React.FC = () => {
   // 确认删除角色
   const handleDeleteRole = async () => {
     if (!deleteTargetRole) return;
-    setDeleting(true);
     try {
-      await deleteRole(String(deleteTargetRole.id));
+      await doDeleteRole(String(deleteTargetRole.id));
       setDeleteModalOpen(false);
       setDeleteTargetRole(null);
       notifySuccess('角色删除成功');
@@ -138,8 +135,6 @@ const PermissionsPage: React.FC = () => {
     } catch (err) {
       console.error('删除角色失败:', err);
       notifyError('删除角色失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -149,9 +144,8 @@ const PermissionsPage: React.FC = () => {
       notifyError('验证失败', '请输入角色标识和角色名称');
       return;
     }
-    setAdding(true);
     try {
-      await insertRole({
+      await doInsertRole({
         id: 0,
         role_key: newRoleKey.trim(),
         role_name: newRoleName.trim(),
@@ -171,8 +165,6 @@ const PermissionsPage: React.FC = () => {
     } catch (err) {
       console.error('新增角色失败:', err);
       notifyError('新增角色失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setAdding(false);
     }
   };
 

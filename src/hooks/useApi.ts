@@ -6,22 +6,24 @@
  *
  * 使用方式：
  * ```tsx
- * const { data, loading, error, execute } = useApi<Category[]>();
+ * // 方式一：直接传入 Service 函数（推荐）
+ * const { data, loading, error, execute } = useApi(getCategories);
  *
- * useEffect(() => {
- *   execute('get_categories');
- * }, []);
+ * useEffect(() => { execute(); }, []);
  *
  * if (loading) return <Loader />;
  * if (error) return <Alert color="red">{error}</Alert>;
  * return <div>{data?.map(...)}</div>;
+ *
+ * // 方式二：带参数
+ * const { execute } = useApi(deleteCategory);
+ * await execute(categoryId);
  * ```
  */
 
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
-import { api, type ApiConfig } from '@/utils/api';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 // ======================== 类型定义 ========================
 
@@ -36,13 +38,9 @@ export interface UseApiState<T> {
 }
 
 /** useApi 返回值 */
-export interface UseApiReturn<T> extends UseApiState<T> {
+export interface UseApiReturn<T, P extends unknown[]> extends UseApiState<T> {
     /** 执行 API 调用 */
-    execute: (
-        command: string,
-        args?: Record<string, unknown>,
-        config?: ApiConfig,
-    ) => Promise<T | null>;
+    execute: (...args: P) => Promise<T | null>;
     /** 重置状态 */
     reset: () => void;
     /** 手动设置数据 */
@@ -54,12 +52,12 @@ export interface UseApiReturn<T> extends UseApiState<T> {
 /**
  * useApi - 统一 API 调用 Hook
  *
- * @param defaultConfig 默认 API 配置
- * @returns UseApiReturn<T>
+ * @param apiFn Service 层的 API 函数
+ * @returns UseApiReturn<T, P>
  */
-export function useApi<T = unknown>(
-    defaultConfig?: ApiConfig,
-): UseApiReturn<T> {
+export function useApi<T, P extends unknown[] = []>(
+    apiFn?: (...args: P) => Promise<T>,
+): UseApiReturn<T, P> {
     const [state, setState] = useState<UseApiState<T>>({
         data: null,
         loading: false,
@@ -68,20 +66,30 @@ export function useApi<T = unknown>(
 
     // 使用 ref 防止组件卸载后继续更新状态
     const mountedRef = useRef(true);
+    const apiFnRef = useRef(apiFn);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        apiFnRef.current = apiFn;
+    }, [apiFn]);
 
     const execute = useCallback(
-        async (
-            command: string,
-            args?: Record<string, unknown>,
-            config?: ApiConfig,
-        ): Promise<T | null> => {
+        async (...args: P): Promise<T | null> => {
+            if (!apiFnRef.current) {
+                console.warn('[useApi] 未提供 API 函数');
+                return null;
+            }
+
             setState((prev) => ({ ...prev, loading: true, error: null }));
 
             try {
-                const result = await api.get<T>(command, args, {
-                    ...defaultConfig,
-                    ...config,
-                });
+                const result = await apiFnRef.current(...args);
 
                 if (mountedRef.current) {
                     setState({ data: result, loading: false, error: null });
@@ -105,7 +113,7 @@ export function useApi<T = unknown>(
                 return null;
             }
         },
-        [defaultConfig],
+        [],
     );
 
     const reset = useCallback(() => {

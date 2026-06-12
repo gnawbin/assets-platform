@@ -13,7 +13,6 @@ import {
   TextInput,
   Select,
   Switch,
-  NumberInput,
   Loader,
   Alert,
   Badge,
@@ -42,12 +41,23 @@ import { getDepartments, type Department } from '@/services/departmentService';
 const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedUsers,
+    loading,
+    error,
+    execute: fetchUsers,
+  } = useApi(getUsers);
+
+  // 使用 useApi 管理增删改操作
+  const { execute: doInsertUser, loading: adding } = useApi(insertUser);
+  const { execute: doUpdateUser, loading: editing } = useApi(updateUser);
+  const { execute: doDeleteUser, loading: deleting } = useApi(deleteUser);
+  const { execute: doResetPassword, loading: resetting } = useApi(resetPassword);
 
   // 新增用户弹窗
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [newUser, setNewUser] = useState({
     username: '',
     password: '',
@@ -63,7 +73,6 @@ const UsersPage: React.FC = () => {
   // 编辑用户弹窗
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     username: '',
     real_name: '',
@@ -78,32 +87,23 @@ const UsersPage: React.FC = () => {
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // 重置密码弹窗
   const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
-  const [resetting, setResetting] = useState(false);
+
+  // 当 fetchedUsers 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedUsers) {
+      setUsers(fetchedUsers);
+    }
+  }, [fetchedUsers]);
 
   useEffect(() => {
     fetchUsers();
     fetchDepartments();
   }, []);
-
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getUsers();
-      setUsers(data);
-    } catch (err) {
-      console.error('获取用户列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取用户列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchDepartments = async () => {
     try {
@@ -135,9 +135,8 @@ const UsersPage: React.FC = () => {
       return;
     }
 
-    setAdding(true);
     try {
-      await insertUser({
+      await doInsertUser({
         username: newUser.username.trim(),
         password: newUser.password,
         realName: newUser.real_name.trim(),
@@ -168,8 +167,6 @@ const UsersPage: React.FC = () => {
     } catch (err) {
       console.error('新增用户失败:', err);
       notifyError('新增用户失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setAdding(false);
     }
   };
 
@@ -201,9 +198,8 @@ const UsersPage: React.FC = () => {
       return;
     }
 
-    setEditing(true);
     try {
-      await updateUser({
+      await doUpdateUser({
         id: editingUser.id,
         username: editForm.username.trim(),
         realName: editForm.real_name.trim(),
@@ -224,8 +220,6 @@ const UsersPage: React.FC = () => {
     } catch (err) {
       console.error('更新用户失败:', err);
       notifyError('更新用户失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setEditing(false);
     }
   };
 
@@ -238,9 +232,8 @@ const UsersPage: React.FC = () => {
   // 确认删除用户
   const handleDeleteUser = async () => {
     if (!deleteTargetUser) return;
-    setDeleting(true);
     try {
-      await deleteUser(deleteTargetUser.id);
+      await doDeleteUser(deleteTargetUser.id);
       setDeleteModalOpen(false);
       setDeleteTargetUser(null);
       notifySuccess('用户删除成功');
@@ -248,8 +241,6 @@ const UsersPage: React.FC = () => {
     } catch (err) {
       console.error('删除用户失败:', err);
       notifyError('删除用户失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -272,9 +263,8 @@ const UsersPage: React.FC = () => {
       return;
     }
 
-    setResetting(true);
     try {
-      await resetPassword(resetPwdUser.id, newPassword);
+      await doResetPassword(resetPwdUser.id, newPassword);
       setResetPwdModalOpen(false);
       setResetPwdUser(null);
       setNewPassword('');
@@ -282,8 +272,6 @@ const UsersPage: React.FC = () => {
     } catch (err) {
       console.error('重置密码失败:', err);
       notifyError('重置密码失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setResetting(false);
     }
   };
 

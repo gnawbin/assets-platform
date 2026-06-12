@@ -53,38 +53,30 @@ const STATUS_MAP: Record<number, { label: string; color: string }> = {
   4: { label: '已领用', color: 'teal' },
 };
 
-// 无形资产类型映射
-const INTANGIBLE_TYPE_MAP: Record<string, string> = {
-  patent: '专利',
-  trademark: '商标',
-  copyright: '著作权',
-  license: '许可证',
-  software: '软件',
-  other: '其他',
-};
-
-// 授权状态映射
-const RIGHT_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  valid: { label: '有效', color: 'green' },
-  expiring: { label: '即将到期', color: 'orange' },
-  expired: { label: '已过期', color: 'red' },
-  pending: { label: '申请中', color: 'blue' },
-};
-
 const SoftwarePage: React.FC = () => {
   const [assets, setAssets] = useState<IntangibleAssetView[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedAssets,
+    loading,
+    error,
+    execute: fetchAssets,
+  } = useApi(getIntangibleAssets);
+
+  // 使用 useApi 管理增删改操作
+  const { execute: doInsert, loading: saving } = useApi(insertIntangibleAsset);
+  const { execute: doUpdate } = useApi(updateIntangibleAsset);
+  const { execute: doDelete, loading: deleting } = useApi(deleteIntangibleAsset);
 
   // 表单弹窗
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
 
-  // 表单字段 - 基础信息
+  // 表单字段
   const [formCategoryId, setFormCategoryId] = useState<number>(0);
   const [formAssetName, setFormAssetName] = useState('');
   const [formManufacturer, setFormManufacturer] = useState('');
@@ -96,24 +88,20 @@ const SoftwarePage: React.FC = () => {
   const [formUsedQuantity, setFormUsedQuantity] = useState<number>(0);
   const [formExpireDate, setFormExpireDate] = useState('');
   const [formDescription, setFormDescription] = useState('');
-
-  // 表单字段 - 无形资产扩展
-  const [formIntangibleType, setFormIntangibleType] = useState<string>('software');
+  // 无形资产扩展字段
+  const [formIntangibleType, setFormIntangibleType] = useState('');
   const [formRegisterNo, setFormRegisterNo] = useState('');
   const [formRegisterOwner, setFormRegisterOwner] = useState('');
   const [formRegisterDate, setFormRegisterDate] = useState('');
   const [formValidStartDate, setFormValidStartDate] = useState('');
   const [formValidEndDate, setFormValidEndDate] = useState('');
-  const [formRightStatus, setFormRightStatus] = useState<string>('valid');
+  const [formRightStatus, setFormRightStatus] = useState('');
   const [formLicenseKey, setFormLicenseKey] = useState('');
   const [formLicenseType, setFormLicenseType] = useState('');
   const [formAuthorizedScope, setFormAuthorizedScope] = useState('');
-  const [formAssignedUserIds, setFormAssignedUserIds] = useState('');
-  const [formBindType, setFormBindType] = useState('');
-  const [formBindInfo, setFormBindInfo] = useState('');
   const [formVersion, setFormVersion] = useState('');
   const [formDownloadLink, setFormDownloadLink] = useState('');
-  const [formAmortizationMethod, setFormAmortizationMethod] = useState<string>('straight_line');
+  const [formAmortizationMethod, setFormAmortizationMethod] = useState('');
   const [formUsefulLife, setFormUsefulLife] = useState<number>(0);
   const [formAmortizationAmount, setFormAmortizationAmount] = useState<number>(0);
   const [formResidualRate, setFormResidualRate] = useState<number>(0);
@@ -121,30 +109,22 @@ const SoftwarePage: React.FC = () => {
   // 删除确认
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<IntangibleAssetView | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // 详情弹窗
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailAsset, setDetailAsset] = useState<IntangibleAssetView | null>(null);
 
+  // 当 fetchedAssets 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedAssets) {
+      setAssets(fetchedAssets);
+    }
+  }, [fetchedAssets]);
+
   useEffect(() => {
     fetchAssets();
     fetchCategories();
   }, []);
-
-  const fetchAssets = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getIntangibleAssets();
-      setAssets(data);
-    } catch (err) {
-      console.error('获取无形资产列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取无形资产列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchCategories = async () => {
     try {
@@ -168,9 +148,9 @@ const SoftwarePage: React.FC = () => {
     return (
       a.asset_name.toLowerCase().includes(s) ||
       a.asset_no.toLowerCase().includes(s) ||
-      (a.register_no && a.register_no.toLowerCase().includes(s)) ||
       (a.manufacturer && a.manufacturer.toLowerCase().includes(s)) ||
-      (a.version && a.version.toLowerCase().includes(s))
+      (a.model && a.model.toLowerCase().includes(s)) ||
+      (a.register_no && a.register_no.toLowerCase().includes(s))
     );
   });
 
@@ -197,22 +177,19 @@ const SoftwarePage: React.FC = () => {
     setFormUsedQuantity(asset.used_quantity || 0);
     setFormExpireDate(asset.expire_date || '');
     setFormDescription(asset.description || '');
-    setFormIntangibleType(asset.intangible_type || 'intangible');
+    setFormIntangibleType(asset.intangible_type || '');
     setFormRegisterNo(asset.register_no || '');
     setFormRegisterOwner(asset.register_owner || '');
     setFormRegisterDate(asset.register_date || '');
     setFormValidStartDate(asset.valid_start_date || '');
     setFormValidEndDate(asset.valid_end_date || '');
-    setFormRightStatus(asset.right_status || 'valid');
+    setFormRightStatus(asset.right_status || '');
     setFormLicenseKey(asset.license_key || '');
     setFormLicenseType(asset.license_type || '');
     setFormAuthorizedScope(asset.authorized_scope || '');
-    setFormAssignedUserIds(asset.assigned_user_ids || '');
-    setFormBindType(asset.bind_type || '');
-    setFormBindInfo(asset.bind_info || '');
     setFormVersion(asset.version || '');
     setFormDownloadLink(asset.download_link || '');
-    setFormAmortizationMethod(asset.amortization_method || 'straight_line');
+    setFormAmortizationMethod(asset.amortization_method || '');
     setFormUsefulLife(asset.useful_life || 0);
     setFormAmortizationAmount(asset.amortization_amount || 0);
     setFormResidualRate(asset.residual_rate || 0);
@@ -232,26 +209,59 @@ const SoftwarePage: React.FC = () => {
     setFormUsedQuantity(0);
     setFormExpireDate('');
     setFormDescription('');
-    setFormIntangibleType('intangible');
+    setFormIntangibleType('');
     setFormRegisterNo('');
     setFormRegisterOwner('');
     setFormRegisterDate('');
     setFormValidStartDate('');
     setFormValidEndDate('');
-    setFormRightStatus('valid');
+    setFormRightStatus('');
     setFormLicenseKey('');
     setFormLicenseType('');
     setFormAuthorizedScope('');
-    setFormAssignedUserIds('');
-    setFormBindType('');
-    setFormBindInfo('');
     setFormVersion('');
     setFormDownloadLink('');
-    setFormAmortizationMethod('straight_line');
+    setFormAmortizationMethod('');
     setFormUsefulLife(0);
     setFormAmortizationAmount(0);
     setFormResidualRate(0);
   };
+
+  // 构建表单输入对象
+  const buildInput = (): IntangibleAssetInput => ({
+    category_id: formCategoryId,
+    asset_name: formAssetName.trim(),
+    manufacturer: formManufacturer.trim() || null,
+    model: formModel.trim() || null,
+    department_id: null,
+    user_id: null,
+    status: parseInt(formStatus),
+    purchase_date: formPurchaseDate || null,
+    purchase_price: formPurchasePrice || null,
+    quantity: formQuantity,
+    used_quantity: formUsedQuantity,
+    expire_date: formExpireDate || null,
+    description: formDescription.trim() || null,
+    intangible_type: formIntangibleType.trim() || null,
+    register_no: formRegisterNo.trim() || null,
+    register_owner: formRegisterOwner.trim() || null,
+    register_date: formRegisterDate || null,
+    valid_start_date: formValidStartDate || null,
+    valid_end_date: formValidEndDate || null,
+    right_status: formRightStatus.trim() || null,
+    license_key: formLicenseKey.trim() || null,
+    license_type: formLicenseType.trim() || null,
+    authorized_scope: formAuthorizedScope.trim() || null,
+    assigned_user_ids: null,
+    bind_type: null,
+    bind_info: null,
+    version: formVersion.trim() || null,
+    download_link: formDownloadLink.trim() || null,
+    amortization_method: formAmortizationMethod.trim() || null,
+    useful_life: formUsefulLife || null,
+    amortization_amount: formAmortizationAmount || null,
+    residual_rate: formResidualRate || null,
+  });
 
   // 保存
   const handleSave = async () => {
@@ -264,48 +274,14 @@ const SoftwarePage: React.FC = () => {
       return;
     }
 
-    setSaving(true);
     try {
-      const input: IntangibleAssetInput = {
-        category_id: formCategoryId,
-        asset_name: formAssetName.trim(),
-        manufacturer: formManufacturer.trim() || null,
-        model: formModel.trim() || null,
-        department_id: null,
-        user_id: null,
-        status: parseInt(formStatus),
-        purchase_date: formPurchaseDate || null,
-        purchase_price: formPurchasePrice || null,
-        quantity: formQuantity,
-        used_quantity: formUsedQuantity,
-        expire_date: formExpireDate || null,
-        description: formDescription.trim() || null,
-        intangible_type: formIntangibleType,
-        register_no: formRegisterNo.trim() || null,
-        register_owner: formRegisterOwner.trim() || null,
-        register_date: formRegisterDate || null,
-        valid_start_date: formValidStartDate || null,
-        valid_end_date: formValidEndDate || null,
-        right_status: formRightStatus,
-        license_key: formLicenseKey.trim() || null,
-        license_type: formLicenseType.trim() || null,
-        authorized_scope: formAuthorizedScope.trim() || null,
-        assigned_user_ids: formAssignedUserIds.trim() || null,
-        bind_type: formBindType.trim() || null,
-        bind_info: formBindInfo.trim() || null,
-        version: formVersion.trim() || null,
-        download_link: formDownloadLink.trim() || null,
-        amortization_method: formAmortizationMethod,
-        useful_life: formUsefulLife || null,
-        amortization_amount: formAmortizationAmount || null,
-        residual_rate: formResidualRate || null,
-      };
+      const input = buildInput();
 
       if (formMode === 'add') {
-        await insertIntangibleAsset(input);
+        await doInsert({ input });
         notifySuccess('无形资产添加成功');
       } else if (editingId) {
-        await updateIntangibleAsset(editingId, input);
+        await doUpdate({ id: editingId, input });
         notifySuccess('无形资产更新成功');
       }
 
@@ -314,8 +290,6 @@ const SoftwarePage: React.FC = () => {
     } catch (err) {
       console.error('保存无形资产失败:', err);
       notifyError('保存无形资产失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -328,9 +302,8 @@ const SoftwarePage: React.FC = () => {
   // 确认删除
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    setDeleting(true);
     try {
-      await deleteIntangibleAsset(deleteTarget.id);
+      await doDelete(deleteTarget.id);
       setDeleteModalOpen(false);
       setDeleteTarget(null);
       notifySuccess('无形资产删除成功');
@@ -338,8 +311,6 @@ const SoftwarePage: React.FC = () => {
     } catch (err) {
       console.error('删除无形资产失败:', err);
       notifyError('删除无形资产失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -358,7 +329,7 @@ const SoftwarePage: React.FC = () => {
             <IconLicense size={28} />
             <div>
               <Title order={2}>无形资产</Title>
-              <Text c="dimmed">管理软件、专利、商标等无形资产</Text>
+              <Text c="dimmed">管理所有软件、专利、商标等无形资产</Text>
             </div>
           </Group>
           <Group>
@@ -412,16 +383,16 @@ const SoftwarePage: React.FC = () => {
                   <Table.Th>资产名称</Table.Th>
                   <Table.Th>分类</Table.Th>
                   <Table.Th>类型</Table.Th>
-                  <Table.Th>版本</Table.Th>
-                  <Table.Th>授权状态</Table.Th>
-                  <Table.Th>有效期</Table.Th>
+                  <Table.Th>注册号</Table.Th>
+                  <Table.Th>状态</Table.Th>
+                  <Table.Th>数量</Table.Th>
                   <Table.Th>操作</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {filteredAssets.map((asset) => {
-                  const rightStatusInfo = RIGHT_STATUS_MAP[asset.right_status || ''] || {
-                    label: asset.right_status || '未知',
+                  const statusInfo = STATUS_MAP[asset.status] || {
+                    label: '未知',
                     color: 'gray',
                   };
                   return (
@@ -445,30 +416,24 @@ const SoftwarePage: React.FC = () => {
                       </Table.Td>
                       <Table.Td>
                         <Badge variant="light" color="violet" size="sm">
-                          {INTANGIBLE_TYPE_MAP[asset.intangible_type || ''] ||
-                            asset.intangible_type ||
-                            '-'}
+                          {asset.intangible_type || '-'}
                         </Badge>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{asset.version || '-'}</Text>
+                        <Text size="sm">{asset.register_no || '-'}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Badge
                           variant="light"
-                          color={rightStatusInfo.color}
+                          color={statusInfo.color}
                           size="sm"
                         >
-                          {rightStatusInfo.label}
+                          {statusInfo.label}
                         </Badge>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm">
-                          {asset.valid_end_date
-                            ? new Date(
-                              asset.valid_end_date
-                            ).toLocaleDateString('zh-CN')
-                            : '-'}
+                          {asset.used_quantity || 0}/{asset.quantity || 0}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -541,38 +506,23 @@ const SoftwarePage: React.FC = () => {
           <Grid>
             <Grid.Col span={6}>
               <TextInput
-                label="供应商/开发商"
-                placeholder="请输入供应商"
+                label="品牌/制造商"
+                placeholder="请输入品牌"
                 value={formManufacturer}
                 onChange={(e) => setFormManufacturer(e.target.value)}
               />
             </Grid.Col>
             <Grid.Col span={6}>
               <TextInput
-                label="版本"
-                placeholder="请输入版本号"
-                value={formVersion}
-                onChange={(e) => setFormVersion(e.target.value)}
+                label="型号"
+                placeholder="请输入型号"
+                value={formModel}
+                onChange={(e) => setFormModel(e.target.value)}
               />
             </Grid.Col>
           </Grid>
 
           <Grid>
-            <Grid.Col span={4}>
-              <Select
-                label="无形资产类型"
-                data={[
-                  { value: 'software', label: '软件' },
-                  { value: 'patent', label: '专利' },
-                  { value: 'trademark', label: '商标' },
-                  { value: 'copyright', label: '著作权' },
-                  { value: 'license', label: '许可证' },
-                  { value: 'other', label: '其他' },
-                ]}
-                value={formIntangibleType}
-                onChange={(val) => setFormIntangibleType(val || 'software')}
-              />
-            </Grid.Col>
             <Grid.Col span={4}>
               <Select
                 label="状态"
@@ -587,22 +537,6 @@ const SoftwarePage: React.FC = () => {
                 onChange={(val) => setFormStatus(val || '0')}
               />
             </Grid.Col>
-            <Grid.Col span={4}>
-              <Select
-                label="授权状态"
-                data={[
-                  { value: 'valid', label: '有效' },
-                  { value: 'expiring', label: '即将到期' },
-                  { value: 'expired', label: '已过期' },
-                  { value: 'pending', label: '申请中' },
-                ]}
-                value={formRightStatus}
-                onChange={(val) => setFormRightStatus(val || 'valid')}
-              />
-            </Grid.Col>
-          </Grid>
-
-          <Grid>
             <Grid.Col span={4}>
               <NumberInput
                 label="数量"
@@ -619,16 +553,6 @@ const SoftwarePage: React.FC = () => {
                 value={formUsedQuantity}
                 onChange={(val) => setFormUsedQuantity(Number(val) || 0)}
                 min={0}
-              />
-            </Grid.Col>
-            <Grid.Col span={4}>
-              <NumberInput
-                label="购买价格"
-                placeholder="请输入价格"
-                value={formPurchasePrice}
-                onChange={(val) => setFormPurchasePrice(Number(val) || 0)}
-                min={0}
-                decimalScale={2}
               />
             </Grid.Col>
           </Grid>
@@ -652,28 +576,57 @@ const SoftwarePage: React.FC = () => {
             </Grid.Col>
           </Grid>
 
+          <Grid>
+            <Grid.Col span={6}>
+              <NumberInput
+                label="购买价格"
+                placeholder="请输入价格"
+                value={formPurchasePrice}
+                onChange={(val) => setFormPurchasePrice(Number(val) || 0)}
+                min={0}
+                decimalScale={2}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput
+                label="版本号"
+                placeholder="请输入版本号"
+                value={formVersion}
+                onChange={(e) => setFormVersion(e.target.value)}
+              />
+            </Grid.Col>
+          </Grid>
+
           <Divider label="知识产权信息" labelPosition="center" />
 
           <Grid>
             <Grid.Col span={6}>
               <TextInput
-                label="注册号/登记号"
+                label="无形资产类型"
+                placeholder="软件著作权/专利/商标"
+                value={formIntangibleType}
+                onChange={(e) => setFormIntangibleType(e.target.value)}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <TextInput
+                label="注册号"
                 placeholder="请输入注册号"
                 value={formRegisterNo}
                 onChange={(e) => setFormRegisterNo(e.target.value)}
               />
             </Grid.Col>
+          </Grid>
+
+          <Grid>
             <Grid.Col span={6}>
               <TextInput
-                label="注册人/权利人"
-                placeholder="请输入权利人"
+                label="注册人"
+                placeholder="请输入注册人"
                 value={formRegisterOwner}
                 onChange={(e) => setFormRegisterOwner(e.target.value)}
               />
             </Grid.Col>
-          </Grid>
-
-          <Grid>
             <Grid.Col span={6}>
               <TextInput
                 label="注册日期"
@@ -682,6 +635,9 @@ const SoftwarePage: React.FC = () => {
                 onChange={(e) => setFormRegisterDate(e.target.value)}
               />
             </Grid.Col>
+          </Grid>
+
+          <Grid>
             <Grid.Col span={6}>
               <TextInput
                 label="有效期开始"
@@ -690,15 +646,23 @@ const SoftwarePage: React.FC = () => {
                 onChange={(e) => setFormValidStartDate(e.target.value)}
               />
             </Grid.Col>
-          </Grid>
-
-          <Grid>
             <Grid.Col span={6}>
               <TextInput
                 label="有效期结束"
                 type="date"
                 value={formValidEndDate}
                 onChange={(e) => setFormValidEndDate(e.target.value)}
+              />
+            </Grid.Col>
+          </Grid>
+
+          <Grid>
+            <Grid.Col span={6}>
+              <TextInput
+                label="权利状态"
+                placeholder="有效/无效/申请中"
+                value={formRightStatus}
+                onChange={(e) => setFormRightStatus(e.target.value)}
               />
             </Grid.Col>
             <Grid.Col span={6}>
@@ -711,21 +675,21 @@ const SoftwarePage: React.FC = () => {
             </Grid.Col>
           </Grid>
 
-          <Divider label="许可证信息" labelPosition="center" />
+          <Divider label="许可信息" labelPosition="center" />
 
           <Grid>
             <Grid.Col span={6}>
               <TextInput
-                label="许可证密钥"
-                placeholder="请输入许可证密钥"
+                label="许可密钥"
+                placeholder="请输入许可密钥"
                 value={formLicenseKey}
                 onChange={(e) => setFormLicenseKey(e.target.value)}
               />
             </Grid.Col>
             <Grid.Col span={6}>
               <TextInput
-                label="许可证类型"
-                placeholder="如：企业版、专业版"
+                label="许可类型"
+                placeholder="永久/订阅/试用"
                 value={formLicenseType}
                 onChange={(e) => setFormLicenseType(e.target.value)}
               />
@@ -733,34 +697,7 @@ const SoftwarePage: React.FC = () => {
           </Grid>
 
           <Grid>
-            <Grid.Col span={6}>
-              <TextInput
-                label="绑定类型"
-                placeholder="如：MAC、用户数"
-                value={formBindType}
-                onChange={(e) => setFormBindType(e.target.value)}
-              />
-            </Grid.Col>
-            <Grid.Col span={6}>
-              <TextInput
-                label="绑定信息"
-                placeholder="绑定详情"
-                value={formBindInfo}
-                onChange={(e) => setFormBindInfo(e.target.value)}
-              />
-            </Grid.Col>
-          </Grid>
-
-          <Grid>
-            <Grid.Col span={6}>
-              <TextInput
-                label="分配用户ID"
-                placeholder="多个用逗号分隔"
-                value={formAssignedUserIds}
-                onChange={(e) => setFormAssignedUserIds(e.target.value)}
-              />
-            </Grid.Col>
-            <Grid.Col span={6}>
+            <Grid.Col span={12}>
               <TextInput
                 label="下载链接"
                 placeholder="请输入下载链接"
@@ -774,24 +711,17 @@ const SoftwarePage: React.FC = () => {
 
           <Grid>
             <Grid.Col span={4}>
-              <Select
+              <TextInput
                 label="摊销方法"
-                data={[
-                  { value: 'straight_line', label: '直线法' },
-                  { value: 'double_declining', label: '双倍余额递减法' },
-                  { value: 'sum_of_years', label: '年数总和法' },
-                  { value: 'none', label: '不计提' },
-                ]}
+                placeholder="直线法/加速法"
                 value={formAmortizationMethod}
-                onChange={(val) =>
-                  setFormAmortizationMethod(val || 'straight_line')
-                }
+                onChange={(e) => setFormAmortizationMethod(e.target.value)}
               />
             </Grid.Col>
             <Grid.Col span={4}>
               <NumberInput
-                label="使用年限(年)"
-                placeholder="请输入年限"
+                label="使用寿命(月)"
+                placeholder="月数"
                 value={formUsefulLife}
                 onChange={(val) => setFormUsefulLife(Number(val) || 0)}
                 min={0}
@@ -800,12 +730,11 @@ const SoftwarePage: React.FC = () => {
             <Grid.Col span={4}>
               <NumberInput
                 label="残值率(%)"
-                placeholder="请输入残值率"
+                placeholder="百分比"
                 value={formResidualRate}
                 onChange={(val) => setFormResidualRate(Number(val) || 0)}
                 min={0}
                 max={100}
-                decimalScale={2}
               />
             </Grid.Col>
           </Grid>
@@ -819,14 +748,6 @@ const SoftwarePage: React.FC = () => {
                 onChange={(val) => setFormAmortizationAmount(Number(val) || 0)}
                 min={0}
                 decimalScale={2}
-              />
-            </Grid.Col>
-            <Grid.Col span={6}>
-              <TextInput
-                label="型号/规格"
-                placeholder="请输入型号规格"
-                value={formModel}
-                onChange={(e) => setFormModel(e.target.value)}
               />
             </Grid.Col>
           </Grid>
@@ -887,9 +808,6 @@ const SoftwarePage: React.FC = () => {
         {detailAsset && (
           <Stack gap="md">
             <Paper p="md" withBorder radius="sm">
-              <Text fw={600} size="sm" mb="sm">
-                基本信息
-              </Text>
               <Stack gap="sm">
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
@@ -920,22 +838,8 @@ const SoftwarePage: React.FC = () => {
                     类型
                   </Text>
                   <Badge variant="light" color="violet">
-                    {INTANGIBLE_TYPE_MAP[
-                      detailAsset.intangible_type || ''
-                    ] || detailAsset.intangible_type || '-'}
+                    {detailAsset.intangible_type || '-'}
                   </Badge>
-                </Group>
-                <Group>
-                  <Text size="sm" c="dimmed" w={100}>
-                    供应商
-                  </Text>
-                  <Text size="sm">{detailAsset.manufacturer || '-'}</Text>
-                </Group>
-                <Group>
-                  <Text size="sm" c="dimmed" w={100}>
-                    版本
-                  </Text>
-                  <Text size="sm">{detailAsset.version || '-'}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
@@ -950,19 +854,23 @@ const SoftwarePage: React.FC = () => {
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    授权状态
+                    数量
                   </Text>
-                  <Badge
-                    variant="light"
-                    color={
-                      RIGHT_STATUS_MAP[detailAsset.right_status || '']?.color ||
-                      'gray'
-                    }
-                  >
-                    {RIGHT_STATUS_MAP[detailAsset.right_status || '']?.label ||
-                      detailAsset.right_status ||
-                      '未知'}
-                  </Badge>
+                  <Text size="sm">
+                    {detailAsset.used_quantity || 0}/{detailAsset.quantity || 0}
+                  </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    购买日期
+                  </Text>
+                  <Text size="sm">
+                    {detailAsset.purchase_date
+                      ? new Date(detailAsset.purchase_date).toLocaleDateString(
+                        'zh-CN'
+                      )
+                      : '-'}
+                  </Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
@@ -976,15 +884,9 @@ const SoftwarePage: React.FC = () => {
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    购买日期
+                    版本号
                   </Text>
-                  <Text size="sm">
-                    {detailAsset.purchase_date
-                      ? new Date(
-                        detailAsset.purchase_date
-                      ).toLocaleDateString('zh-CN')
-                      : '-'}
-                  </Text>
+                  <Text size="sm">{detailAsset.version || '-'}</Text>
                 </Group>
               </Stack>
             </Paper>
@@ -996,13 +898,13 @@ const SoftwarePage: React.FC = () => {
               <Stack gap="sm">
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    注册号/登记号
+                    注册号
                   </Text>
                   <Text size="sm">{detailAsset.register_no || '-'}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    注册人/权利人
+                    注册人
                   </Text>
                   <Text size="sm">{detailAsset.register_owner || '-'}</Text>
                 </Group>
@@ -1012,29 +914,34 @@ const SoftwarePage: React.FC = () => {
                   </Text>
                   <Text size="sm">
                     {detailAsset.register_date
-                      ? new Date(detailAsset.register_date).toLocaleDateString('zh-CN')
+                      ? new Date(detailAsset.register_date).toLocaleDateString(
+                        'zh-CN'
+                      )
                       : '-'}
                   </Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    有效期开始
+                    有效期
                   </Text>
                   <Text size="sm">
                     {detailAsset.valid_start_date
-                      ? new Date(detailAsset.valid_start_date).toLocaleDateString('zh-CN')
+                      ? `${new Date(
+                        detailAsset.valid_start_date
+                      ).toLocaleDateString('zh-CN')} ~ ${detailAsset.valid_end_date
+                        ? new Date(
+                          detailAsset.valid_end_date
+                        ).toLocaleDateString('zh-CN')
+                        : '长期'
+                      }`
                       : '-'}
                   </Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    有效期结束
+                    权利状态
                   </Text>
-                  <Text size="sm">
-                    {detailAsset.valid_end_date
-                      ? new Date(detailAsset.valid_end_date).toLocaleDateString('zh-CN')
-                      : '-'}
-                  </Text>
+                  <Text size="sm">{detailAsset.right_status || '-'}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
@@ -1047,39 +954,20 @@ const SoftwarePage: React.FC = () => {
 
             <Paper p="md" withBorder radius="sm">
               <Text fw={600} size="sm" mb="sm">
-                许可证信息
-
+                许可信息
               </Text>
               <Stack gap="sm">
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    许可证密钥
+                    许可密钥
                   </Text>
                   <Text size="sm">{detailAsset.license_key || '-'}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    许可证类型
+                    许可类型
                   </Text>
                   <Text size="sm">{detailAsset.license_type || '-'}</Text>
-                </Group>
-                <Group>
-                  <Text size="sm" c="dimmed" w={100}>
-                    绑定类型
-                  </Text>
-                  <Text size="sm">{detailAsset.bind_type || '-'}</Text>
-                </Group>
-                <Group>
-                  <Text size="sm" c="dimmed" w={100}>
-                    绑定信息
-                  </Text>
-                  <Text size="sm">{detailAsset.bind_info || '-'}</Text>
-                </Group>
-                <Group>
-                  <Text size="sm" c="dimmed" w={100}>
-                    分配用户
-                  </Text>
-                  <Text size="sm">{detailAsset.assigned_user_ids || '-'}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
@@ -1100,18 +988,16 @@ const SoftwarePage: React.FC = () => {
                     摊销方法
                   </Text>
                   <Text size="sm">
-                    {detailAsset.amortization_method === 'straight_line' ? '直线法' :
-                      detailAsset.amortization_method === 'double_declining' ? '双倍余额递减法' :
-                        detailAsset.amortization_method === 'sum_of_years' ? '年数总和法' :
-                          detailAsset.amortization_method === 'none' ? '不计提' :
-                            detailAsset.amortization_method || '-'}
+                    {detailAsset.amortization_method || '-'}
                   </Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
-                    使用年限
+                    使用寿命
                   </Text>
-                  <Text size="sm">{detailAsset.useful_life ? `${detailAsset.useful_life} 年` : '-'}</Text>
+                  <Text size="sm">
+                    {detailAsset.useful_life ? `${detailAsset.useful_life} 月` : '-'}
+                  </Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
@@ -1127,7 +1013,11 @@ const SoftwarePage: React.FC = () => {
                   <Text size="sm" c="dimmed" w={100}>
                     残值率
                   </Text>
-                  <Text size="sm">{detailAsset.residual_rate ? `${detailAsset.residual_rate}%` : '-'}</Text>
+                  <Text size="sm">
+                    {detailAsset.residual_rate
+                      ? `${detailAsset.residual_rate}%`
+                      : '-'}
+                  </Text>
                 </Group>
               </Stack>
             </Paper>

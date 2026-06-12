@@ -1,9 +1,9 @@
-import { invoke } from '@tauri-apps/api/core';
+import { api } from '@/utils/api';
 import type { LoginResult } from '@/store/authStore';
 
 /**
  * 用户登录
  */
-export async function login(username: string, password: string): Promise<LoginResult> {
-    return await invoke<LoginResult>('login', { username, password });
+export function login(username: string, password: string): Promise<LoginResult> {
+    return api.post<LoginResult>('login', { username, password });
 }

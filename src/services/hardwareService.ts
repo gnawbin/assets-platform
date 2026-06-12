@@ -71,6 +71,17 @@ export interface HardwareAssetInput {
     fault_desc: string | null;
 }
 
+/** 新增固定资产参数 */
+export interface InsertHardwareAssetParams {
+    input: HardwareAssetInput;
+}
+
+/** 更新固定资产参数 */
+export interface UpdateHardwareAssetParams {
+    id: number;
+    input: HardwareAssetInput;
+}
+
 // ======================== 服务方法 ========================
 
 /** 获取所有固定资产 */
@@ -79,13 +90,13 @@ export function getHardwareAssets() {
 }
 
 /** 新增固定资产 */
-export function insertHardwareAsset(input: HardwareAssetInput) {
-    return api.post<string>('insert_hardware_asset', { input });
+export function insertHardwareAsset(params: InsertHardwareAssetParams) {
+    return api.post<string>('insert_hardware_asset', { input: params.input });
 }
 
 /** 更新固定资产 */
-export function updateHardwareAsset(id: number, input: HardwareAssetInput) {
-    return api.put<string>('update_hardware_asset', { id, input });
+export function updateHardwareAsset(params: UpdateHardwareAssetParams) {
+    return api.put<string>('update_hardware_asset', { id: params.id, input: params.input });
 }
 
 /** 删除固定资产（软删除） */

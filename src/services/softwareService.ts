@@ -89,6 +89,17 @@ export interface IntangibleAssetInput {
     residual_rate: number | null;
 }
 
+/** 新增无形资产参数 */
+export interface InsertIntangibleAssetParams {
+    input: IntangibleAssetInput;
+}
+
+/** 更新无形资产参数 */
+export interface UpdateIntangibleAssetParams {
+    id: number;
+    input: IntangibleAssetInput;
+}
+
 // ======================== 服务方法 ========================
 
 /** 获取所有无形资产 */
@@ -97,13 +108,13 @@ export function getIntangibleAssets() {
 }
 
 /** 新增无形资产 */
-export function insertIntangibleAsset(input: IntangibleAssetInput) {
-    return api.post<string>('insert_intangible_asset', { input });
+export function insertIntangibleAsset(params: InsertIntangibleAssetParams) {
+    return api.post<string>('insert_intangible_asset', { input: params.input });
 }
 
 /** 更新无形资产 */
-export function updateIntangibleAsset(id: number, input: IntangibleAssetInput) {
-    return api.put<string>('update_intangible_asset', { id, input });
+export function updateIntangibleAsset(params: UpdateIntangibleAssetParams) {
+    return api.put<string>('update_intangible_asset', { id: params.id, input: params.input });
 }
 
 /** 删除无形资产（软删除） */

@@ -23,6 +23,25 @@ export interface Category {
     deleted: number | null;
 }
 
+/** 新增分类参数 */
+export interface InsertCategoryParams {
+    categoryName: string;
+    assetType: string;
+    parentId: string;
+    sort: number;
+    description: string | null;
+}
+
+/** 更新分类参数 */
+export interface UpdateCategoryParams {
+    id: string;
+    categoryName: string;
+    assetType: string;
+    parentId: string;
+    sort: number;
+    description: string | null;
+}
+
 // ======================== 服务方法 ========================
 
 /** 获取所有分类 */
@@ -31,13 +50,41 @@ export function getCategories() {
 }
 
 /** 新增分类 */
-export function insertCategory(category: Category) {
-    return api.post<string>('insert_category', { category });
+export function insertCategory(params: InsertCategoryParams) {
+    return api.post<string>('insert_category', {
+        category: {
+            id: "0",
+            category_name: params.categoryName,
+            asset_type: params.assetType,
+            parent_id: params.parentId,
+            sort: params.sort,
+            description: params.description,
+            created_by: null,
+            created_at: null,
+            updated_by: null,
+            updated_at: null,
+            deleted: null,
+        },
+    });
 }
 
 /** 更新分类 */
-export function updateCategory(category: Category) {
-    return api.put<string>('update_category', { category });
+export function updateCategory(params: UpdateCategoryParams) {
+    return api.put<string>('update_category', {
+        category: {
+            id: params.id,
+            category_name: params.categoryName,
+            asset_type: params.assetType,
+            parent_id: params.parentId,
+            sort: params.sort,
+            description: params.description,
+            created_by: null,
+            created_at: null,
+            updated_by: null,
+            updated_at: null,
+            deleted: null,
+        },
+    });
 }
 
 /** 删除分类（软删除） */

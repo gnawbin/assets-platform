@@ -60,8 +60,14 @@ interface TreeNode {
 const CategoriesPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedCategories,
+    loading,
+    error,
+    execute: fetchCategories,
+  } = useApi(getCategories);
 
   // 选中的分类
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
@@ -74,30 +80,26 @@ const CategoriesPage: React.FC = () => {
   const [formAssetType, setFormAssetType] = useState('hardware');
   const [formSort, setFormSort] = useState<number>(0);
   const [formDesc, setFormDesc] = useState('');
-  const [saving, setSaving] = useState(false);
+
+  // 使用 useApi 管理保存操作
+  const { execute: doInsert, loading: saving } = useApi(insertCategory);
+  const { execute: doUpdate } = useApi(updateCategory);
+  const { execute: doDelete, loading: deleting } = useApi(deleteCategory);
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+
+  // 当 fetchedCategories 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedCategories) {
+      setCategories(fetchedCategories);
+      buildTree(fetchedCategories);
+    }
+  }, [fetchedCategories]);
 
   useEffect(() => {
     fetchCategories();
   }, []);
-
-  const fetchCategories = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getCategories();
-      setCategories(data);
-      buildTree(data);
-    } catch (err) {
-      console.error('获取分类列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取分类列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // 构建树结构
   const buildTree = (cats: Category[]) => {
@@ -192,35 +194,26 @@ const CategoriesPage: React.FC = () => {
       return;
     }
 
-    setSaving(true);
     try {
       if (formMode === 'add') {
-        const newCategory: Category = {
-          id: "0",
-          category_name: formName.trim(),
-          asset_type: formAssetType,
-          parent_id: formParentId,
+        await doInsert({
+          categoryName: formName.trim(),
+          assetType: formAssetType,
+          parentId: formParentId,
           sort: formSort,
           description: formDesc.trim() || null,
-          created_by: null,
-          created_at: null,
-          updated_by: null,
-          updated_at: null,
-          deleted: null,
-        };
-        await insertCategory(newCategory);
+        });
         notifySuccess('分类添加成功');
       } else {
         if (!selectedCategory) return;
-        const updatedCategory: Category = {
-          ...selectedCategory,
-          category_name: formName.trim(),
-          asset_type: formAssetType,
-          parent_id: formParentId,
+        await doUpdate({
+          id: selectedCategory.id,
+          categoryName: formName.trim(),
+          assetType: formAssetType,
+          parentId: formParentId,
           sort: formSort,
           description: formDesc.trim() || null,
-        };
-        await updateCategory(updatedCategory);
+        });
         notifySuccess('分类更新成功');
       }
       setFormModalOpen(false);
@@ -228,8 +221,6 @@ const CategoriesPage: React.FC = () => {
     } catch (err) {
       console.error('保存分类失败:', err);
       notifyError('保存分类失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -241,9 +232,8 @@ const CategoriesPage: React.FC = () => {
   // 确认删除
   const handleDelete = async () => {
     if (!selectedCategory) return;
-    setDeleting(true);
     try {
-      await deleteCategory(selectedCategory.id);
+      await doDelete(selectedCategory.id);
       setDeleteModalOpen(false);
       setSelectedCategory(null);
       notifySuccess('分类删除成功');
@@ -251,8 +241,6 @@ const CategoriesPage: React.FC = () => {
     } catch (err) {
       console.error('删除分类失败:', err);
       notifyError('删除分类失败', typeof err === 'string' ? err : undefined);
-    } finally {
-      setDeleting(false);
     }
   };
 
