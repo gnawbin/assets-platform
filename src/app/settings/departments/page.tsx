@@ -32,19 +32,15 @@ import {
   IconChevronRight,
   IconChevronDown,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
-
-interface Department {
-  id: number;
-  department_name: string;
-  parent_id: number | null;
-  description: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-  deleted: number | null;
-}
+import { notifySuccess, notifyError } from '@/utils/notify';
+import { useApi } from '@/hooks/useApi';
+import {
+  getDepartments,
+  insertDepartment,
+  updateDepartment,
+  deleteDepartment,
+  type Department,
+} from '@/services/departmentService';
 
 // 树节点接口
 interface TreeNode {
@@ -59,8 +55,14 @@ interface TreeNode {
 const DepartmentsPage: React.FC = () => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedDepartments,
+    loading,
+    error,
+    execute: fetchDepartments,
+  } = useApi(getDepartments);
 
   // 选中的部门
   const [selectedDept, setSelectedDept] = useState<Department | null>(null);
@@ -71,30 +73,26 @@ const DepartmentsPage: React.FC = () => {
   const [formParentId, setFormParentId] = useState<number | null>(null);
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
-  const [saving, setSaving] = useState(false);
+
+  // 使用 useApi 管理增删改操作
+  const { execute: doInsert, loading: saving } = useApi(insertDepartment);
+  const { execute: doUpdate } = useApi(updateDepartment);
+  const { execute: doDelete, loading: deleting } = useApi(deleteDepartment);
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+
+  // 当 fetchedDepartments 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedDepartments) {
+      setDepartments(fetchedDepartments);
+      buildTree(fetchedDepartments);
+    }
+  }, [fetchedDepartments]);
 
   useEffect(() => {
     fetchDepartments();
   }, []);
-
-  const fetchDepartments = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await invoke<Department[]>('get_departments');
-      setDepartments(data);
-      buildTree(data);
-    } catch (err) {
-      console.error('获取部门列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取部门列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // 构建树结构
   const buildTree = (depts: Department[]) => {
@@ -172,38 +170,35 @@ const DepartmentsPage: React.FC = () => {
   // 保存部门
   const handleSave = async () => {
     if (!formName.trim()) {
-      alert('请输入部门名称');
+      notifyError('验证失败', '请输入部门名称');
       return;
     }
 
-    setSaving(true);
     try {
       if (formMode === 'add') {
-        await invoke('insert_department', {
+        await doInsert({
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
           createdBy: null,
         });
-        alert('部门添加成功！');
+        notifySuccess('部门添加成功');
       } else {
         if (!selectedDept) return;
-        await invoke('update_department', {
+        await doUpdate({
           id: selectedDept.id,
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
           updatedBy: null,
         });
-        alert('部门更新成功！');
+        notifySuccess('部门更新成功');
       }
       setFormModalOpen(false);
       fetchDepartments();
     } catch (err) {
       console.error('保存部门失败:', err);
-      alert(typeof err === 'string' ? err : '保存部门失败');
-    } finally {
-      setSaving(false);
+      notifyError('保存部门失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -215,18 +210,15 @@ const DepartmentsPage: React.FC = () => {
   // 确认删除
   const handleDelete = async () => {
     if (!selectedDept) return;
-    setDeleting(true);
     try {
-      await invoke('delete_department', { id: selectedDept.id });
+      await doDelete(selectedDept.id);
       setDeleteModalOpen(false);
       setSelectedDept(null);
-      alert('部门删除成功！');
+      notifySuccess('部门删除成功');
       fetchDepartments();
     } catch (err) {
       console.error('删除部门失败:', err);
-      alert(typeof err === 'string' ? err : '删除部门失败');
-    } finally {
-      setDeleting(false);
+      notifyError('删除部门失败', typeof err === 'string' ? err : undefined);
     }
   };
 

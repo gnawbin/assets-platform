@@ -170,11 +170,11 @@ const Sidebar: React.FC = () => {
       icon: <IconBooks size={18} />,
       label: '资产台账',
       links: [
-         { label: '资产分类', path: '/categories' },
-     { label: '固定资产', path: '/hardware' },
-    
+        { label: '资产分类', path: '/categories' },
+        { label: '固定资产', path: '/hardware' },
+
         { label: '无形资产', path: '/software' },
-       
+
       ],
     },
     {
@@ -206,7 +206,7 @@ const Sidebar: React.FC = () => {
       label: '系统配置',
       links: [
         { label: '权限管理', path: '/settings/permissions' },
-       
+
         { label: '部门管理', path: '/settings/departments' },
         { label: '用户管理', path: '/settings/users' },
         { label: '流程设计', path: '/settings/process-design' },
@@ -234,7 +234,7 @@ const Sidebar: React.FC = () => {
             IT设备资产管理系统
           </Text>
           <Text size="sm" fw={500}>
-            v0.0.2
+            v0.0.3
           </Text>
         </Box>
       </ScrollArea>

@@ -13,7 +13,6 @@ import {
   TextInput,
   Select,
   Switch,
-  NumberInput,
   Loader,
   Alert,
   Badge,
@@ -27,43 +26,38 @@ import {
   IconKey,
   IconRefresh,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
-
-interface User {
-  id: number;
-  username: string;
-  real_name: string;
-  email: string | null;
-  phone: string | null;
-  department_id: number | null;
-  status: number;
-  nickname: string | null;
-  avatar: string | null;
-  person_id: string | null;
-  person_code: string | null;
-  super_user_id: number | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-}
-
-interface Department {
-  id: number;
-  department_name: string;
-  parent_id: number | null;
-  description: string | null;
-}
+import { notifySuccess, notifyError } from '@/utils/notify';
+import { useApi } from '@/hooks/useApi';
+import {
+  getUsers,
+  insertUser,
+  updateUser,
+  deleteUser,
+  resetPassword,
+  type User,
+} from '@/services/userService';
+import { getDepartments, type Department } from '@/services/departmentService';
 
 const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedUsers,
+    loading,
+    error,
+    execute: fetchUsers,
+  } = useApi(getUsers);
+
+  // 使用 useApi 管理增删改操作
+  const { execute: doInsertUser, loading: adding } = useApi(insertUser);
+  const { execute: doUpdateUser, loading: editing } = useApi(updateUser);
+  const { execute: doDeleteUser, loading: deleting } = useApi(deleteUser);
+  const { execute: doResetPassword, loading: resetting } = useApi(resetPassword);
 
   // 新增用户弹窗
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [adding, setAdding] = useState(false);
   const [newUser, setNewUser] = useState({
     username: '',
     password: '',
@@ -79,7 +73,6 @@ const UsersPage: React.FC = () => {
   // 编辑用户弹窗
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     username: '',
     real_name: '',
@@ -93,37 +86,28 @@ const UsersPage: React.FC = () => {
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteUser, setDeleteUser] = useState<User | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
 
   // 重置密码弹窗
   const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
-  const [resetting, setResetting] = useState(false);
+
+  // 当 fetchedUsers 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedUsers) {
+      setUsers(fetchedUsers);
+    }
+  }, [fetchedUsers]);
 
   useEffect(() => {
     fetchUsers();
     fetchDepartments();
   }, []);
 
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await invoke<User[]>('get_users');
-      setUsers(data);
-    } catch (err) {
-      console.error('获取用户列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取用户列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const fetchDepartments = async () => {
     try {
-      const data = await invoke<Department[]>('get_departments');
+      const data = await getDepartments();
       setDepartments(data);
     } catch {
       // 部门接口可能不存在，忽略错误
@@ -139,21 +123,20 @@ const UsersPage: React.FC = () => {
   // 新增用户
   const handleAddUser = async () => {
     if (!newUser.username.trim()) {
-      alert('请输入用户名');
+      notifyError('验证失败', '请输入用户名');
       return;
     }
     if (!newUser.password.trim()) {
-      alert('请输入密码');
+      notifyError('验证失败', '请输入密码');
       return;
     }
     if (!newUser.real_name.trim()) {
-      alert('请输入真实姓名');
+      notifyError('验证失败', '请输入真实姓名');
       return;
     }
 
-    setAdding(true);
     try {
-      await invoke('insert_user', {
+      await doInsertUser({
         username: newUser.username.trim(),
         password: newUser.password,
         realName: newUser.real_name.trim(),
@@ -179,13 +162,11 @@ const UsersPage: React.FC = () => {
         nickname: '',
         person_code: '',
       });
-      alert('用户添加成功！');
+      notifySuccess('用户添加成功');
       fetchUsers();
     } catch (err) {
       console.error('新增用户失败:', err);
-      alert(typeof err === 'string' ? err : '新增用户失败');
-    } finally {
-      setAdding(false);
+      notifyError('新增用户失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -209,17 +190,16 @@ const UsersPage: React.FC = () => {
   const handleEditUser = async () => {
     if (!editingUser) return;
     if (!editForm.username.trim()) {
-      alert('请输入用户名');
+      notifyError('验证失败', '请输入用户名');
       return;
     }
     if (!editForm.real_name.trim()) {
-      alert('请输入真实姓名');
+      notifyError('验证失败', '请输入真实姓名');
       return;
     }
 
-    setEditing(true);
     try {
-      await invoke('update_user', {
+      await doUpdateUser({
         id: editingUser.id,
         username: editForm.username.trim(),
         realName: editForm.real_name.trim(),
@@ -235,37 +215,32 @@ const UsersPage: React.FC = () => {
       });
       setEditModalOpen(false);
       setEditingUser(null);
-      alert('用户更新成功！');
+      notifySuccess('用户更新成功');
       fetchUsers();
     } catch (err) {
       console.error('更新用户失败:', err);
-      alert(typeof err === 'string' ? err : '更新用户失败');
-    } finally {
-      setEditing(false);
+      notifyError('更新用户失败', typeof err === 'string' ? err : undefined);
     }
   };
 
   // 打开删除确认弹窗
   const openDeleteModal = (user: User) => {
-    setDeleteUser(user);
+    setDeleteTargetUser(user);
     setDeleteModalOpen(true);
   };
 
   // 确认删除用户
   const handleDeleteUser = async () => {
-    if (!deleteUser) return;
-    setDeleting(true);
+    if (!deleteTargetUser) return;
     try {
-      await invoke('delete_user', { id: deleteUser.id });
+      await doDeleteUser(deleteTargetUser.id);
       setDeleteModalOpen(false);
-      setDeleteUser(null);
-      alert('用户删除成功！');
+      setDeleteTargetUser(null);
+      notifySuccess('用户删除成功');
       fetchUsers();
     } catch (err) {
       console.error('删除用户失败:', err);
-      alert(typeof err === 'string' ? err : '删除用户失败');
-    } finally {
-      setDeleting(false);
+      notifyError('删除用户失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -280,29 +255,23 @@ const UsersPage: React.FC = () => {
   const handleResetPassword = async () => {
     if (!resetPwdUser) return;
     if (!newPassword.trim()) {
-      alert('请输入新密码');
+      notifyError('验证失败', '请输入新密码');
       return;
     }
     if (newPassword.length < 6) {
-      alert('密码长度不能少于6位');
+      notifyError('验证失败', '密码长度不能少于6位');
       return;
     }
 
-    setResetting(true);
     try {
-      await invoke('reset_password', {
-        id: resetPwdUser.id,
-        newPassword: newPassword,
-      });
+      await doResetPassword(resetPwdUser.id, newPassword);
       setResetPwdModalOpen(false);
       setResetPwdUser(null);
       setNewPassword('');
-      alert('密码重置成功！');
+      notifySuccess('密码重置成功');
     } catch (err) {
       console.error('重置密码失败:', err);
-      alert(typeof err === 'string' ? err : '重置密码失败');
-    } finally {
-      setResetting(false);
+      notifyError('重置密码失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -644,8 +613,8 @@ const UsersPage: React.FC = () => {
       >
         <Stack gap="md">
           <Text>
-            确定要删除用户 <strong>{deleteUser?.real_name}</strong>（
-            {deleteUser?.username}）吗？
+            确定要删除用户 <strong>{deleteTargetUser?.real_name}</strong>（
+            {deleteTargetUser?.username}）吗？
           </Text>
           <Text size="sm" c="dimmed">
             此操作将软删除该用户，用户将无法登录系统，但数据仍可恢复。

@@ -1,0 +1,82 @@
+/**
+ * 用户 API 服务
+ *
+ * 封装所有与用户相关的 Tauri 命令调用。
+ * 统一通过 api 层处理错误、日志和重试。
+ */
+
+import { api } from '@/utils/api';
+
+// ======================== 类型定义 ========================
+
+export interface User {
+    id: number;
+    username: string;
+    real_name: string;
+    email: string | null;
+    phone: string | null;
+    department_id: number | null;
+    status: number;
+    nickname: string | null;
+    avatar: string | null;
+    person_id: string | null;
+    person_code: string | null;
+    super_user_id: number | null;
+    created_by: number | null;
+    created_at: string | null;
+    updated_by: number | null;
+    updated_at: string | null;
+}
+
+// ======================== 服务方法 ========================
+
+/** 获取所有用户 */
+export function getUsers() {
+    return api.get<User[]>('get_users');
+}
+
+/** 新增用户 */
+export function insertUser(params: {
+    username: string;
+    password: string;
+    realName: string;
+    email: string | null;
+    phone: string | null;
+    departmentId: number | null;
+    status: number;
+    nickname: string | null;
+    personId: null;
+    personCode: string | null;
+    superUserId: null;
+    createdBy: null;
+}) {
+    return api.post<string>('insert_user', params);
+}
+
+/** 更新用户 */
+export function updateUser(params: {
+    id: number;
+    username: string;
+    realName: string;
+    email: string | null;
+    phone: string | null;
+    departmentId: number | null;
+    status: number;
+    nickname: string | null;
+    personId: null;
+    personCode: string | null;
+    superUserId: null;
+    updatedBy: null;
+}) {
+    return api.put<string>('update_user', params);
+}
+
+/** 删除用户（软删除） */
+export function deleteUser(id: number) {
+    return api.delete<string>('delete_user', { id });
+}
+
+/** 重置密码 */
+export function resetPassword(id: number, newPassword: string) {
+    return api.post<string>('reset_password', { id, newPassword });
+}

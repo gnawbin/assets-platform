@@ -35,21 +35,15 @@ import {
   IconChevronRight,
   IconChevronDown,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
-
-interface Category {
-  id: string;
-  category_name: string;
-  asset_type: string;
-  parent_id: string;
-  sort: number;
-  description: string | null;
-  created_by: string | null;
-  created_at: string | null;
-  updated_by: string | null;
-  updated_at: string | null;
-  deleted: number | null;
-}
+import { notifySuccess, notifyError } from '@/utils/notify';
+import { useApi } from '@/hooks/useApi';
+import {
+  getCategories,
+  insertCategory,
+  updateCategory,
+  deleteCategory,
+  type Category,
+} from '@/services/categoryService';
 
 // 树节点接口
 interface TreeNode {
@@ -66,8 +60,14 @@ interface TreeNode {
 const CategoriesPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedCategories,
+    loading,
+    error,
+    execute: fetchCategories,
+  } = useApi(getCategories);
 
   // 选中的分类
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
@@ -80,30 +80,26 @@ const CategoriesPage: React.FC = () => {
   const [formAssetType, setFormAssetType] = useState('hardware');
   const [formSort, setFormSort] = useState<number>(0);
   const [formDesc, setFormDesc] = useState('');
-  const [saving, setSaving] = useState(false);
+
+  // 使用 useApi 管理保存操作
+  const { execute: doInsert, loading: saving } = useApi(insertCategory);
+  const { execute: doUpdate } = useApi(updateCategory);
+  const { execute: doDelete, loading: deleting } = useApi(deleteCategory);
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+
+  // 当 fetchedCategories 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedCategories) {
+      setCategories(fetchedCategories);
+      buildTree(fetchedCategories);
+    }
+  }, [fetchedCategories]);
 
   useEffect(() => {
     fetchCategories();
   }, []);
-
-  const fetchCategories = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await invoke<Category[]>('get_categories');
-      setCategories(data);
-      buildTree(data);
-    } catch (err) {
-      console.error('获取分类列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取分类列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // 构建树结构
   const buildTree = (cats: Category[]) => {
@@ -194,48 +190,37 @@ const CategoriesPage: React.FC = () => {
   // 保存分类
   const handleSave = async () => {
     if (!formName.trim()) {
-      alert('请输入分类名称');
+      notifyError('验证失败', '请输入分类名称');
       return;
     }
 
-    setSaving(true);
     try {
       if (formMode === 'add') {
-        const newCategory: Category = {
-          id: "0",
-          category_name: formName.trim(),
-          asset_type: formAssetType,
-          parent_id: formParentId,
+        await doInsert({
+          categoryName: formName.trim(),
+          assetType: formAssetType,
+          parentId: formParentId,
           sort: formSort,
           description: formDesc.trim() || null,
-          created_by: null,
-          created_at: null,
-          updated_by: null,
-          updated_at: null,
-          deleted: null,
-        };
-        await invoke('insert_category', { category: newCategory });
-        alert('分类添加成功！');
+        });
+        notifySuccess('分类添加成功');
       } else {
         if (!selectedCategory) return;
-        const updatedCategory: Category = {
-          ...selectedCategory,
-          category_name: formName.trim(),
-          asset_type: formAssetType,
-          parent_id: formParentId,
+        await doUpdate({
+          id: selectedCategory.id,
+          categoryName: formName.trim(),
+          assetType: formAssetType,
+          parentId: formParentId,
           sort: formSort,
           description: formDesc.trim() || null,
-        };
-        await invoke('update_category', { category: updatedCategory });
-        alert('分类更新成功！');
+        });
+        notifySuccess('分类更新成功');
       }
       setFormModalOpen(false);
       fetchCategories();
     } catch (err) {
       console.error('保存分类失败:', err);
-      alert(typeof err === 'string' ? err : '保存分类失败');
-    } finally {
-      setSaving(false);
+      notifyError('保存分类失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -247,18 +232,15 @@ const CategoriesPage: React.FC = () => {
   // 确认删除
   const handleDelete = async () => {
     if (!selectedCategory) return;
-    setDeleting(true);
     try {
-      await invoke('delete_category', { id: selectedCategory.id });
+      await doDelete(selectedCategory.id);
       setDeleteModalOpen(false);
       setSelectedCategory(null);
-      alert('分类删除成功！');
+      notifySuccess('分类删除成功');
       fetchCategories();
     } catch (err) {
       console.error('删除分类失败:', err);
-      alert(typeof err === 'string' ? err : '删除分类失败');
-    } finally {
-      setDeleting(false);
+      notifyError('删除分类失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -508,16 +490,16 @@ const CategoriesPage: React.FC = () => {
                   创建时间:{' '}
                   {selectedCategory.created_at
                     ? new Date(selectedCategory.created_at).toLocaleString(
-                        'zh-CN'
-                      )
+                      'zh-CN'
+                    )
                     : '-'}
                 </Text>
                 <Text size="xs" c="dimmed">
                   更新时间:{' '}
                   {selectedCategory.updated_at
                     ? new Date(selectedCategory.updated_at).toLocaleString(
-                        'zh-CN'
-                      )
+                      'zh-CN'
+                    )
                     : '-'}
                 </Text>
               </Stack>

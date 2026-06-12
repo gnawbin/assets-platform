@@ -16,8 +16,8 @@ import {
   Box,
 } from '@mantine/core';
 import { IconAlertCircle, IconLogin } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { useAuthStore } from '@/store/authStore';
+import { login as loginApi } from '@/services/authService';
 
 const LoginPage: React.FC = () => {
   const router = useRouter();
@@ -41,18 +41,7 @@ const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      const result = await invoke<{
-        id: number;
-        username: string;
-        real_name: string;
-        email: string | null;
-        phone: string | null;
-        department_id: number | null;
-        status: number;
-        nickname: string | null;
-        avatar: string | null;
-        token: string;
-      }>('login', { username: username.trim(), password });
+      const result = await loginApi(username.trim(), password);
 
       login(result);
       router.push('/');

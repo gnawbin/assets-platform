@@ -22,7 +22,6 @@ import {
   Divider,
   Grid,
   Paper,
-  Switch,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -33,80 +32,17 @@ import {
   IconSearch,
   IconDeviceDesktop,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
-
-// ======================== 类型定义 ========================
-
-interface HardwareAssetView {
-  id: number;
-  asset_no: string;
-  asset_type: string;
-  category_id: number;
-  asset_name: string;
-  manufacturer: string | null;
-  model: string | null;
-  department_id: number | null;
-  user_id: number | null;
-  status: number;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  quantity: number | null;
-  used_quantity: number | null;
-  expire_date: string | null;
-  description: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-  deleted: number | null;
-  // hard_assets 扩展字段
-  hard_id: number | null;
-  sn: string | null;
-  mac_address: string | null;
-  location: string | null;
-  hardware_config: string | null;
-  use_user_id: number | null;
-  use_start_date: string | null;
-  maintenance_vendor: string | null;
-  maintenance_type: string | null;
-  maintenance_expire_date: string | null;
-  fault_desc: string | null;
-}
-
-interface HardwareAssetInput {
-  category_id: number;
-  asset_name: string;
-  manufacturer: string | null;
-  model: string | null;
-  department_id: number | null;
-  user_id: number | null;
-  status: number | null;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  quantity: number | null;
-  used_quantity: number | null;
-  expire_date: string | null;
-  description: string | null;
-  sn: string | null;
-  mac_address: string | null;
-  location: string | null;
-  hardware_config: string | null;
-  use_user_id: number | null;
-  use_start_date: string | null;
-  maintenance_vendor: string | null;
-  maintenance_type: string | null;
-  maintenance_expire_date: string | null;
-  fault_desc: string | null;
-}
-
-interface Category {
-  id: number;
-  category_name: string;
-  asset_type: string;
-  parent_id: number;
-  sort: number;
-  description: string | null;
-}
+import { notifySuccess, notifyError } from '@/utils/notify';
+import { useApi } from '@/hooks/useApi';
+import { getCategories, type Category } from '@/services/categoryService';
+import {
+  getHardwareAssets,
+  insertHardwareAsset,
+  updateHardwareAsset,
+  deleteHardwareAsset,
+  type HardwareAssetView,
+  type HardwareAssetInput,
+} from '@/services/hardwareService';
 
 // 状态映射
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
@@ -120,15 +56,25 @@ const STATUS_MAP: Record<number, { label: string; color: string }> = {
 const HardwarePage: React.FC = () => {
   const [assets, setAssets] = useState<HardwareAssetView[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
+
+  // 使用 useApi 管理数据获取
+  const {
+    data: fetchedAssets,
+    loading,
+    error,
+    execute: fetchAssets,
+  } = useApi(getHardwareAssets);
+
+  // 使用 useApi 管理增删改操作
+  const { execute: doInsert, loading: saving } = useApi(insertHardwareAsset);
+  const { execute: doUpdate } = useApi(updateHardwareAsset);
+  const { execute: doDelete, loading: deleting } = useApi(deleteHardwareAsset);
 
   // 表单弹窗
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
 
   // 表单字段
   const [formCategoryId, setFormCategoryId] = useState<number>(0);
@@ -156,34 +102,26 @@ const HardwarePage: React.FC = () => {
   // 删除确认
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<HardwareAssetView | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // 详情弹窗
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailAsset, setDetailAsset] = useState<HardwareAssetView | null>(null);
+
+  // 当 fetchedAssets 变化时更新本地状态
+  useEffect(() => {
+    if (fetchedAssets) {
+      setAssets(fetchedAssets);
+    }
+  }, [fetchedAssets]);
 
   useEffect(() => {
     fetchAssets();
     fetchCategories();
   }, []);
 
-  const fetchAssets = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await invoke<HardwareAssetView[]>('get_hardware_assets');
-      setAssets(data);
-    } catch (err) {
-      console.error('获取固定资产列表失败:', err);
-      setError(typeof err === 'string' ? err : '获取固定资产列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const fetchCategories = async () => {
     try {
-      const data = await invoke<Category[]>('get_categories');
+      const data = await getCategories();
       setCategories(data.filter((c) => c.asset_type === 'fixed' || c.asset_type === 'hardware'));
     } catch (err) {
       console.error('获取分类列表失败:', err);
@@ -192,7 +130,7 @@ const HardwarePage: React.FC = () => {
 
   // 获取分类名称
   const getCategoryName = (id: number): string => {
-    const cat = categories.find((c) => c.id === id);
+    const cat = categories.find((c) => String(c.id) === String(id));
     return cat ? cat.category_name : `分类#${id}`;
   };
 
@@ -268,60 +206,60 @@ const HardwarePage: React.FC = () => {
     setFormFaultDesc('');
   };
 
+  // 构建表单输入对象
+  const buildInput = (): HardwareAssetInput => ({
+    category_id: formCategoryId,
+    asset_name: formAssetName.trim(),
+    manufacturer: formManufacturer.trim() || null,
+    model: formModel.trim() || null,
+    department_id: null,
+    user_id: null,
+    status: parseInt(formStatus),
+    purchase_date: formPurchaseDate || null,
+    purchase_price: formPurchasePrice || null,
+    quantity: formQuantity,
+    used_quantity: formUsedQuantity,
+    expire_date: formExpireDate || null,
+    description: formDescription.trim() || null,
+    sn: formSn.trim() || null,
+    mac_address: formMacAddress.trim() || null,
+    location: formLocation.trim() || null,
+    hardware_config: formHardwareConfig.trim() || null,
+    use_user_id: null,
+    use_start_date: formUseStartDate || null,
+    maintenance_vendor: formMaintenanceVendor.trim() || null,
+    maintenance_type: formMaintenanceType.trim() || null,
+    maintenance_expire_date: formMaintenanceExpireDate || null,
+    fault_desc: formFaultDesc.trim() || null,
+  });
+
   // 保存
   const handleSave = async () => {
     if (!formAssetName.trim()) {
-      alert('请输入资产名称');
+      notifyError('验证失败', '请输入资产名称');
       return;
     }
     if (!formCategoryId) {
-      alert('请选择资产分类');
+      notifyError('验证失败', '请选择资产分类');
       return;
     }
 
-    setSaving(true);
     try {
-      const input: HardwareAssetInput = {
-        category_id: formCategoryId,
-        asset_name: formAssetName.trim(),
-        manufacturer: formManufacturer.trim() || null,
-        model: formModel.trim() || null,
-        department_id: null,
-        user_id: null,
-        status: parseInt(formStatus),
-        purchase_date: formPurchaseDate || null,
-        purchase_price: formPurchasePrice || null,
-        quantity: formQuantity,
-        used_quantity: formUsedQuantity,
-        expire_date: formExpireDate || null,
-        description: formDescription.trim() || null,
-        sn: formSn.trim() || null,
-        mac_address: formMacAddress.trim() || null,
-        location: formLocation.trim() || null,
-        hardware_config: formHardwareConfig.trim() || null,
-        use_user_id: null,
-        use_start_date: formUseStartDate || null,
-        maintenance_vendor: formMaintenanceVendor.trim() || null,
-        maintenance_type: formMaintenanceType.trim() || null,
-        maintenance_expire_date: formMaintenanceExpireDate || null,
-        fault_desc: formFaultDesc.trim() || null,
-      };
+      const input = buildInput();
 
       if (formMode === 'add') {
-        await invoke('insert_hardware_asset', { input });
-        alert('固定资产添加成功！');
+        await doInsert({ input });
+        notifySuccess('固定资产添加成功');
       } else if (editingId) {
-        await invoke('update_hardware_asset', { id: editingId, input });
-        alert('固定资产更新成功！');
+        await doUpdate({ id: editingId, input });
+        notifySuccess('固定资产更新成功');
       }
 
       setFormModalOpen(false);
       fetchAssets();
     } catch (err) {
       console.error('保存固定资产失败:', err);
-      alert(typeof err === 'string' ? err : '保存固定资产失败');
-    } finally {
-      setSaving(false);
+      notifyError('保存固定资产失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -334,18 +272,15 @@ const HardwarePage: React.FC = () => {
   // 确认删除
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    setDeleting(true);
     try {
-      await invoke('delete_hardware_asset', { id: deleteTarget.id });
+      await doDelete(deleteTarget.id);
       setDeleteModalOpen(false);
       setDeleteTarget(null);
-      alert('固定资产删除成功！');
+      notifySuccess('固定资产删除成功');
       fetchAssets();
     } catch (err) {
       console.error('删除固定资产失败:', err);
-      alert(typeof err === 'string' ? err : '删除固定资产失败');
-    } finally {
-      setDeleting(false);
+      notifyError('删除固定资产失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -833,8 +768,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.purchase_date
                       ? new Date(detailAsset.purchase_date).toLocaleDateString(
-                          'zh-CN'
-                        )
+                        'zh-CN'
+                      )
                       : '-'}
                   </Text>
                 </Group>
@@ -855,8 +790,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.expire_date
                       ? new Date(detailAsset.expire_date).toLocaleDateString(
-                          'zh-CN'
-                        )
+                        'zh-CN'
+                      )
                       : '-'}
                   </Text>
                 </Group>
@@ -899,8 +834,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.use_start_date
                       ? new Date(
-                          detailAsset.use_start_date
-                        ).toLocaleDateString('zh-CN')
+                        detailAsset.use_start_date
+                      ).toLocaleDateString('zh-CN')
                       : '-'}
                   </Text>
                 </Group>
@@ -935,8 +870,8 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {detailAsset.maintenance_expire_date
                       ? new Date(
-                          detailAsset.maintenance_expire_date
-                        ).toLocaleDateString('zh-CN')
+                        detailAsset.maintenance_expire_date
+                      ).toLocaleDateString('zh-CN')
                       : '-'}
                   </Text>
                 </Group>
