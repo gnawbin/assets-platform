@@ -3,6 +3,7 @@ use std::str;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize, Serializer};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 
 use serde::de::{self, Deserializer, Visitor};
 use std::fmt;
@@ -98,7 +99,7 @@ where
     deserializer.deserialize_any(OptI64Visitor)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetCategory {
     #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
     pub id: i64,
@@ -206,7 +207,7 @@ pub struct SysUser {
     pub deleted: Option<i16>, //删除标志，记录用户是否被删除，0=未删除，1=已删除，软删除使用
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Department {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64, //主键,唯一标识一条部门记录
@@ -283,7 +284,7 @@ pub struct SysMenu {
     /// 软删除标志（0=未删除，1=已删除）
     pub deleted: i16,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Role {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64, //主键，唯一标识一条角色记录

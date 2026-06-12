@@ -5,6 +5,7 @@ use crate::utils::snowflake::next_id;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use utoipa::ToSchema;
 
 /// JWT 声明
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,7 +37,7 @@ pub struct LoginResponse {
 }
 
 /// 用户列表响应（不包含密码）
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct UserResponse {
     pub id: i64,
     pub username: String,

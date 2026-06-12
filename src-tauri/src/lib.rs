@@ -1,3 +1,4 @@
+mod api;
 mod commands;
 mod database;
 mod service;
@@ -44,6 +45,13 @@ pub fn run() {
                 database::init_database().await.expect("数据库初始化失败");
                 tracing::info!("数据库初始化完成");
             });
+
+            // 在后台启动 HTTP API 服务（与 Tauri 共用 Tokio 运行时）
+            let pool = database::get_pool().expect("获取数据库连接池失败");
+            tauri::async_runtime::spawn(async move {
+                api::start_http_server(pool).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

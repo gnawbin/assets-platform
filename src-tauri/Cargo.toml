@@ -80,7 +80,16 @@ tokio = { version = "1.52", default-features = false, features = [
   "time",
   "fs",
   "net",
+  "signal",
 ] }
+
+# HTTP 服务框架（用于前后端分离时的 REST API）
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# OpenAPI / Swagger 文档
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "8", features = ["axum", "vendored"] }
 uuid = { version = "1.23.1", features = ["v4"] }
 # HTTP 客户端
 reqwest = { version = "0.13.2", features = [
