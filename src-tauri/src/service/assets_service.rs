@@ -3,10 +3,11 @@ use crate::utils::snowflake::next_id;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tracing::{error, info, warn};
+use utoipa::ToSchema;
 
 // ======================== 固定资产（JOIN 视图） ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HardwareAssetView {
     // assets 主表字段
     pub id: i64,
@@ -46,7 +47,7 @@ pub struct HardwareAssetView {
 
 // ======================== 无形资产（JOIN 视图） ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IntangibleAssetView {
     // assets 主表字段
     pub id: i64,
@@ -95,7 +96,7 @@ pub struct IntangibleAssetView {
 
 // ======================== 新增/修改请求体 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HardwareAssetInput {
     // assets 主表字段
     pub category_id: i64,
@@ -124,7 +125,7 @@ pub struct HardwareAssetInput {
     pub fault_desc: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IntangibleAssetInput {
     // assets 主表字段
     pub category_id: i64,
