@@ -33,81 +33,17 @@ import {
   IconSearch,
   IconDeviceDesktop,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { notifySuccess, notifyError } from '@/utils/notify';
-
-// ======================== 类型定义 ========================
-
-interface HardwareAssetView {
-  id: number;
-  asset_no: string;
-  asset_type: string;
-  category_id: number;
-  asset_name: string;
-  manufacturer: string | null;
-  model: string | null;
-  department_id: number | null;
-  user_id: number | null;
-  status: number;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  quantity: number | null;
-  used_quantity: number | null;
-  expire_date: string | null;
-  description: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-  deleted: number | null;
-  // hard_assets 扩展字段
-  hard_id: number | null;
-  sn: string | null;
-  mac_address: string | null;
-  location: string | null;
-  hardware_config: string | null;
-  use_user_id: number | null;
-  use_start_date: string | null;
-  maintenance_vendor: string | null;
-  maintenance_type: string | null;
-  maintenance_expire_date: string | null;
-  fault_desc: string | null;
-}
-
-interface HardwareAssetInput {
-  category_id: number;
-  asset_name: string;
-  manufacturer: string | null;
-  model: string | null;
-  department_id: number | null;
-  user_id: number | null;
-  status: number | null;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  quantity: number | null;
-  used_quantity: number | null;
-  expire_date: string | null;
-  description: string | null;
-  sn: string | null;
-  mac_address: string | null;
-  location: string | null;
-  hardware_config: string | null;
-  use_user_id: number | null;
-  use_start_date: string | null;
-  maintenance_vendor: string | null;
-  maintenance_type: string | null;
-  maintenance_expire_date: string | null;
-  fault_desc: string | null;
-}
-
-interface Category {
-  id: number;
-  category_name: string;
-  asset_type: string;
-  parent_id: number;
-  sort: number;
-  description: string | null;
-}
+import { useApi } from '@/hooks/useApi';
+import { getCategories, type Category } from '@/services/categoryService';
+import {
+  getHardwareAssets,
+  insertHardwareAsset,
+  updateHardwareAsset,
+  deleteHardwareAsset,
+  type HardwareAssetView,
+  type HardwareAssetInput,
+} from '@/services/hardwareService';
 
 // 状态映射
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
@@ -172,7 +108,7 @@ const HardwarePage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await invoke<HardwareAssetView[]>('get_hardware_assets');
+      const data = await getHardwareAssets();
       setAssets(data);
     } catch (err) {
       console.error('获取固定资产列表失败:', err);
@@ -184,7 +120,7 @@ const HardwarePage: React.FC = () => {
 
   const fetchCategories = async () => {
     try {
-      const data = await invoke<Category[]>('get_categories');
+      const data = await getCategories();
       setCategories(data.filter((c) => c.asset_type === 'fixed' || c.asset_type === 'hardware'));
     } catch (err) {
       console.error('获取分类列表失败:', err);
@@ -193,7 +129,7 @@ const HardwarePage: React.FC = () => {
 
   // 获取分类名称
   const getCategoryName = (id: number): string => {
-    const cat = categories.find((c) => c.id === id);
+    const cat = categories.find((c) => String(c.id) === String(id));
     return cat ? cat.category_name : `分类#${id}`;
   };
 
@@ -309,10 +245,10 @@ const HardwarePage: React.FC = () => {
       };
 
       if (formMode === 'add') {
-        await invoke('insert_hardware_asset', { input });
+        await insertHardwareAsset(input);
         notifySuccess('固定资产添加成功');
       } else if (editingId) {
-        await invoke('update_hardware_asset', { id: editingId, input });
+        await updateHardwareAsset(editingId, input);
         notifySuccess('固定资产更新成功');
       }
 
@@ -337,7 +273,7 @@ const HardwarePage: React.FC = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await invoke('delete_hardware_asset', { id: deleteTarget.id });
+      await deleteHardwareAsset(deleteTarget.id);
       setDeleteModalOpen(false);
       setDeleteTarget(null);
       notifySuccess('固定资产删除成功');

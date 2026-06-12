@@ -32,99 +32,17 @@ import {
   IconSearch,
   IconLicense,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { notifySuccess, notifyError } from '@/utils/notify';
-
-// ======================== 类型定义 ========================
-
-interface IntangibleAssetView {
-  id: number;
-  asset_no: string;
-  asset_type: string;
-  category_id: number;
-  asset_name: string;
-  manufacturer: string | null;
-  model: string | null;
-  department_id: number | null;
-  user_id: number | null;
-  status: number;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  quantity: number | null;
-  used_quantity: number | null;
-  expire_date: string | null;
-  description: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-  deleted: number | null;
-  // intangible_assets 扩展字段
-  intangible_id: number | null;
-  intangible_type: string | null;
-  register_no: string | null;
-  register_owner: string | null;
-  register_date: string | null;
-  valid_start_date: string | null;
-  valid_end_date: string | null;
-  right_status: string | null;
-  license_key: string | null;
-  license_type: string | null;
-  authorized_scope: string | null;
-  assigned_user_ids: string | null;
-  bind_type: string | null;
-  bind_info: string | null;
-  version: string | null;
-  download_link: string | null;
-  amortization_method: string | null;
-  useful_life: number | null;
-  amortization_amount: number | null;
-  residual_rate: number | null;
-}
-
-interface IntangibleAssetInput {
-  category_id: number;
-  asset_name: string;
-  manufacturer: string | null;
-  model: string | null;
-  department_id: number | null;
-  user_id: number | null;
-  status: number | null;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  quantity: number | null;
-  used_quantity: number | null;
-  expire_date: string | null;
-  description: string | null;
-  intangible_type: string | null;
-  register_no: string | null;
-  register_owner: string | null;
-  register_date: string | null;
-  valid_start_date: string | null;
-  valid_end_date: string | null;
-  right_status: string | null;
-  license_key: string | null;
-  license_type: string | null;
-  authorized_scope: string | null;
-  assigned_user_ids: string | null;
-  bind_type: string | null;
-  bind_info: string | null;
-  version: string | null;
-  download_link: string | null;
-  amortization_method: string | null;
-  useful_life: number | null;
-  amortization_amount: number | null;
-  residual_rate: number | null;
-}
-
-interface Category {
-  id: number;
-  category_name: string;
-  asset_type: string;
-  parent_id: number;
-  sort: number;
-  description: string | null;
-}
+import { useApi } from '@/hooks/useApi';
+import { getCategories, type Category } from '@/services/categoryService';
+import {
+  getIntangibleAssets,
+  insertIntangibleAsset,
+  updateIntangibleAsset,
+  deleteIntangibleAsset,
+  type IntangibleAssetView,
+  type IntangibleAssetInput,
+} from '@/services/softwareService';
 
 // 状态映射
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
@@ -218,7 +136,7 @@ const SoftwarePage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await invoke<IntangibleAssetView[]>('get_intangible_assets');
+      const data = await getIntangibleAssets();
       setAssets(data);
     } catch (err) {
       console.error('获取无形资产列表失败:', err);
@@ -230,7 +148,7 @@ const SoftwarePage: React.FC = () => {
 
   const fetchCategories = async () => {
     try {
-      const data = await invoke<Category[]>('get_categories');
+      const data = await getCategories();
       setCategories(data.filter((c) => c.asset_type === 'intangible'));
     } catch (err) {
       console.error('获取分类列表失败:', err);
@@ -239,7 +157,7 @@ const SoftwarePage: React.FC = () => {
 
   // 获取分类名称
   const getCategoryName = (id: number): string => {
-    const cat = categories.find((c) => c.id === id);
+    const cat = categories.find((c) => String(c.id) === String(id));
     return cat ? cat.category_name : `分类#${id}`;
   };
 
@@ -384,10 +302,10 @@ const SoftwarePage: React.FC = () => {
       };
 
       if (formMode === 'add') {
-        await invoke('insert_intangible_asset', { input });
+        await insertIntangibleAsset(input);
         notifySuccess('无形资产添加成功');
       } else if (editingId) {
-        await invoke('update_intangible_asset', { id: editingId, input });
+        await updateIntangibleAsset(editingId, input);
         notifySuccess('无形资产更新成功');
       }
 
@@ -412,7 +330,7 @@ const SoftwarePage: React.FC = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await invoke('delete_intangible_asset', { id: deleteTarget.id });
+      await deleteIntangibleAsset(deleteTarget.id);
       setDeleteModalOpen(false);
       setDeleteTarget(null);
       notifySuccess('无形资产删除成功');

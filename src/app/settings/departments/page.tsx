@@ -32,20 +32,15 @@ import {
   IconChevronRight,
   IconChevronDown,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { notifySuccess, notifyError } from '@/utils/notify';
-
-interface Department {
-  id: number;
-  department_name: string;
-  parent_id: number | null;
-  description: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-  deleted: number | null;
-}
+import { useApi } from '@/hooks/useApi';
+import {
+  getDepartments,
+  insertDepartment,
+  updateDepartment,
+  deleteDepartment,
+  type Department,
+} from '@/services/departmentService';
 
 // 树节点接口
 interface TreeNode {
@@ -86,7 +81,7 @@ const DepartmentsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await invoke<Department[]>('get_departments');
+      const data = await getDepartments();
       setDepartments(data);
       buildTree(data);
     } catch (err) {
@@ -180,7 +175,7 @@ const DepartmentsPage: React.FC = () => {
     setSaving(true);
     try {
       if (formMode === 'add') {
-        await invoke('insert_department', {
+        await insertDepartment({
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
@@ -189,7 +184,7 @@ const DepartmentsPage: React.FC = () => {
         notifySuccess('部门添加成功');
       } else {
         if (!selectedDept) return;
-        await invoke('update_department', {
+        await updateDepartment({
           id: selectedDept.id,
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
@@ -218,7 +213,7 @@ const DepartmentsPage: React.FC = () => {
     if (!selectedDept) return;
     setDeleting(true);
     try {
-      await invoke('delete_department', { id: selectedDept.id });
+      await deleteDepartment(selectedDept.id);
       setDeleteModalOpen(false);
       setSelectedDept(null);
       notifySuccess('部门删除成功');

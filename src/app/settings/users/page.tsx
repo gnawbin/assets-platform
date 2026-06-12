@@ -27,34 +27,17 @@ import {
   IconKey,
   IconRefresh,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { notifySuccess, notifyError } from '@/utils/notify';
-
-interface User {
-  id: number;
-  username: string;
-  real_name: string;
-  email: string | null;
-  phone: string | null;
-  department_id: number | null;
-  status: number;
-  nickname: string | null;
-  avatar: string | null;
-  person_id: string | null;
-  person_code: string | null;
-  super_user_id: number | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-}
-
-interface Department {
-  id: number;
-  department_name: string;
-  parent_id: number | null;
-  description: string | null;
-}
+import { useApi } from '@/hooks/useApi';
+import {
+  getUsers,
+  insertUser,
+  updateUser,
+  deleteUser,
+  resetPassword,
+  type User,
+} from '@/services/userService';
+import { getDepartments, type Department } from '@/services/departmentService';
 
 const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -94,7 +77,7 @@ const UsersPage: React.FC = () => {
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteUser, setDeleteUser] = useState<User | null>(null);
+  const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   // 重置密码弹窗
@@ -112,7 +95,7 @@ const UsersPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await invoke<User[]>('get_users');
+      const data = await getUsers();
       setUsers(data);
     } catch (err) {
       console.error('获取用户列表失败:', err);
@@ -124,7 +107,7 @@ const UsersPage: React.FC = () => {
 
   const fetchDepartments = async () => {
     try {
-      const data = await invoke<Department[]>('get_departments');
+      const data = await getDepartments();
       setDepartments(data);
     } catch {
       // 部门接口可能不存在，忽略错误
@@ -154,7 +137,7 @@ const UsersPage: React.FC = () => {
 
     setAdding(true);
     try {
-      await invoke('insert_user', {
+      await insertUser({
         username: newUser.username.trim(),
         password: newUser.password,
         realName: newUser.real_name.trim(),
@@ -220,7 +203,7 @@ const UsersPage: React.FC = () => {
 
     setEditing(true);
     try {
-      await invoke('update_user', {
+      await updateUser({
         id: editingUser.id,
         username: editForm.username.trim(),
         realName: editForm.real_name.trim(),
@@ -248,18 +231,18 @@ const UsersPage: React.FC = () => {
 
   // 打开删除确认弹窗
   const openDeleteModal = (user: User) => {
-    setDeleteUser(user);
+    setDeleteTargetUser(user);
     setDeleteModalOpen(true);
   };
 
   // 确认删除用户
   const handleDeleteUser = async () => {
-    if (!deleteUser) return;
+    if (!deleteTargetUser) return;
     setDeleting(true);
     try {
-      await invoke('delete_user', { id: deleteUser.id });
+      await deleteUser(deleteTargetUser.id);
       setDeleteModalOpen(false);
-      setDeleteUser(null);
+      setDeleteTargetUser(null);
       notifySuccess('用户删除成功');
       fetchUsers();
     } catch (err) {
@@ -291,10 +274,7 @@ const UsersPage: React.FC = () => {
 
     setResetting(true);
     try {
-      await invoke('reset_password', {
-        id: resetPwdUser.id,
-        newPassword: newPassword,
-      });
+      await resetPassword(resetPwdUser.id, newPassword);
       setResetPwdModalOpen(false);
       setResetPwdUser(null);
       setNewPassword('');
@@ -645,8 +625,8 @@ const UsersPage: React.FC = () => {
       >
         <Stack gap="md">
           <Text>
-            确定要删除用户 <strong>{deleteUser?.real_name}</strong>（
-            {deleteUser?.username}）吗？
+            确定要删除用户 <strong>{deleteTargetUser?.real_name}</strong>（
+            {deleteTargetUser?.username}）吗？
           </Text>
           <Text size="sm" c="dimmed">
             此操作将软删除该用户，用户将无法登录系统，但数据仍可恢复。

@@ -16,27 +16,18 @@ import {
   TextInput,
 } from '@mantine/core';
 import { IconAlertCircle, IconTrash, IconShield } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { notifySuccess, notifyError } from '@/utils/notify';
-
-interface Role {
-  id: number;
-  role_key: string;
-  role_name: string;
-  description: string | null;
-  created_by: number | null;
-  created_at: string | null;
-  updated_by: number | null;
-  updated_at: string | null;
-  deleted: number | null;
-}
-
-interface MantineTree {
-  value: string;
-  label: string;
-  children: MantineTree[] | null;
-  checked?: boolean;
-}
+import { useApi } from '@/hooks/useApi';
+import {
+  getRoles,
+  insertRole,
+  deleteRole,
+  getAllMenusTree,
+  getRoleMenuIds,
+  assignRoleMenus,
+  type Role,
+  type MantineTree,
+} from '@/services/permissionService';
 
 const PermissionsPage: React.FC = () => {
   console.log('PermissionsPage RENDERED');
@@ -55,7 +46,7 @@ const PermissionsPage: React.FC = () => {
 
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteRole, setDeleteRole] = useState<Role | null>(null);
+  const [deleteTargetRole, setDeleteTargetRole] = useState<Role | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   // 新增角色弹窗
@@ -73,7 +64,7 @@ const PermissionsPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await invoke<Role[]>('get_roles');
+      const data = await getRoles();
       setRoles(data);
     } catch (err) {
       console.error('获取角色列表失败:', err);
@@ -95,12 +86,12 @@ const PermissionsPage: React.FC = () => {
     try {
       // 获取菜单树
       console.log('invoking get_all_menus_tree...');
-      const tree = await invoke<MantineTree[]>('get_all_menus_tree');
+      const tree = await getAllMenusTree();
       console.log('get_all_menus_tree result:', tree);
       setMenuTree(tree);
       // 获取角色已分配的权限ID
       console.log('invoking get_role_menu_ids...');
-      const menuIds = await invoke<number[]>('get_role_menu_ids', { roleId: String(role.id) });
+      const menuIds = await getRoleMenuIds(String(role.id));
       console.log('get_role_menu_ids result:', menuIds);
       setCheckedMenuIds(new Set(menuIds.map(String)));
     } catch (err) {
@@ -117,7 +108,7 @@ const PermissionsPage: React.FC = () => {
     setSavingPerms(true);
     try {
       const menuIds = Array.from(checkedMenuIds);
-      await invoke('assign_role_menus', { roleId: String(selectedRole.id), menuIds });
+      await assignRoleMenus(String(selectedRole.id), menuIds);
       setPermModalOpen(false);
       notifySuccess('权限分配成功');
     } catch (err) {
@@ -130,18 +121,18 @@ const PermissionsPage: React.FC = () => {
 
   // 打开删除确认弹窗
   const openDeleteModal = (role: Role) => {
-    setDeleteRole(role);
+    setDeleteTargetRole(role);
     setDeleteModalOpen(true);
   };
 
   // 确认删除角色
   const handleDeleteRole = async () => {
-    if (!deleteRole) return;
+    if (!deleteTargetRole) return;
     setDeleting(true);
     try {
-      await invoke('delete_role', { roleId: String(deleteRole.id) });
+      await deleteRole(String(deleteTargetRole.id));
       setDeleteModalOpen(false);
-      setDeleteRole(null);
+      setDeleteTargetRole(null);
       notifySuccess('角色删除成功');
       fetchRoles();
     } catch (err) {
@@ -160,18 +151,16 @@ const PermissionsPage: React.FC = () => {
     }
     setAdding(true);
     try {
-      await invoke('insert_role', {
-        role: {
-          id: 0,
-          role_key: newRoleKey.trim(),
-          role_name: newRoleName.trim(),
-          description: newRoleDesc.trim() || null,
-          created_by: null,
-          created_at: null,
-          updated_by: null,
-          updated_at: null,
-          deleted: 0,
-        },
+      await insertRole({
+        id: 0,
+        role_key: newRoleKey.trim(),
+        role_name: newRoleName.trim(),
+        description: newRoleDesc.trim() || null,
+        created_by: null,
+        created_at: null,
+        updated_by: null,
+        updated_at: null,
+        deleted: 0,
       });
       setAddModalOpen(false);
       setNewRoleKey('');
@@ -378,7 +367,7 @@ const PermissionsPage: React.FC = () => {
       >
         <Stack gap="md">
           <Text>
-            确定要删除角色 <strong>{deleteRole?.role_name}</strong>（{deleteRole?.role_key}）吗？
+            确定要删除角色 <strong>{deleteTargetRole?.role_name}</strong>（{deleteTargetRole?.role_key}）吗？
           </Text>
           <Text size="sm" c="dimmed">
             此操作将同时删除该角色的所有权限关联和用户关联，且不可恢复。

@@ -35,22 +35,15 @@ import {
   IconChevronRight,
   IconChevronDown,
 } from '@tabler/icons-react';
-import { invoke } from '@tauri-apps/api/core';
 import { notifySuccess, notifyError } from '@/utils/notify';
-
-interface Category {
-  id: string;
-  category_name: string;
-  asset_type: string;
-  parent_id: string;
-  sort: number;
-  description: string | null;
-  created_by: string | null;
-  created_at: string | null;
-  updated_by: string | null;
-  updated_at: string | null;
-  deleted: number | null;
-}
+import { useApi } from '@/hooks/useApi';
+import {
+  getCategories,
+  insertCategory,
+  updateCategory,
+  deleteCategory,
+  type Category,
+} from '@/services/categoryService';
 
 // 树节点接口
 interface TreeNode {
@@ -95,7 +88,7 @@ const CategoriesPage: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await invoke<Category[]>('get_categories');
+      const data = await getCategories();
       setCategories(data);
       buildTree(data);
     } catch (err) {
@@ -215,7 +208,7 @@ const CategoriesPage: React.FC = () => {
           updated_at: null,
           deleted: null,
         };
-        await invoke('insert_category', { category: newCategory });
+        await insertCategory(newCategory);
         notifySuccess('分类添加成功');
       } else {
         if (!selectedCategory) return;
@@ -227,7 +220,7 @@ const CategoriesPage: React.FC = () => {
           sort: formSort,
           description: formDesc.trim() || null,
         };
-        await invoke('update_category', { category: updatedCategory });
+        await updateCategory(updatedCategory);
         notifySuccess('分类更新成功');
       }
       setFormModalOpen(false);
@@ -250,7 +243,7 @@ const CategoriesPage: React.FC = () => {
     if (!selectedCategory) return;
     setDeleting(true);
     try {
-      await invoke('delete_category', { id: selectedCategory.id });
+      await deleteCategory(selectedCategory.id);
       setDeleteModalOpen(false);
       setSelectedCategory(null);
       notifySuccess('分类删除成功');
