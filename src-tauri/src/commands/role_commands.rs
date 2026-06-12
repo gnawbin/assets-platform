@@ -2,7 +2,7 @@
 //!
 //! 对应 lib.rs 中的 insert_role / get_roles / get_role_menu_ids / assign_role_menus / delete_role / get_all_menus_tree
 
-use crate::database::models::{MantineTree, Role};
+use crate::database::models::{MantineTree, Role, SidebarMenuItem};
 use crate::service;
 
 /// 新增角色
@@ -55,4 +55,10 @@ pub async fn delete_role(role_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
     service::role_service::get_all_menus_tree().await
+}
+
+/// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
+#[tauri::command]
+pub async fn get_user_menus() -> Result<Vec<SidebarMenuItem>, String> {
+    service::role_service::get_user_menus().await
 }

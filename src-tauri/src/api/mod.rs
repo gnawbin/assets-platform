@@ -150,6 +150,9 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/roles", get(role_routes::get_roles))
         .route("/api/roles", post(role_routes::insert_role))
         .route("/api/roles/{id}", delete(role_routes::delete_role))
+        // 菜单
+        .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
+        .route("/api/menus/user", get(role_routes::get_user_menus))
         // 应用认证中间件
         .layer(middleware::from_fn(auth_middleware));
 
