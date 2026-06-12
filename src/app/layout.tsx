@@ -40,8 +40,8 @@ export default function RootLayout({
       logger.info('[Adapter] 检测到 Tauri 环境，使用 Tauri 适配器');
       setAdapter('tauri');
     } else {
-      logger.info('[Adapter] 未检测到 Tauri 环境，默认使用 Tauri 适配器');
-      setAdapter('tauri');
+      logger.info('[Adapter] 未检测到 Tauri 环境，默认使用 HTTP 适配器');
+      setAdapter('http');
     }
   }, []);
 

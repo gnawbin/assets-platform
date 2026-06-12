@@ -228,7 +228,7 @@ const Sidebar: React.FC = () => {
 
         <Box
           p="md"
-          style={{ borderTop: '1px solid #e9ecef', marginTop: 'auto' }}
+          style={{ borderTop: '1px solid var(--mantine-color-gray-3)', marginTop: 'auto' }}
         >
           <Text size="xs" c="dimmed" mb={5}>
             IT设备资产管理系统
