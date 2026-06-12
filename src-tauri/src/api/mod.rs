@@ -142,12 +142,16 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             delete(department_routes::delete_department),
         )
         // 用户
+        .route("/api/users/me", get(user_routes::get_current_user))
         .route("/api/users", get(user_routes::get_users))
         .route("/api/users", post(user_routes::insert_user))
         .route("/api/users/{id}", put(user_routes::update_user))
         .route("/api/users/{id}", delete(user_routes::delete_user))
         .route("/api/users/{id}/roles", get(role_routes::get_user_role_ids))
-        .route("/api/users/{id}/roles", post(role_routes::assign_user_roles))
+        .route(
+            "/api/users/{id}/roles",
+            post(role_routes::assign_user_roles),
+        )
         // 角色
         .route("/api/roles", get(role_routes::get_roles))
         .route("/api/roles", post(role_routes::insert_role))

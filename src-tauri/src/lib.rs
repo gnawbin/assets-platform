@@ -115,6 +115,7 @@ pub fn run() {
             commands::user_commands::insert_user,
             commands::user_commands::update_user,
             commands::user_commands::delete_user,
+            commands::user_commands::get_current_user,
             commands::user_commands::reset_password,
             // 部门管理
             commands::department_commands::get_departments,

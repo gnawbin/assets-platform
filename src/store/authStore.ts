@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { api } from '@/utils/api';
 
 export interface UserInfo {
   id: number;
@@ -24,7 +25,7 @@ interface AuthState {
   isLoggedIn: boolean;
   login: (result: LoginResult) => void;
   logout: () => void;
-  init: () => void;
+  init: () => Promise<void>;
 }
 
 /**
@@ -63,7 +64,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: null, token: null, isLoggedIn: false });
   },
 
-  init: () => {
+  init: async () => {
     const storedToken = localStorage.getItem('auth_token');
     const storedUser = localStorage.getItem('auth_user');
 
@@ -78,11 +79,21 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       try {
-        const user = JSON.parse(storedUser) as UserInfo;
-        set({ user, token: storedToken, isLoggedIn: true });
+        // 优先从后端获取最新用户信息
+        const freshUser = await api.get<UserInfo>('get_current_user', { token: storedToken });
+        // 更新 localStorage 中的缓存
+        localStorage.setItem('auth_user', JSON.stringify(freshUser));
+        set({ user: freshUser, token: storedToken, isLoggedIn: true });
+        return;
       } catch {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_user');
+        // 后端请求失败，降级使用 localStorage 的缓存
+        try {
+          const user = JSON.parse(storedUser) as UserInfo;
+          set({ user, token: storedToken, isLoggedIn: true });
+        } catch {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+        }
       }
     }
   },

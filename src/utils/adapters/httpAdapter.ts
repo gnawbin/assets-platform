@@ -73,6 +73,7 @@ const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     delete_department: { method: 'DELETE', path: '/api/departments/{id}' },
 
     // ======================== 用户 ========================
+    get_current_user: { method: 'GET', path: '/api/users/me' },
     get_users: { method: 'GET', path: '/api/users' },
     insert_user: { method: 'POST', path: '/api/users' },
     update_user: { method: 'PUT', path: '/api/users/{id}' },

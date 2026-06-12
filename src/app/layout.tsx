@@ -56,7 +56,9 @@ export default function RootLayout({
   }, [pathname]);
 
   useEffect(() => {
-    init();
+    init().catch((err) => {
+      logger.error('初始化认证状态失败', err);
+    });
   }, [init]);
 
   useEffect(() => {
