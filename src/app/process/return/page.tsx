@@ -28,6 +28,8 @@ import {
   type AssetReturn,
   type AssetReturnInput,
 } from '@/services/processService';
+import AssetSelect from '@/components/AssetSelect';
+import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 
 const ReturnPage: React.FC = () => {
   const [returns, setReturns] = useState<AssetReturn[]>([]);
@@ -223,20 +225,27 @@ const ReturnPage: React.FC = () => {
               onChange={(e) => setForm({ ...form, receive_id: parseInt(e.currentTarget.value) || 0 })}
               required
             />
-            <TextInput
-              label="资产ID"
-              type="number"
-              value={form.asset_id || ''}
-              onChange={(e) => setForm({ ...form, asset_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
-            <TextInput
-              label="用户ID"
-              type="number"
-              value={form.user_id || ''}
-              onChange={(e) => setForm({ ...form, user_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
+            <div>
+              <Text size="sm" fw={500} mb={4}>选择资产</Text>
+              <AssetSelect
+                mode="single"
+                value={form.asset_id ? String(form.asset_id) : null}
+                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                label="选择资产"
+              />
+            </div>
+            <div>
+              <Text size="sm" fw={500} mb={4}>选择用户</Text>
+              <DepartmentUserSelect
+                departmentId={null}
+                userId={form.user_id ? String(form.user_id) : null}
+                onDepartmentChange={() => { }}
+                onUserChange={(userId) =>
+                  setForm({ ...form, user_id: userId ? parseInt(userId) : 0 })
+                }
+                userLabel="选择用户"
+              />
+            </div>
             <TextInput
               label="归还日期"
               type="date"
@@ -259,13 +268,18 @@ const ReturnPage: React.FC = () => {
               value={form.remark || ''}
               onChange={(e) => setForm({ ...form, remark: e.currentTarget.value })}
             />
-            <TextInput
-              label="确认人ID"
-              type="number"
-              value={form.confirm_by || ''}
-              onChange={(e) => setForm({ ...form, confirm_by: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
+            <div>
+              <Text size="sm" fw={500} mb={4}>确认人</Text>
+              <DepartmentUserSelect
+                departmentId={null}
+                userId={form.confirm_by ? String(form.confirm_by) : null}
+                onDepartmentChange={() => { }}
+                onUserChange={(userId) =>
+                  setForm({ ...form, confirm_by: userId ? parseInt(userId) : 0 })
+                }
+                userLabel="选择确认人"
+              />
+            </div>
             <TextInput
               label="确认时间"
               type="date"

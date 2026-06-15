@@ -28,15 +28,17 @@ import {
     type AssetReceive,
     type AssetReceiveInput,
 } from '@/services/processService';
+import AssetSelect from '@/components/AssetSelect';
+import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 
 const ReceivePage: React.FC = () => {
     const [receives, setReceives] = useState<AssetReceive[]>([]);
     const [modalOpened, setModalOpened] = useState(false);
     const [editingId, setEditingId] = useState<number | null>(null);
     const [form, setForm] = useState<AssetReceiveInput>({
-        asset_id: 0,
-        user_id: 0,
-        department_id: 0,
+        asset_id: '',
+        user_id: '',
+        department_id: '',
         receive_date: '',
         reason: '',
         status: 0,
@@ -59,9 +61,9 @@ const ReceivePage: React.FC = () => {
     const openCreateModal = () => {
         setEditingId(null);
         setForm({
-            asset_id: 0,
-            user_id: 0,
-            department_id: 0,
+            asset_id: '',
+            user_id: '',
+            department_id: '',
             receive_date: new Date().toISOString().split('T')[0],
             reason: '',
             status: 0,
@@ -211,27 +213,31 @@ const ReceivePage: React.FC = () => {
                     size="lg"
                 >
                     <Stack gap="md">
-                        <TextInput
-                            label="资产ID"
-                            type="number"
-                            value={form.asset_id || ''}
-                            onChange={(e) => setForm({ ...form, asset_id: parseInt(e.currentTarget.value) || 0 })}
-                            required
-                        />
-                        <TextInput
-                            label="用户ID"
-                            type="number"
-                            value={form.user_id || ''}
-                            onChange={(e) => setForm({ ...form, user_id: parseInt(e.currentTarget.value) || 0 })}
-                            required
-                        />
-                        <TextInput
-                            label="部门ID"
-                            type="number"
-                            value={form.department_id || ''}
-                            onChange={(e) => setForm({ ...form, department_id: parseInt(e.currentTarget.value) || 0 })}
-                            required
-                        />
+                        <div>
+                            <Text size="sm" fw={500} mb={4}>选择资产</Text>
+                            <AssetSelect
+                                mode="single"
+                                value={form.asset_id}
+                                onChange={(id) => setForm({ ...form, asset_id: id ?? '' })}
+                                label="选择资产"
+                            />
+                        </div>
+
+                        <div>
+                            <Text size="sm" fw={500} mb={4}>选择用户</Text>
+                            <DepartmentUserSelect
+                                departmentId={form.department_id}
+                                userId={form.user_id}
+                                onDepartmentChange={(deptId) =>
+                                    setForm({ ...form, department_id: deptId ?? '' })
+                                }
+                                onUserChange={(userId) =>
+                                    setForm({ ...form, user_id: userId ?? '' })
+                                }
+                            />
+                        </div>
+
+
                         <TextInput
                             label="领用日期"
                             type="date"

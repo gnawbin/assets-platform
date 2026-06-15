@@ -12,9 +12,9 @@ import { api } from '@/utils/api';
 export interface AssetReceive {
     id: number;
     receive_no: string;
-    asset_id: number;
-    user_id: number;
-    department_id: number;
+    asset_id: string;
+    user_id: string;
+    department_id: string;
     receive_date: string;
     reason: string;
     status: number;
@@ -29,9 +29,9 @@ export interface AssetReceive {
 
 export interface AssetReceiveInput {
     [key: string]: unknown;
-    asset_id: number;
-    user_id: number;
-    department_id: number;
+    asset_id: string;
+    user_id: string;
+    department_id: string;
     receive_date: string;
     reason: string;
     status?: number;

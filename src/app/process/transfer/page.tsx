@@ -28,6 +28,8 @@ import {
   type AssetTransfer,
   type AssetTransferInput,
 } from '@/services/processService';
+import AssetSelect from '@/components/AssetSelect';
+import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 
 const TransferPage: React.FC = () => {
   const [transfers, setTransfers] = useState<AssetTransfer[]>([]);
@@ -221,41 +223,46 @@ const TransferPage: React.FC = () => {
           size="lg"
         >
           <Stack gap="md">
-            <TextInput
-              label="资产ID"
-              type="number"
-              value={form.asset_id || ''}
-              onChange={(e) => setForm({ ...form, asset_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
-            <TextInput
-              label="调出部门ID"
-              type="number"
-              value={form.out_dept_id || ''}
-              onChange={(e) => setForm({ ...form, out_dept_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
-            <TextInput
-              label="调入部门ID"
-              type="number"
-              value={form.in_dept_id || ''}
-              onChange={(e) => setForm({ ...form, in_dept_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
-            <TextInput
-              label="调出人ID"
-              type="number"
-              value={form.out_user_id || ''}
-              onChange={(e) => setForm({ ...form, out_user_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
-            <TextInput
-              label="调入人ID"
-              type="number"
-              value={form.in_user_id || ''}
-              onChange={(e) => setForm({ ...form, in_user_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
+            <div>
+              <Text size="sm" fw={500} mb={4}>选择资产</Text>
+              <AssetSelect
+                mode="single"
+                value={form.asset_id ? String(form.asset_id) : null}
+                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                label="选择资产"
+              />
+            </div>
+
+            <div>
+              <Text size="sm" fw={500} mb={4}>调出人</Text>
+              <DepartmentUserSelect
+                departmentId={form.out_dept_id ? String(form.out_dept_id) : null}
+                userId={form.out_user_id ? String(form.out_user_id) : null}
+                onDepartmentChange={(deptId) =>
+                  setForm({ ...form, out_dept_id: deptId ? parseInt(deptId) : 0 })
+                }
+                onUserChange={(userId) =>
+                  setForm({ ...form, out_user_id: userId ? parseInt(userId) : 0 })
+                }
+                userLabel="选择调出人"
+              />
+            </div>
+
+            <div>
+              <Text size="sm" fw={500} mb={4}>调入人</Text>
+              <DepartmentUserSelect
+                departmentId={form.in_dept_id ? String(form.in_dept_id) : null}
+                userId={form.in_user_id ? String(form.in_user_id) : null}
+                onDepartmentChange={(deptId) =>
+                  setForm({ ...form, in_dept_id: deptId ? parseInt(deptId) : 0 })
+                }
+                onUserChange={(userId) =>
+                  setForm({ ...form, in_user_id: userId ? parseInt(userId) : 0 })
+                }
+                userLabel="选择调入人"
+              />
+            </div>
+
             <TextInput
               label="调拨日期"
               type="date"

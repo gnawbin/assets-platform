@@ -28,6 +28,8 @@ import {
   type AssetScrap,
   type AssetScrapInput,
 } from '@/services/processService';
+import AssetSelect from '@/components/AssetSelect';
+import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 
 const ScrapPage: React.FC = () => {
   const [scraps, setScraps] = useState<AssetScrap[]>([]);
@@ -204,13 +206,15 @@ const ScrapPage: React.FC = () => {
           size="lg"
         >
           <Stack gap="md">
-            <TextInput
-              label="资产ID"
-              type="number"
-              value={form.asset_id || ''}
-              onChange={(e) => setForm({ ...form, asset_id: parseInt(e.currentTarget.value) || 0 })}
-              required
-            />
+            <div>
+              <Text size="sm" fw={500} mb={4}>选择资产</Text>
+              <AssetSelect
+                mode="single"
+                value={form.asset_id ? String(form.asset_id) : null}
+                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                label="选择资产"
+              />
+            </div>
             <Textarea
               label="报废原因"
               value={form.reason}
@@ -224,12 +228,18 @@ const ScrapPage: React.FC = () => {
               onChange={(e) => setForm({ ...form, scrap_date: e.currentTarget.value })}
               required
             />
-            <TextInput
-              label="处理人ID"
-              type="number"
-              value={form.handle_user || ''}
-              onChange={(e) => setForm({ ...form, handle_user: parseInt(e.currentTarget.value) || 0 })}
-            />
+            <div>
+              <Text size="sm" fw={500} mb={4}>处理人</Text>
+              <DepartmentUserSelect
+                departmentId={null}
+                userId={form.handle_user ? String(form.handle_user) : null}
+                onDepartmentChange={() => { }}
+                onUserChange={(userId) =>
+                  setForm({ ...form, handle_user: userId ? parseInt(userId) : 0 })
+                }
+                userLabel="选择处理人"
+              />
+            </div>
             <Select
               label="状态"
               data={[

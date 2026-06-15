@@ -28,6 +28,7 @@ import {
     type AssetPurchase,
     type AssetPurchaseInput,
 } from '@/services/processService';
+import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 
 const PurchasePage: React.FC = () => {
     const [purchases, setPurchases] = useState<AssetPurchase[]>([]);
@@ -278,20 +279,20 @@ const PurchasePage: React.FC = () => {
                             value={form.total_price || ''}
                             onChange={(e) => setForm({ ...form, total_price: parseFloat(e.currentTarget.value) || 0 })}
                         />
-                        <TextInput
-                            label="申请人ID"
-                            type="number"
-                            value={form.apply_user || ''}
-                            onChange={(e) => setForm({ ...form, apply_user: parseInt(e.currentTarget.value) || 0 })}
-                            required
-                        />
-                        <TextInput
-                            label="部门ID"
-                            type="number"
-                            value={form.dept_id || ''}
-                            onChange={(e) => setForm({ ...form, dept_id: parseInt(e.currentTarget.value) || 0 })}
-                            required
-                        />
+                        <div>
+                            <Text size="sm" fw={500} mb={4}>申请人</Text>
+                            <DepartmentUserSelect
+                                departmentId={form.dept_id ? String(form.dept_id) : null}
+                                userId={form.apply_user ? String(form.apply_user) : null}
+                                onDepartmentChange={(deptId) =>
+                                    setForm({ ...form, dept_id: deptId ? parseInt(deptId) : 0 })
+                                }
+                                onUserChange={(userId) =>
+                                    setForm({ ...form, apply_user: userId ? parseInt(userId) : 0 })
+                                }
+                                userLabel="选择申请人"
+                            />
+                        </div>
                         <Textarea
                             label="采购原因"
                             value={form.reason}

@@ -28,6 +28,8 @@ import {
     type AssetRepair,
     type AssetRepairInput,
 } from '@/services/processService';
+import AssetSelect from '@/components/AssetSelect';
+import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 
 const RepairPage: React.FC = () => {
     const [repairs, setRepairs] = useState<AssetRepair[]>([]);
@@ -230,13 +232,15 @@ const RepairPage: React.FC = () => {
                     size="lg"
                 >
                     <Stack gap="md">
-                        <TextInput
-                            label="资产ID"
-                            type="number"
-                            value={form.asset_id || ''}
-                            onChange={(e) => setForm({ ...form, asset_id: parseInt(e.currentTarget.value) || 0 })}
-                            required
-                        />
+                        <div>
+                            <Text size="sm" fw={500} mb={4}>选择资产</Text>
+                            <AssetSelect
+                                mode="single"
+                                value={form.asset_id ? String(form.asset_id) : null}
+                                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                                label="选择资产"
+                            />
+                        </div>
                         <Textarea
                             label="故障描述"
                             value={form.fault_desc}
@@ -248,18 +252,20 @@ const RepairPage: React.FC = () => {
                             value={form.repair_desc || ''}
                             onChange={(e) => setForm({ ...form, repair_desc: e.currentTarget.value })}
                         />
-                        <TextInput
-                            label="维修人ID"
-                            type="number"
-                            value={form.repair_user_id || ''}
-                            onChange={(e) => setForm({ ...form, repair_user_id: parseInt(e.currentTarget.value) || 0 })}
-                        />
-                        <TextInput
-                            label="维修部门ID"
-                            type="number"
-                            value={form.repair_dept_id || ''}
-                            onChange={(e) => setForm({ ...form, repair_dept_id: parseInt(e.currentTarget.value) || 0 })}
-                        />
+                        <div>
+                            <Text size="sm" fw={500} mb={4}>维修人</Text>
+                            <DepartmentUserSelect
+                                departmentId={form.repair_dept_id ? String(form.repair_dept_id) : null}
+                                userId={form.repair_user_id ? String(form.repair_user_id) : null}
+                                onDepartmentChange={(deptId) =>
+                                    setForm({ ...form, repair_dept_id: deptId ? parseInt(deptId) : 0 })
+                                }
+                                onUserChange={(userId) =>
+                                    setForm({ ...form, repair_user_id: userId ? parseInt(userId) : 0 })
+                                }
+                                userLabel="选择维修人"
+                            />
+                        </div>
                         <Select
                             label="维修类型"
                             data={[
