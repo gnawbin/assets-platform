@@ -36,7 +36,7 @@ export function getRoles() {
 }
 
 /** 新增角色 */
-export function insertRole(role: Role) {
+export function insertRole(role: { role_key: string; role_name: string; description?: string | null }) {
     return api.post<string>('insert_role', { role });
 }
 

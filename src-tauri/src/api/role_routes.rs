@@ -8,7 +8,6 @@ use utoipa::ToSchema;
 
 use crate::database::models::{MantineTree, Role, SidebarMenuItem};
 use crate::service;
-use crate::utils::snowflake::next_id;
 
 use super::response::{ApiError, ApiResponse};
 
@@ -67,19 +66,15 @@ pub async fn get_roles() -> Result<Json<ApiResponse<Vec<Role>>>, ApiError> {
 pub async fn insert_role(
     Json(req): Json<CreateRoleRequest>,
 ) -> Result<Json<ApiResponse<Role>>, ApiError> {
-    let role = Role {
-        id: next_id() as i64,
-        role_key: req.role_key,
-        role_name: req.role_name,
-        description: req.description,
-        created_by: Some(1),
-        created_at: None,
-        updated_by: Some(1),
-        updated_at: None,
-        deleted: Some(0),
-    };
-
-    match service::role_service::insert_role(&role).await {
+    // 通过 service 层创建角色，路由层不直接构造 Role 对象
+    match service::role_service::insert_role_by_params(
+        &req.role_key,
+        &req.role_name,
+        req.description.as_deref(),
+        Some(1), // created_by
+    )
+    .await
+    {
         Ok(role) => Ok(Json(ApiResponse::success(role))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
@@ -166,6 +161,68 @@ pub async fn assign_user_roles(
         .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
 
     match service::role_service::assign_user_roles(user_id, req.role_ids).await {
+        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+// ======================== 角色菜单关联 ========================
+
+/// 分配角色菜单请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AssignRoleMenusRequest {
+    pub menu_ids: Vec<i64>,
+}
+
+/// 获取角色已分配的菜单 ID 列表
+#[utoipa::path(
+    get,
+    path = "/api/roles/{id}/menus",
+    tag = "角色管理",
+    responses(
+        (status = 200, description = "获取成功", body = ApiResponse<Vec<i64>>),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_role_menu_ids(
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Vec<i64>>>, ApiError> {
+    let role_id: i64 = id
+        .parse()
+        .map_err(|_| ApiError::bad_request("无效的角色ID"))?;
+
+    match service::role_service::get_role_menu_ids(role_id).await {
+        Ok(menu_ids) => Ok(Json(ApiResponse::success(menu_ids))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 为角色分配菜单权限
+#[utoipa::path(
+    post,
+    path = "/api/roles/{id}/menus",
+    tag = "角色管理",
+    request_body = AssignRoleMenusRequest,
+    responses(
+        (status = 200, description = "分配成功"),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn assign_role_menus(
+    Path(id): Path<String>,
+    Json(req): Json<AssignRoleMenusRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let role_id: i64 = id
+        .parse()
+        .map_err(|_| ApiError::bad_request("无效的角色ID"))?;
+
+    match service::role_service::assign_role_menus(role_id, req.menu_ids).await {
         Ok(_) => Ok(Json(ApiResponse::success(()))),
         Err(e) => Err(ApiError::internal_error(e)),
     }

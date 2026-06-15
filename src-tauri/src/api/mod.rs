@@ -147,6 +147,10 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/users", post(user_routes::insert_user))
         .route("/api/users/{id}", put(user_routes::update_user))
         .route("/api/users/{id}", delete(user_routes::delete_user))
+        .route(
+            "/api/users/{id}/reset-password",
+            post(user_routes::reset_password),
+        )
         .route("/api/users/{id}/roles", get(role_routes::get_user_role_ids))
         .route(
             "/api/users/{id}/roles",
@@ -156,6 +160,11 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/roles", get(role_routes::get_roles))
         .route("/api/roles", post(role_routes::insert_role))
         .route("/api/roles/{id}", delete(role_routes::delete_role))
+        .route("/api/roles/{id}/menus", get(role_routes::get_role_menu_ids))
+        .route(
+            "/api/roles/{id}/menus",
+            post(role_routes::assign_role_menus),
+        )
         // 菜单
         .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
         .route("/api/menus/user", get(role_routes::get_user_menus))

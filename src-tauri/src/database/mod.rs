@@ -57,11 +57,13 @@ impl DatabaseManager {
         Self { pool: None, config }
     }
 
-    /// 初始化数据库连接
+    /// 初始化数据库连接和表结构
     pub async fn init(&mut self) -> Result<()> {
         let config = postgres::PostgresConfig::from_env()?;
         postgres::init_postgres_pool(config).await?;
         let pool = postgres::get_postgres_pool()?;
+        // 初始化表结构
+        postgres::init_postgres_tables(&pool).await?;
         self.pool = Some(pool);
         Ok(())
     }

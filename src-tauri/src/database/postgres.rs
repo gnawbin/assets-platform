@@ -341,58 +341,26 @@ pub async fn test_postgres_connection(config: &PostgresConfig) -> Result<()> {
 }
 
 /// 初始化 PostgreSQL 数据库表结构
+///
+/// 注意：此函数创建的表结构与 models.rs 中的实体定义保持一致。
+/// 所有表均支持软删除（deleted 字段），使用 Snowflake ID 作为主键。
 #[allow(dead_code)]
 pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
-    // 创建系统配置表
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS system_config (
-            id BIGSERIAL PRIMARY KEY,
-            config_key VARCHAR(255) NOT NULL UNIQUE,
-            config_value TEXT NOT NULL,
-            remark TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| anyhow!("Failed to create system_config table: {}", e))?;
-
-    // 创建数据库配置表
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS db_config (
-            id BIGSERIAL PRIMARY KEY,
-            host VARCHAR(255) NOT NULL,
-            port INTEGER NOT NULL,
-            db_name VARCHAR(255) NOT NULL,
-            username VARCHAR(255) NOT NULL,
-            password VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| anyhow!("Failed to create db_config table: {}", e))?;
-
-    // 创建资产分类表
+    // ======================== 资产分类表 ========================
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS asset_category (
-            id BIGSERIAL PRIMARY KEY,
+            id BIGINT PRIMARY KEY,
             category_name VARCHAR(255) NOT NULL,
             asset_type VARCHAR(50) NOT NULL,
-            parent_id BIGINT DEFAULT 0,
+            parent_id BIGINT,
             sort SMALLINT DEFAULT 0,
             description TEXT,
             created_by BIGINT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_by BIGINT,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0
         )
         "#,
     )
@@ -400,28 +368,31 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
     .await
     .map_err(|e| anyhow!("Failed to create asset_category table: {}", e))?;
 
-    // 创建资产表
+    // ======================== 资产主表 ========================
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS assets (
-            id BIGSERIAL PRIMARY KEY,
+            id BIGINT PRIMARY KEY,
             asset_no VARCHAR(100) NOT NULL UNIQUE,
             asset_type VARCHAR(50) NOT NULL,
             category_id BIGINT NOT NULL,
             asset_name VARCHAR(255) NOT NULL,
             manufacturer VARCHAR(255),
             model VARCHAR(255),
-            serial_no VARCHAR(255),
-            purchase_date DATE,
+            department_id BIGINT,
+            user_id BIGINT,
+            status SMALLINT DEFAULT 0,
+            purchase_date TIMESTAMP,
             purchase_price DECIMAL(15, 2),
-            status VARCHAR(50) DEFAULT 'active',
-            location VARCHAR(255),
-            responsible_person VARCHAR(255),
+            quantity INT DEFAULT 1,
+            used_quantity INT DEFAULT 0,
+            expire_date TIMESTAMP,
             description TEXT,
             created_by BIGINT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
             updated_by BIGINT,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
             FOREIGN KEY (category_id) REFERENCES asset_category(id)
         )
         "#,
@@ -430,28 +401,465 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
     .await
     .map_err(|e| anyhow!("Failed to create assets table: {}", e))?;
 
-    // 创建用户表
+    // ======================== 固定资产扩展表 ========================
     sqlx::query(
         r#"
-        CREATE TABLE IF NOT EXISTS users (
-            id BIGSERIAL PRIMARY KEY,
-            username VARCHAR(100) NOT NULL UNIQUE,
-            email VARCHAR(255) NOT NULL UNIQUE,
-            password_hash VARCHAR(255) NOT NULL,
-            full_name VARCHAR(255),
-            role VARCHAR(50) DEFAULT 'user',
-            is_active BOOLEAN DEFAULT true,
-            last_login TIMESTAMP WITH TIME ZONE,
+        CREATE TABLE IF NOT EXISTS hard_assets (
+            id BIGINT PRIMARY KEY,
+            asset_id BIGINT NOT NULL UNIQUE,
+            sn VARCHAR(255),
+            mac_address VARCHAR(255),
+            location VARCHAR(255),
+            maintenance_vendor VARCHAR(255),
+            maintenance_type VARCHAR(50),
+            maintenance_expire_date TIMESTAMP,
+            hardware_config TEXT,
+            use_user_id BIGINT,
+            use_start_date TIMESTAMP,
+            fault_desc TEXT,
+            created_by BIGINT,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
         )
         "#,
     )
     .execute(pool)
     .await
-    .map_err(|e| anyhow!("Failed to create users table: {}", e))?;
+    .map_err(|e| anyhow!("Failed to create hard_assets table: {}", e))?;
 
-    // 创建索引
+    // ======================== 无形资产扩展表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS intangible_assets (
+            id BIGINT PRIMARY KEY,
+            asset_id BIGINT NOT NULL UNIQUE,
+            intangible_type VARCHAR(50) NOT NULL,
+            register_no VARCHAR(255),
+            register_owner VARCHAR(255),
+            register_date TIMESTAMP,
+            valid_start_date TIMESTAMP,
+            valid_end_date TIMESTAMP,
+            right_status VARCHAR(50),
+            license_key VARCHAR(255),
+            license_type VARCHAR(50),
+            authorized_scope TEXT,
+            assigned_user_ids TEXT,
+            bind_type VARCHAR(50),
+            bind_info TEXT,
+            version VARCHAR(100),
+            download_link TEXT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create intangible_assets table: {}", e))?;
+
+    // ======================== 用户表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sys_user (
+            id BIGINT PRIMARY KEY,
+            username VARCHAR(100) NOT NULL UNIQUE,
+            passwd VARCHAR(255) NOT NULL,
+            domain VARCHAR(100),
+            real_name VARCHAR(255) NOT NULL,
+            email VARCHAR(255),
+            phone VARCHAR(50),
+            department_id BIGINT,
+            status SMALLINT DEFAULT 1,
+            nickname VARCHAR(255),
+            avatar TEXT,
+            person_id VARCHAR(50),
+            person_code VARCHAR(50),
+            super_user_id BIGINT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create sys_user table: {}", e))?;
+
+    // ======================== 部门表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS department (
+            id BIGINT PRIMARY KEY,
+            department_name VARCHAR(255) NOT NULL,
+            parent_id BIGINT,
+            description TEXT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create department table: {}", e))?;
+
+    // ======================== 角色表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sys_role (
+            id BIGINT PRIMARY KEY,
+            role_key VARCHAR(100) NOT NULL UNIQUE,
+            role_name VARCHAR(255) NOT NULL,
+            description TEXT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create sys_role table: {}", e))?;
+
+    // ======================== 菜单表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sys_menu (
+            id BIGINT PRIMARY KEY,
+            menu_name VARCHAR(255) NOT NULL,
+            parent_id BIGINT,
+            path VARCHAR(255),
+            component VARCHAR(255),
+            icon VARCHAR(100),
+            order_num SMALLINT DEFAULT 0,
+            visible BOOLEAN DEFAULT true,
+            perms VARCHAR(255),
+            menu_type SMALLINT DEFAULT 1,
+            hidden_button BOOLEAN DEFAULT false,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create sys_menu table: {}", e))?;
+
+    // ======================== 用户角色关联表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sys_user_role (
+            id BIGINT PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            role_id BIGINT NOT NULL,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES sys_user(id),
+            FOREIGN KEY (role_id) REFERENCES sys_role(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create sys_user_role table: {}", e))?;
+
+    // ======================== 角色菜单关联表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS sys_role_menu (
+            id BIGINT PRIMARY KEY,
+            role_id BIGINT NOT NULL,
+            menu_id BIGINT NOT NULL,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (role_id) REFERENCES sys_role(id),
+            FOREIGN KEY (menu_id) REFERENCES sys_menu(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create sys_role_menu table: {}", e))?;
+
+    // ======================== 资产文档表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_documents (
+            id BIGINT PRIMARY KEY,
+            asset_id BIGINT NOT NULL,
+            doc_type VARCHAR(50) NOT NULL,
+            doc_name VARCHAR(255) NOT NULL,
+            doc_no VARCHAR(100) NOT NULL,
+            party_a VARCHAR(255) NOT NULL,
+            party_b VARCHAR(255) NOT NULL,
+            sign_date TIMESTAMP,
+            effective_date TIMESTAMP,
+            expire_date TIMESTAMP,
+            file_path TEXT NOT NULL,
+            file_name VARCHAR(255) NOT NULL,
+            file_size BIGINT NOT NULL,
+            remark TEXT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_documents table: {}", e))?;
+
+    // ======================== 资产知识表 ========================
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_knowledge (
+            id BIGINT PRIMARY KEY,
+            asset_id BIGINT NOT NULL,
+            doc_source VARCHAR(50) NOT NULL,
+            knowledge_type VARCHAR(50) NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            content TEXT NOT NULL,
+            chunk_index INT DEFAULT 0,
+            vector_data REAL[],
+            permission_level VARCHAR(50) DEFAULT 'public',
+            owner_type VARCHAR(50),
+            owner_id BIGINT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_knowledge table: {}", e))?;
+
+    // ======================== 流程相关表 ========================
+
+    // 资产领用申请表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_receive (
+            id BIGINT PRIMARY KEY,
+            receive_no VARCHAR(100) NOT NULL UNIQUE,
+            asset_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            department_id BIGINT NOT NULL,
+            receive_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            reason TEXT NOT NULL,
+            status SMALLINT DEFAULT 0,
+            approve_by BIGINT,
+            approve_time TIMESTAMP WITH TIME ZONE,
+            approve_remark TEXT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_receive table: {}", e))?;
+
+    // 资产归还确认表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_return (
+            id BIGINT PRIMARY KEY,
+            return_no VARCHAR(100) NOT NULL UNIQUE,
+            receive_id BIGINT NOT NULL,
+            asset_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            return_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            asset_status SMALLINT DEFAULT 0,
+            remark TEXT,
+            confirm_by BIGINT NOT NULL,
+            confirm_time TIMESTAMP WITH TIME ZONE NOT NULL,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_return table: {}", e))?;
+
+    // 资产调拨表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_transfer (
+            id BIGINT PRIMARY KEY,
+            transfer_no VARCHAR(100) NOT NULL UNIQUE,
+            asset_id BIGINT NOT NULL,
+            out_dept_id BIGINT NOT NULL,
+            in_dept_id BIGINT NOT NULL,
+            out_user_id BIGINT NOT NULL,
+            in_user_id BIGINT NOT NULL,
+            transfer_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            reason TEXT NOT NULL,
+            status SMALLINT DEFAULT 0,
+            approve_by BIGINT,
+            approve_time TIMESTAMP WITH TIME ZONE,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_transfer table: {}", e))?;
+
+    // 资产维修表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_repair (
+            id BIGINT PRIMARY KEY,
+            repair_no VARCHAR(100) NOT NULL UNIQUE,
+            asset_id BIGINT NOT NULL,
+            fault_desc TEXT NOT NULL,
+            repair_desc TEXT,
+            repair_user_id BIGINT,
+            repair_dept_id BIGINT,
+            repair_file_url TEXT,
+            repair_type SMALLINT DEFAULT 0,
+            vendor VARCHAR(255),
+            cost DECIMAL(15, 2),
+            apply_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            repair_date TIMESTAMP WITH TIME ZONE,
+            finish_date TIMESTAMP WITH TIME ZONE,
+            status SMALLINT DEFAULT 0,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_repair table: {}", e))?;
+
+    // 资产报废表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_scrap (
+            id BIGINT PRIMARY KEY,
+            scrap_no VARCHAR(100) NOT NULL UNIQUE,
+            asset_id BIGINT NOT NULL,
+            reason TEXT NOT NULL,
+            scrap_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            status SMALLINT DEFAULT 0,
+            approve_by BIGINT,
+            approve_time TIMESTAMP WITH TIME ZONE,
+            handle_user BIGINT,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (asset_id) REFERENCES assets(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_scrap table: {}", e))?;
+
+    // 资产采购申请表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_purchase (
+            id BIGINT PRIMARY KEY,
+            purchase_no VARCHAR(100) NOT NULL UNIQUE,
+            asset_name VARCHAR(255) NOT NULL,
+            category_id BIGINT NOT NULL,
+            model VARCHAR(255),
+            manufacturer VARCHAR(255),
+            quantity INT NOT NULL,
+            unit_price DECIMAL(15, 2),
+            total_price DECIMAL(15, 2),
+            apply_user BIGINT NOT NULL,
+            dept_id BIGINT NOT NULL,
+            reason TEXT NOT NULL,
+            status SMALLINT DEFAULT 0,
+            supplier VARCHAR(255),
+            purchase_date TIMESTAMP WITH TIME ZONE,
+            arrive_date TIMESTAMP WITH TIME ZONE,
+            created_by BIGINT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_by BIGINT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            deleted SMALLINT DEFAULT 0,
+            FOREIGN KEY (category_id) REFERENCES asset_category(id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_purchase table: {}", e))?;
+
+    // 通用审批记录表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS asset_approval (
+            id BIGSERIAL PRIMARY KEY,
+            biz_type SMALLINT NOT NULL,
+            biz_id BIGINT NOT NULL,
+            step SMALLINT NOT NULL,
+            approver_id BIGINT NOT NULL,
+            approve_status SMALLINT DEFAULT 0,
+            remark TEXT,
+            approve_time TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| anyhow!("Failed to create asset_approval table: {}", e))?;
+
+    // ======================== 创建索引 ========================
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_assets_asset_no ON assets(asset_no)")
         .execute(pool)
         .await
@@ -469,10 +877,18 @@ pub async fn init_postgres_tables(pool: &PgPool) -> Result<()> {
     .await
     .map_err(|e| anyhow!("Failed to create index on asset_category: {}", e))?;
 
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sys_user_username ON sys_user(username)")
+        .execute(pool)
+        .await
+        .map_err(|e| anyhow!("Failed to create index on sys_user: {}", e))?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sys_role_role_key ON sys_role(role_key)")
+        .execute(pool)
+        .await
+        .map_err(|e| anyhow!("Failed to create index on sys_role: {}", e))?;
+
     Ok(())
 }
-
-/// 插入初始数据
 
 /// 完整的 PostgreSQL 数据库初始化
 #[allow(dead_code)]

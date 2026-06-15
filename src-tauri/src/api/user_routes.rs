@@ -17,21 +17,35 @@ use super::response::{ApiError, ApiResponse};
 pub struct CreateUserRequest {
     pub username: String,
     pub password: String,
-    pub display_name: String,
+    pub real_name: String,
     pub email: Option<String>,
     pub phone: Option<String>,
     pub department_id: Option<i64>,
     pub role_id: Option<i64>,
+    pub nickname: Option<String>,
+    pub person_id: Option<String>,
+    pub person_code: Option<String>,
+    pub super_user_id: Option<i64>,
 }
 
 /// 更新用户请求
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateUserRequest {
-    pub display_name: String,
+    pub real_name: String,
     pub email: Option<String>,
     pub phone: Option<String>,
     pub department_id: Option<i64>,
     pub role_id: Option<i64>,
+    pub nickname: Option<String>,
+    pub person_id: Option<String>,
+    pub person_code: Option<String>,
+    pub super_user_id: Option<i64>,
+}
+
+/// 重置密码请求
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ResetPasswordRequest {
+    pub new_password: String,
 }
 
 /// 登录请求
@@ -113,21 +127,22 @@ pub async fn get_users() -> Result<Json<ApiResponse<Vec<UserResponse>>>, ApiErro
     )
 )]
 pub async fn insert_user(
+    Extension(claims): Extension<auth::Claims>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>, ApiError> {
     match service::user_service::insert_user(
         &req.username,
         &req.password,
-        &req.display_name,
+        &req.real_name,
         req.email.as_deref(),
         req.phone.as_deref(),
         req.department_id,
-        1,       // status: 启用
-        None,    // nickname
-        None,    // person_id
-        None,    // person_code
-        None,    // super_user_id
-        Some(1), // created_by
+        1, // status: 启用
+        req.nickname.as_deref(),
+        req.person_id.as_deref(),
+        req.person_code.as_deref(),
+        req.super_user_id,
+        Some(claims.sub), // created_by 从 JWT 中提取
     )
     .await
     {
@@ -151,6 +166,7 @@ pub async fn insert_user(
     )
 )]
 pub async fn update_user(
+    Extension(claims): Extension<auth::Claims>,
     Path(id): Path<String>,
     Json(req): Json<UpdateUserRequest>,
 ) -> Result<Json<ApiResponse<UserResponse>>, ApiError> {
@@ -160,21 +176,49 @@ pub async fn update_user(
 
     match service::user_service::update_user(
         id,
-        &req.display_name, // username 复用 display_name
-        &req.display_name,
+        &req.real_name, // username 复用 real_name
+        &req.real_name,
         req.email.as_deref(),
         req.phone.as_deref(),
         req.department_id,
-        1,       // status
-        None,    // nickname
-        None,    // person_id
-        None,    // person_code
-        None,    // super_user_id
-        Some(1), // updated_by
+        1, // status
+        req.nickname.as_deref(),
+        req.person_id.as_deref(),
+        req.person_code.as_deref(),
+        req.super_user_id,
+        Some(claims.sub), // updated_by 从 JWT 中提取
     )
     .await
     {
         Ok(user) => Ok(Json(ApiResponse::success(user))),
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 重置密码
+#[utoipa::path(
+    post,
+    path = "/api/users/{id}/reset-password",
+    tag = "用户管理",
+    request_body = ResetPasswordRequest,
+    responses(
+        (status = 200, description = "重置成功"),
+        (status = 500, description = "服务器错误", body = ApiError),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn reset_password(
+    Path(id): Path<String>,
+    Json(req): Json<ResetPasswordRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let id: i64 = id
+        .parse()
+        .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
+
+    match service::user_service::reset_password(id, &req.new_password).await {
+        Ok(_) => Ok(Json(ApiResponse::success(()))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }

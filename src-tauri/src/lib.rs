@@ -141,14 +141,5 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use chrono::{DateTime, Utc};
-    use database::models::AssetCategory;
-
-    #[test]
-    fn test_greet() {
-        let name = "Alice";
-        let greeting = format!("Hello, {}! You've been greeted from Rust!", name);
-        assert_eq!(greeting, "Hello, Alice! You've been greeted from Rust!");
-    }
+    // 集成测试在 tests/ 目录中
 }

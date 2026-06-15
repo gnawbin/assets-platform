@@ -31,6 +31,39 @@ pub async fn insert_role(role: &Role) -> Result<Role, String> {
     Ok(inserted)
 }
 
+/// 通过参数新增角色（供 HTTP API 路由层使用）
+pub async fn insert_role_by_params(
+    role_key: &str,
+    role_name: &str,
+    description: Option<&str>,
+    created_by: Option<i64>,
+) -> Result<Role, String> {
+    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("新增角色: name={}, key={}", role_name, role_key);
+
+    let inserted = sqlx::query_as::<_, Role>(
+        "INSERT INTO sys_role (id, role_key, role_name, description, created_by, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id, role_key, role_name, description, created_by, created_at, updated_by, updated_at, deleted"
+    )
+    .bind(next_id() as i64)
+    .bind(role_key)
+    .bind(role_name)
+    .bind(description)
+    .bind(created_by)
+    .fetch_one(&pool)
+    .await
+    .map_err(|e| {
+        error!("新增角色失败: name={}, error={}", role_name, e);
+        format!("新增角色失败: {}", e)
+    })?;
+
+    info!(
+        "新增角色成功: id={}, name={}",
+        inserted.id, inserted.role_name
+    );
+    Ok(inserted)
+}
+
 /// 获取所有角色列表
 pub async fn get_roles() -> Result<Vec<Role>, String> {
     let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
