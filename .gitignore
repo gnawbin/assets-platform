@@ -14,7 +14,10 @@ pnpm-lock.yaml
 # Environment variables
 .env
 .env.local
+.env.toml
+.env.local.toml
 .env.*.local
 .ra-target
 package-lock.yaml
 .env.toml
+pnpm-workspace.yaml
