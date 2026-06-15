@@ -17,6 +17,11 @@ use crate::database::models::{AssetCategory, Department, Role};
 use crate::service::assets_service::{
     HardwareAssetInput, HardwareAssetView, IntangibleAssetInput, IntangibleAssetView,
 };
+use crate::service::process_service::{
+    AssetPurchaseInput, AssetPurchaseUpdateInput, AssetReceiveInput, AssetReceiveUpdateInput,
+    AssetRepairInput, AssetRepairUpdateInput, AssetReturnInput, AssetReturnUpdateInput,
+    AssetScrapInput, AssetScrapUpdateInput, AssetTransferInput, AssetTransferUpdateInput,
+};
 use crate::service::user_service::UserResponse;
 
 /// API 文档结构

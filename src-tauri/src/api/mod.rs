@@ -8,6 +8,7 @@ pub mod auth;
 pub mod category_routes;
 pub mod department_routes;
 pub mod openapi;
+pub mod process_routes;
 pub mod response;
 pub mod role_routes;
 pub mod user_routes;
@@ -168,6 +169,75 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         // 菜单
         .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
         .route("/api/menus/user", get(role_routes::get_user_menus))
+        // 流程管理-领用
+        .route("/api/process/receive", get(process_routes::get_receives))
+        .route("/api/process/receive", post(process_routes::insert_receive))
+        .route(
+            "/api/process/receive/{id}",
+            put(process_routes::update_receive),
+        )
+        .route(
+            "/api/process/receive/{id}",
+            delete(process_routes::delete_receive),
+        )
+        // 流程管理-归还
+        .route("/api/process/return", get(process_routes::get_returns))
+        .route("/api/process/return", post(process_routes::insert_return))
+        .route(
+            "/api/process/return/{id}",
+            put(process_routes::update_return),
+        )
+        .route(
+            "/api/process/return/{id}",
+            delete(process_routes::delete_return),
+        )
+        // 流程管理-调拨
+        .route("/api/process/transfer", get(process_routes::get_transfers))
+        .route(
+            "/api/process/transfer",
+            post(process_routes::insert_transfer),
+        )
+        .route(
+            "/api/process/transfer/{id}",
+            put(process_routes::update_transfer),
+        )
+        .route(
+            "/api/process/transfer/{id}",
+            delete(process_routes::delete_transfer),
+        )
+        // 流程管理-维修
+        .route("/api/process/repair", get(process_routes::get_repairs))
+        .route("/api/process/repair", post(process_routes::insert_repair))
+        .route(
+            "/api/process/repair/{id}",
+            put(process_routes::update_repair),
+        )
+        .route(
+            "/api/process/repair/{id}",
+            delete(process_routes::delete_repair),
+        )
+        // 流程管理-报废
+        .route("/api/process/scrap", get(process_routes::get_scraps))
+        .route("/api/process/scrap", post(process_routes::insert_scrap))
+        .route("/api/process/scrap/{id}", put(process_routes::update_scrap))
+        .route(
+            "/api/process/scrap/{id}",
+            delete(process_routes::delete_scrap),
+        )
+        // 流程管理-采购
+        .route("/api/process/purchase", get(process_routes::get_purchases))
+        .route(
+            "/api/process/purchase",
+            post(process_routes::insert_purchase),
+        )
+        .route(
+            "/api/process/purchase/{id}",
+            put(process_routes::update_purchase),
+        )
+        .route(
+            "/api/process/purchase/{id}",
+            delete(process_routes::delete_purchase),
+        )
         // 应用认证中间件
         .layer(middleware::from_fn(auth_middleware));
 

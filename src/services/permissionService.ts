@@ -10,7 +10,7 @@ import { api } from '@/utils/api';
 // ======================== 类型定义 ========================
 
 export interface Role {
-    id: number;
+    id: string;
     role_key: string;
     role_name: string;
     description: string | null;

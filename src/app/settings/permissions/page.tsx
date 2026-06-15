@@ -146,15 +146,9 @@ const PermissionsPage: React.FC = () => {
     }
     try {
       await doInsertRole({
-        id: 0,
         role_key: newRoleKey.trim(),
         role_name: newRoleName.trim(),
         description: newRoleDesc.trim() || null,
-        created_by: null,
-        created_at: null,
-        updated_by: null,
-        updated_at: null,
-        deleted: 0,
       });
       setAddModalOpen(false);
       setNewRoleKey('');

@@ -132,6 +132,36 @@ pub fn run() {
             commands::asset_commands::insert_intangible_asset,
             commands::asset_commands::update_intangible_asset,
             commands::asset_commands::delete_intangible_asset,
+            // 流程管理-领用
+            commands::process_commands::get_receives,
+            commands::process_commands::insert_receive,
+            commands::process_commands::update_receive,
+            commands::process_commands::delete_receive,
+            // 流程管理-归还
+            commands::process_commands::get_returns,
+            commands::process_commands::insert_return,
+            commands::process_commands::update_return,
+            commands::process_commands::delete_return,
+            // 流程管理-调拨
+            commands::process_commands::get_transfers,
+            commands::process_commands::insert_transfer,
+            commands::process_commands::update_transfer,
+            commands::process_commands::delete_transfer,
+            // 流程管理-维修
+            commands::process_commands::get_repairs,
+            commands::process_commands::insert_repair,
+            commands::process_commands::update_repair,
+            commands::process_commands::delete_repair,
+            // 流程管理-报废
+            commands::process_commands::get_scraps,
+            commands::process_commands::insert_scrap,
+            commands::process_commands::update_scrap,
+            commands::process_commands::delete_scrap,
+            // 流程管理-采购
+            commands::process_commands::get_purchases,
+            commands::process_commands::insert_purchase,
+            commands::process_commands::update_purchase,
+            commands::process_commands::delete_purchase,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

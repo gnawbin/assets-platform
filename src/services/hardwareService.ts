@@ -10,15 +10,15 @@ import { api } from '@/utils/api';
 // ======================== 类型定义 ========================
 
 export interface HardwareAssetView {
-    id: number;
+    id: string;
     asset_no: string;
     asset_type: string;
-    category_id: number;
+    category_id: string;
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: number | null;
-    user_id: number | null;
+    department_id: string | null;
+    user_id: string | null;
     status: number;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -26,18 +26,18 @@ export interface HardwareAssetView {
     used_quantity: number | null;
     expire_date: string | null;
     description: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
     deleted: number | null;
     // hard_assets 扩展字段
-    hard_id: number | null;
+    hard_id: string | null;
     sn: string | null;
     mac_address: string | null;
     location: string | null;
     hardware_config: string | null;
-    use_user_id: number | null;
+    use_user_id: string | null;
     use_start_date: string | null;
     maintenance_vendor: string | null;
     maintenance_type: string | null;
@@ -46,12 +46,12 @@ export interface HardwareAssetView {
 }
 
 export interface HardwareAssetInput {
-    category_id: number;
+    category_id: string;
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: number | null;
-    user_id: number | null;
+    department_id: string | null;
+    user_id: string | null;
     status: number | null;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -63,7 +63,7 @@ export interface HardwareAssetInput {
     mac_address: string | null;
     location: string | null;
     hardware_config: string | null;
-    use_user_id: number | null;
+    use_user_id: string | null;
     use_start_date: string | null;
     maintenance_vendor: string | null;
     maintenance_type: string | null;
@@ -78,7 +78,7 @@ export interface InsertHardwareAssetParams {
 
 /** 更新固定资产参数 */
 export interface UpdateHardwareAssetParams {
-    id: number;
+    id: string;
     input: HardwareAssetInput;
 }
 
@@ -100,6 +100,6 @@ export function updateHardwareAsset(params: UpdateHardwareAssetParams) {
 }
 
 /** 删除固定资产（软删除） */
-export function deleteHardwareAsset(id: number) {
+export function deleteHardwareAsset(id: string) {
     return api.delete<string>('delete_hardware_asset', { id });
 }

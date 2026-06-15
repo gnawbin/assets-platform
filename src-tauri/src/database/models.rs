@@ -9,7 +9,7 @@ use serde::de::{self, Deserializer, Visitor};
 use std::fmt;
 
 // 把 i64 序列化为字符串的辅助函数（防止前端 JS 精度丢失）
-fn i64_to_string<S>(value: &i64, serializer: S) -> Result<S::Ok, S::Error>
+pub fn i64_to_string<S>(value: &i64, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -17,7 +17,7 @@ where
 }
 
 // 把字符串反序列化为 i64 的辅助函数
-fn i64_from_string<'de, D>(deserializer: D) -> Result<i64, D::Error>
+pub fn i64_from_string<'de, D>(deserializer: D) -> Result<i64, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -47,7 +47,7 @@ where
 }
 
 // 处理 Option<i64> 的辅助函数
-fn opt_i64_to_string<S>(value: &Option<i64>, serializer: S) -> Result<S::Ok, S::Error>
+pub fn opt_i64_to_string<S>(value: &Option<i64>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -58,7 +58,7 @@ where
 }
 
 // 把 Option<string> 反序列化为 Option<i64> 的辅助函数
-fn opt_i64_from_string<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+pub fn opt_i64_from_string<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -391,7 +391,7 @@ pub struct AssetKnowledge {
     pub deleted: i16,
 }
 // ======================== 【1】资产领用申请表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetReceive {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -419,7 +419,7 @@ pub struct AssetReceive {
 }
 
 // ======================== 【2】资产归还确认表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetReturn {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -446,7 +446,7 @@ pub struct AssetReturn {
 }
 
 // ======================== 【3】资产调拨表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetTransfer {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -477,7 +477,7 @@ pub struct AssetTransfer {
 }
 
 // ======================== 【4】资产维修表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetRepair {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -538,7 +538,7 @@ pub struct Assets {
 }
 
 // ======================== 【5】资产报废表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetScrap {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -563,7 +563,7 @@ pub struct AssetScrap {
 }
 
 // ======================== 【6】资产采购申请表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetPurchase {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,

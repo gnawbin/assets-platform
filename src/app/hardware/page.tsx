@@ -77,7 +77,7 @@ const HardwarePage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
 
   // 表单字段
-  const [formCategoryId, setFormCategoryId] = useState<number>(0);
+  const [formCategoryId, setFormCategoryId] = useState<string>('');
   const [formAssetName, setFormAssetName] = useState('');
   const [formManufacturer, setFormManufacturer] = useState('');
   const [formModel, setFormModel] = useState('');
@@ -129,8 +129,8 @@ const HardwarePage: React.FC = () => {
   };
 
   // 获取分类名称
-  const getCategoryName = (id: number): string => {
-    const cat = categories.find((c) => String(c.id) === String(id));
+  const getCategoryName = (id: string): string => {
+    const cat = categories.find((c) => String(c.id) === id);
     return cat ? cat.category_name : `分类#${id}`;
   };
 
@@ -158,7 +158,7 @@ const HardwarePage: React.FC = () => {
   // 打开编辑弹窗
   const openEditModal = (asset: HardwareAssetView) => {
     setFormMode('edit');
-    setEditingId(asset.id);
+    setEditingId(Number(asset.id));
     setFormCategoryId(asset.category_id);
     setFormAssetName(asset.asset_name);
     setFormManufacturer(asset.manufacturer || '');
@@ -184,7 +184,7 @@ const HardwarePage: React.FC = () => {
 
   // 重置表单
   const resetForm = () => {
-    setFormCategoryId(0);
+    setFormCategoryId('');
     setFormAssetName('');
     setFormManufacturer('');
     setFormModel('');
@@ -251,7 +251,7 @@ const HardwarePage: React.FC = () => {
         await doInsert({ input });
         notifySuccess('固定资产添加成功');
       } else if (editingId) {
-        await doUpdate({ id: editingId, input });
+        await doUpdate({ id: String(editingId), input });
         notifySuccess('固定资产更新成功');
       }
 
@@ -468,8 +468,8 @@ const HardwarePage: React.FC = () => {
                   value: String(c.id),
                   label: c.category_name,
                 }))}
-                value={String(formCategoryId)}
-                onChange={(val) => setFormCategoryId(Number(val) || 0)}
+                value={formCategoryId}
+                onChange={(val) => setFormCategoryId(val || '')}
                 searchable
               />
             </Grid.Col>
