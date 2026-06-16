@@ -245,7 +245,7 @@ const Sidebar: React.FC = () => {
             IT设备资产管理系统
           </Text>
           <Text size="sm" fw={500}>
-            v0.0.4
+            v0.0.5
           </Text>
         </Box>
       </ScrollArea>
