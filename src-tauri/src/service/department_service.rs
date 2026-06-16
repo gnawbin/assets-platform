@@ -5,7 +5,7 @@ use tracing::{error, info, warn};
 
 /// 获取所有部门列表
 pub async fn get_departments() -> Result<Vec<Department>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let departments = sqlx::query_as::<_, Department>(
         "SELECT id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted FROM sys_department WHERE deleted IS NULL OR deleted = 0 ORDER BY id ASC"
     )
@@ -28,7 +28,7 @@ pub async fn insert_department(
     description: Option<&str>,
     created_by: Option<i64>,
 ) -> Result<Department, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!(
         "新增部门: name={}, parent_id={:?}",
@@ -69,7 +69,7 @@ pub async fn update_department(
     description: Option<&str>,
     updated_by: Option<i64>,
 ) -> Result<Department, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新部门: id={}, name={}", id, department_name);
 
@@ -99,7 +99,7 @@ pub async fn update_department(
 
 /// 删除部门（软删除）
 pub async fn delete_department(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除部门: id={}", id);
 

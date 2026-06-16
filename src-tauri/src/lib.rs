@@ -23,6 +23,35 @@ fn load_env() {
             Ok(table) => {
                 for (section, values) in &table {
                     if let Some(sub_table) = values.as_table() {
+                        // 特殊处理 postgres 段的 read_replicas 数组
+                        if section == "postgres" {
+                            if let Some(toml::Value::Array(replicas)) =
+                                sub_table.get("read_replicas")
+                            {
+                                let hosts_str: Vec<String> = replicas
+                                    .iter()
+                                    .filter_map(|v| {
+                                        let table = v.as_table()?;
+                                        let host = table.get("host")?.as_str()?;
+                                        let port = table
+                                            .get("port")
+                                            .and_then(|p| p.as_integer())
+                                            .unwrap_or(5432);
+                                        let weight = table
+                                            .get("weight")
+                                            .and_then(|w| w.as_integer())
+                                            .unwrap_or(1);
+                                        Some(format!("{}:{}:{}", host, port, weight))
+                                    })
+                                    .collect();
+                                if !hosts_str.is_empty() {
+                                    let pg_read_hosts = hosts_str.join(",");
+                                    std::env::set_var("PG_READ_HOSTS", &pg_read_hosts);
+                                    std::env::set_var("POSTGRES_READ_HOSTS", &pg_read_hosts);
+                                }
+                            }
+                        }
+
                         for (key, value) in sub_table {
                             let env_value = match value {
                                 toml::Value::String(s) => s.clone(),
@@ -132,6 +161,36 @@ pub fn run() {
             commands::asset_commands::insert_intangible_asset,
             commands::asset_commands::update_intangible_asset,
             commands::asset_commands::delete_intangible_asset,
+            // 流程管理-领用
+            commands::process_commands::get_receives,
+            commands::process_commands::insert_receive,
+            commands::process_commands::update_receive,
+            commands::process_commands::delete_receive,
+            // 流程管理-归还
+            commands::process_commands::get_returns,
+            commands::process_commands::insert_return,
+            commands::process_commands::update_return,
+            commands::process_commands::delete_return,
+            // 流程管理-调拨
+            commands::process_commands::get_transfers,
+            commands::process_commands::insert_transfer,
+            commands::process_commands::update_transfer,
+            commands::process_commands::delete_transfer,
+            // 流程管理-维修
+            commands::process_commands::get_repairs,
+            commands::process_commands::insert_repair,
+            commands::process_commands::update_repair,
+            commands::process_commands::delete_repair,
+            // 流程管理-报废
+            commands::process_commands::get_scraps,
+            commands::process_commands::insert_scrap,
+            commands::process_commands::update_scrap,
+            commands::process_commands::delete_scrap,
+            // 流程管理-采购
+            commands::process_commands::get_purchases,
+            commands::process_commands::insert_purchase,
+            commands::process_commands::update_purchase,
+            commands::process_commands::delete_purchase,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
@@ -141,14 +200,5 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use chrono::{DateTime, Utc};
-    use database::models::AssetCategory;
-
-    #[test]
-    fn test_greet() {
-        let name = "Alice";
-        let greeting = format!("Hello, {}! You've been greeted from Rust!", name);
-        assert_eq!(greeting, "Hello, Alice! You've been greeted from Rust!");
-    }
+    // 集成测试在 tests/ 目录中
 }

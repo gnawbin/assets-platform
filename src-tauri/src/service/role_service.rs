@@ -5,7 +5,7 @@ use tracing::{error, info};
 
 /// 新增角色
 pub async fn insert_role(role: &Role) -> Result<Role, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("新增角色: name={}, key={}", role.role_name, role.role_key);
 
@@ -31,9 +31,42 @@ pub async fn insert_role(role: &Role) -> Result<Role, String> {
     Ok(inserted)
 }
 
+/// 通过参数新增角色（供 HTTP API 路由层使用）
+pub async fn insert_role_by_params(
+    role_key: &str,
+    role_name: &str,
+    description: Option<&str>,
+    created_by: Option<i64>,
+) -> Result<Role, String> {
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+
+    info!("新增角色: name={}, key={}", role_name, role_key);
+
+    let inserted = sqlx::query_as::<_, Role>(
+        "INSERT INTO sys_role (id, role_key, role_name, description, created_by, created_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id, role_key, role_name, description, created_by, created_at, updated_by, updated_at, deleted"
+    )
+    .bind(next_id() as i64)
+    .bind(role_key)
+    .bind(role_name)
+    .bind(description)
+    .bind(created_by)
+    .fetch_one(&pool)
+    .await
+    .map_err(|e| {
+        error!("新增角色失败: name={}, error={}", role_name, e);
+        format!("新增角色失败: {}", e)
+    })?;
+
+    info!(
+        "新增角色成功: id={}, name={}",
+        inserted.id, inserted.role_name
+    );
+    Ok(inserted)
+}
+
 /// 获取所有角色列表
 pub async fn get_roles() -> Result<Vec<Role>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let roles = sqlx::query_as::<_, Role>(
         "SELECT id, role_key, role_name, description, created_by, created_at, updated_by, updated_at, deleted FROM sys_role WHERE deleted IS NULL OR deleted = 0 ORDER BY id ASC"
     )
@@ -51,7 +84,7 @@ pub async fn get_roles() -> Result<Vec<Role>, String> {
 
 /// 获取指定角色已分配的菜单权限ID列表
 pub async fn get_role_menu_ids(role_id: i64) -> Result<Vec<i64>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("查询角色菜单权限: role_id={}", role_id);
 
@@ -77,7 +110,7 @@ pub async fn get_role_menu_ids(role_id: i64) -> Result<Vec<i64>, String> {
 
 /// 为角色分配菜单权限（先删除旧关联，再插入新关联）
 pub async fn assign_role_menus(role_id: i64, menu_ids: Vec<i64>) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!(
         "分配角色菜单权限: role_id={}, 菜单数={}",
@@ -130,7 +163,7 @@ pub async fn assign_role_menus(role_id: i64, menu_ids: Vec<i64>) -> Result<(), S
 
 /// 删除角色（软删除）
 pub async fn delete_role(role_id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除角色: role_id={}", role_id);
 
@@ -181,7 +214,7 @@ pub async fn delete_role(role_id: i64) -> Result<(), String> {
 /// 获取所有菜单树（用于权限分配）
 pub async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
     info!("获取所有菜单树被调用");
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let all_menus = sqlx::query_as::<_, SysMenu>(
         "SELECT id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, created_by, created_at, updated_by, updated_at, deleted FROM sys_menu WHERE deleted = 0 ORDER BY order_num ASC"
     )
@@ -231,7 +264,7 @@ fn build_menu_node(menu: &SysMenu, all_menus: &[SysMenu]) -> MantineTree {
 
 /// 获取用户已分配的角色 ID 列表
 pub async fn get_user_role_ids(user_id: i64) -> Result<Vec<i64>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("查询用户角色关联: user_id={}", user_id);
 
@@ -257,7 +290,7 @@ pub async fn get_user_role_ids(user_id: i64) -> Result<Vec<i64>, String> {
 
 /// 为用户分配角色（先删除旧关联，再插入新关联）
 pub async fn assign_user_roles(user_id: i64, role_ids: Vec<i64>) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!(
         "分配用户角色: user_id={}, 角色数={}",
@@ -311,7 +344,7 @@ pub async fn assign_user_roles(user_id: i64, role_ids: Vec<i64>) -> Result<(), S
 /// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
 pub async fn get_user_menus() -> Result<Vec<SidebarMenuItem>, String> {
     info!("获取侧边栏菜单被调用");
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let all_menus = sqlx::query_as::<_, SysMenu>(
         "SELECT id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, created_by, created_at, updated_by, updated_at, deleted FROM sys_menu WHERE deleted = 0 AND menu_type IN (1, 2) AND visible = true ORDER BY order_num ASC"
     )

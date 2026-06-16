@@ -7,11 +7,20 @@ use utoipa::{Modify, OpenApi};
 
 use crate::api::category_routes::{CreateCategoryRequest, UpdateCategoryRequest};
 use crate::api::department_routes::{CreateDepartmentRequest, UpdateDepartmentRequest};
-use crate::api::role_routes::{AssignUserRolesRequest, CreateRoleRequest, UpdateRoleRequest};
-use crate::api::user_routes::{CreateUserRequest, LoginRequest, LoginResponse, UpdateUserRequest};
+use crate::api::role_routes::{
+    AssignRoleMenusRequest, AssignUserRolesRequest, CreateRoleRequest, UpdateRoleRequest,
+};
+use crate::api::user_routes::{
+    CreateUserRequest, LoginRequest, LoginResponse, ResetPasswordRequest, UpdateUserRequest,
+};
 use crate::database::models::{AssetCategory, Department, Role};
 use crate::service::assets_service::{
     HardwareAssetInput, HardwareAssetView, IntangibleAssetInput, IntangibleAssetView,
+};
+use crate::service::process_service::{
+    AssetPurchaseInput, AssetPurchaseUpdateInput, AssetReceiveInput, AssetReceiveUpdateInput,
+    AssetRepairInput, AssetRepairUpdateInput, AssetReturnInput, AssetReturnUpdateInput,
+    AssetScrapInput, AssetScrapUpdateInput, AssetTransferInput, AssetTransferUpdateInput,
 };
 use crate::service::user_service::UserResponse;
 
@@ -47,12 +56,16 @@ use crate::service::user_service::UserResponse;
         crate::api::user_routes::insert_user,
         crate::api::user_routes::update_user,
         crate::api::user_routes::delete_user,
+        crate::api::user_routes::reset_password,
+        crate::api::user_routes::get_current_user,
         // 角色
         crate::api::role_routes::get_roles,
         crate::api::role_routes::insert_role,
         crate::api::role_routes::delete_role,
         crate::api::role_routes::get_user_role_ids,
         crate::api::role_routes::assign_user_roles,
+        crate::api::role_routes::get_role_menu_ids,
+        crate::api::role_routes::assign_role_menus,
         // 菜单
         crate::api::role_routes::get_all_menus_tree,
         crate::api::role_routes::get_user_menus,
@@ -71,6 +84,8 @@ use crate::service::user_service::UserResponse;
             CreateRoleRequest,
             UpdateRoleRequest,
             AssignUserRolesRequest,
+            AssignRoleMenusRequest,
+            ResetPasswordRequest,
             HardwareAssetInput,
             HardwareAssetView,
             IntangibleAssetInput,

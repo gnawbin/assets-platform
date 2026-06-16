@@ -5,7 +5,7 @@ use tracing::{error, info};
 
 /// 获取所有资产类别列表
 pub async fn get_categories() -> Result<Vec<AssetCategory>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let categories = sqlx::query_as::<_, AssetCategory>(
         "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM asset_category where deleted=0 ORDER BY sort ASC"
     )
@@ -23,9 +23,9 @@ pub async fn get_categories() -> Result<Vec<AssetCategory>, String> {
 
 //获取资产类别最高级别的列表
 pub async fn get_super_categories() -> Result<Vec<AssetCategory>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let categories = sqlx::query_as::<_, AssetCategory>(
-        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM asset_category where parent_id=0 and deleted=0 ORDER BY sort ASC"
+        "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM asset_category WHERE parent_id IS NULL AND deleted=0 ORDER BY sort ASC"
     )
     .fetch_all(&pool)
     .await
@@ -40,7 +40,7 @@ pub async fn get_super_categories() -> Result<Vec<AssetCategory>, String> {
 }
 //插入新资产类别
 pub async fn insert_category(category: &AssetCategory) -> Result<AssetCategory, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!(
         "新增资产类别: name={}, type={}",
@@ -76,7 +76,7 @@ pub async fn insert_category(category: &AssetCategory) -> Result<AssetCategory, 
     Ok(category)
 }
 pub async fn update_category(category: &AssetCategory) -> Result<AssetCategory, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!(
         "更新资产类别: id={}, name={}",
@@ -112,7 +112,7 @@ pub async fn update_category(category: &AssetCategory) -> Result<AssetCategory, 
     Ok(category)
 }
 pub async fn delete_category(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除资产类别: id={}", id);
 
