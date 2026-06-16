@@ -111,15 +111,6 @@ base64 = "0.22.1"
 regex = "1.10"
 # Cron表达式解析
 cron = "0.16.0"
-# 加密相关
-aes = "0.8.2"                                          # 降级稳定版
-block-padding = "0.3.0"                                # 配套版本
-cbc = "0.1.2"                                          # 降级稳定版
-hmac = "0.13.0"
-pbkdf2 = "0.13.0"
-sha2 = "0.11.0"
-zeroize = { version = "1.8.2", features = ["derive"] }
-
 winapi = { version = "0.3", features = [
   "memoryapi",
   "debugapi",
