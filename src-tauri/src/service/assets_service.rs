@@ -334,7 +334,7 @@ WHERE a.asset_type = 'fixed' AND (a.deleted IS NULL OR a.deleted = 0)
 
 /// 获取所有固定资产列表（JOIN assets + hard_assets）
 pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let sql = format!("{} ORDER BY a.created_at DESC", HARDWARE_SELECT_SQL);
     let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
@@ -350,7 +350,7 @@ pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
 
 /// 新增固定资产
 pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<HardwareAssetView, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let asset_id = next_id() as i64;
     let hard_id = next_id() as i64;
     let asset_no = format!("{}", next_id());
@@ -431,7 +431,7 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
 
 /// 根据ID查询单个固定资产
 async fn get_hardware_asset_by_id(asset_id: i64) -> Result<HardwareAssetView, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let sql = format!("{} AND a.id = $1", HARDWARE_SELECT_SQL);
     let row = sqlx::query(&sql)
@@ -455,7 +455,7 @@ pub async fn update_hardware_asset(
     id: i64,
     input: HardwareAssetInput,
 ) -> Result<HardwareAssetView, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新固定资产: id={}, name={}", id, input.asset_name);
 
@@ -565,7 +565,7 @@ pub async fn update_hardware_asset(
 
 /// 删除固定资产（软删除）
 pub async fn delete_hardware_asset(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除固定资产: id={}", id);
 
@@ -606,7 +606,7 @@ WHERE a.asset_type = 'intangible' AND (a.deleted IS NULL OR a.deleted = 0)
 
 /// 获取所有无形资产列表（JOIN assets + intangible_assets）
 pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let sql = format!("{} ORDER BY a.created_at DESC", INTANGIBLE_SELECT_SQL);
     let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
@@ -624,7 +624,7 @@ pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String>
 pub async fn insert_intangible_asset(
     input: IntangibleAssetInput,
 ) -> Result<IntangibleAssetView, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let asset_id = next_id() as i64;
     let intangible_id = next_id() as i64;
     let asset_no = format!("{}", next_id());
@@ -721,7 +721,7 @@ pub async fn insert_intangible_asset(
 
 /// 根据ID查询单个无形资产
 async fn get_intangible_asset_by_id(asset_id: i64) -> Result<IntangibleAssetView, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let sql = format!("{} AND a.id = $1", INTANGIBLE_SELECT_SQL);
     let row = sqlx::query(&sql)
@@ -745,7 +745,7 @@ pub async fn update_intangible_asset(
     id: i64,
     input: IntangibleAssetInput,
 ) -> Result<IntangibleAssetView, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新无形资产: id={}, name={}", id, input.asset_name);
 
@@ -885,7 +885,7 @@ pub async fn update_intangible_asset(
 
 /// 删除无形资产（软删除）
 pub async fn delete_intangible_asset(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除无形资产: id={}", id);
 

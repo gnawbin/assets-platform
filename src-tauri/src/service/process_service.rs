@@ -9,7 +9,7 @@ use crate::database::models::{
 };
 use crate::utils::snowflake::next_id;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use utoipa::ToSchema;
 
 // ======================== 领用管理 ========================
@@ -36,7 +36,7 @@ pub struct AssetReceiveUpdateInput {
 
 /// 获取所有领用记录
 pub async fn get_receives() -> Result<Vec<AssetReceive>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let rows = sqlx::query_as::<_, AssetReceive>(
         "SELECT id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted FROM asset_receive WHERE deleted = 0 ORDER BY created_at DESC"
@@ -55,7 +55,7 @@ pub async fn get_receives() -> Result<Vec<AssetReceive>, String> {
 
 /// 新增领用记录
 pub async fn insert_receive(input: AssetReceiveInput) -> Result<AssetReceive, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let id = next_id() as i64;
     let receive_no = format!("RECV-{}", id);
 
@@ -99,7 +99,7 @@ pub async fn update_receive(
     id: i64,
     input: AssetReceiveUpdateInput,
 ) -> Result<AssetReceive, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新领用记录: id={}", id);
 
@@ -134,7 +134,7 @@ pub async fn update_receive(
 
 /// 删除领用记录（软删除）
 pub async fn delete_receive(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除领用记录: id={}", id);
 
@@ -179,7 +179,7 @@ pub struct AssetReturnUpdateInput {
 
 /// 获取所有归还记录
 pub async fn get_returns() -> Result<Vec<AssetReturn>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let rows = sqlx::query_as::<_, AssetReturn>(
         "SELECT id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted FROM asset_return WHERE deleted = 0 ORDER BY created_at DESC"
@@ -198,7 +198,7 @@ pub async fn get_returns() -> Result<Vec<AssetReturn>, String> {
 
 /// 新增归还记录
 pub async fn insert_return(input: AssetReturnInput) -> Result<AssetReturn, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let id = next_id() as i64;
     let return_no = format!("RET-{}", id);
 
@@ -241,7 +241,7 @@ pub async fn insert_return(input: AssetReturnInput) -> Result<AssetReturn, Strin
 
 /// 更新归还记录
 pub async fn update_return(id: i64, input: AssetReturnUpdateInput) -> Result<AssetReturn, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新归还记录: id={}", id);
 
@@ -279,7 +279,7 @@ pub async fn update_return(id: i64, input: AssetReturnUpdateInput) -> Result<Ass
 
 /// 删除归还记录（软删除）
 pub async fn delete_return(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除归还记录: id={}", id);
 
@@ -324,7 +324,7 @@ pub struct AssetTransferUpdateInput {
 
 /// 获取所有调拨记录
 pub async fn get_transfers() -> Result<Vec<AssetTransfer>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let rows = sqlx::query_as::<_, AssetTransfer>(
         "SELECT id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted FROM asset_transfer WHERE deleted = 0 ORDER BY created_at DESC"
@@ -343,7 +343,7 @@ pub async fn get_transfers() -> Result<Vec<AssetTransfer>, String> {
 
 /// 新增调拨记录
 pub async fn insert_transfer(input: AssetTransferInput) -> Result<AssetTransfer, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let id = next_id() as i64;
     let transfer_no = format!("TRSF-{}", id);
 
@@ -386,7 +386,7 @@ pub async fn update_transfer(
     id: i64,
     input: AssetTransferUpdateInput,
 ) -> Result<AssetTransfer, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新调拨记录: id={}", id);
 
@@ -424,7 +424,7 @@ pub async fn update_transfer(
 
 /// 删除调拨记录（软删除）
 pub async fn delete_transfer(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除调拨记录: id={}", id);
 
@@ -479,7 +479,7 @@ pub struct AssetRepairUpdateInput {
 
 /// 获取所有维修记录
 pub async fn get_repairs() -> Result<Vec<AssetRepair>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let rows = sqlx::query_as::<_, AssetRepair>(
         "SELECT id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted FROM asset_repair WHERE deleted = 0 ORDER BY created_at DESC"
@@ -498,7 +498,7 @@ pub async fn get_repairs() -> Result<Vec<AssetRepair>, String> {
 
 /// 新增维修记录
 pub async fn insert_repair(input: AssetRepairInput) -> Result<AssetRepair, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let id = next_id() as i64;
     let repair_no = format!("REPR-{}", id);
 
@@ -543,7 +543,7 @@ pub async fn insert_repair(input: AssetRepairInput) -> Result<AssetRepair, Strin
 
 /// 更新维修记录
 pub async fn update_repair(id: i64, input: AssetRepairUpdateInput) -> Result<AssetRepair, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新维修记录: id={}", id);
 
@@ -588,7 +588,7 @@ pub async fn update_repair(id: i64, input: AssetRepairUpdateInput) -> Result<Ass
 
 /// 删除维修记录（软删除）
 pub async fn delete_repair(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除维修记录: id={}", id);
 
@@ -627,7 +627,7 @@ pub struct AssetScrapUpdateInput {
 
 /// 获取所有报废记录
 pub async fn get_scraps() -> Result<Vec<AssetScrap>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let rows = sqlx::query_as::<_, AssetScrap>(
         "SELECT id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted FROM asset_scrap WHERE deleted = 0 ORDER BY created_at DESC"
@@ -646,7 +646,7 @@ pub async fn get_scraps() -> Result<Vec<AssetScrap>, String> {
 
 /// 新增报废记录
 pub async fn insert_scrap(input: AssetScrapInput) -> Result<AssetScrap, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let id = next_id() as i64;
     let scrap_no = format!("SCRP-{}", id);
 
@@ -680,7 +680,7 @@ pub async fn insert_scrap(input: AssetScrapInput) -> Result<AssetScrap, String> 
 
 /// 更新报废记录
 pub async fn update_scrap(id: i64, input: AssetScrapUpdateInput) -> Result<AssetScrap, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新报废记录: id={}", id);
 
@@ -714,7 +714,7 @@ pub async fn update_scrap(id: i64, input: AssetScrapUpdateInput) -> Result<Asset
 
 /// 删除报废记录（软删除）
 pub async fn delete_scrap(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除报废记录: id={}", id);
 
@@ -771,7 +771,7 @@ pub struct AssetPurchaseUpdateInput {
 
 /// 获取所有采购记录
 pub async fn get_purchases() -> Result<Vec<AssetPurchase>, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     let rows = sqlx::query_as::<_, AssetPurchase>(
         "SELECT id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted FROM asset_purchase WHERE deleted = 0 ORDER BY created_at DESC"
@@ -790,7 +790,7 @@ pub async fn get_purchases() -> Result<Vec<AssetPurchase>, String> {
 
 /// 新增采购记录
 pub async fn insert_purchase(input: AssetPurchaseInput) -> Result<AssetPurchase, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let id = next_id() as i64;
     let purchase_no = format!("PUR-{}", id);
 
@@ -839,7 +839,7 @@ pub async fn update_purchase(
     id: i64,
     input: AssetPurchaseUpdateInput,
 ) -> Result<AssetPurchase, String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("更新采购记录: id={}", id);
 
@@ -849,7 +849,8 @@ pub async fn update_purchase(
             asset_name = $2, category_id = $3, model = $4, manufacturer = $5,
             quantity = $6, unit_price = $7, total_price = $8,
             apply_user = $9, dept_id = $10, reason = $11, status = $12,
-            supplier = $13, purchase_date = $14::timestamptz, arrive_date = $15::timestamptz,
+            supplier = $13, purchase_date = $14::timestamptz,
+            arrive_date = $15::timestamptz,
             updated_by = $16, updated_at = NOW()
         WHERE id = $1 AND deleted = 0
         RETURNING id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted
@@ -884,7 +885,7 @@ pub async fn update_purchase(
 
 /// 删除采购记录（软删除）
 pub async fn delete_purchase(id: i64) -> Result<(), String> {
-    let pool = database::get_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!("删除采购记录: id={}", id);
 

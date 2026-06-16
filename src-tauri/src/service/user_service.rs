@@ -1,5 +1,5 @@
-use crate::database::get_pool;
 use crate::database::models::SysUser;
+use crate::database::{get_read_pool, get_write_pool};
 use crate::utils::password_secret::{hash_password, verify_password};
 use crate::utils::snowflake::next_id;
 use jsonwebtoken::{encode, EncodingKey, Header};
@@ -82,7 +82,7 @@ impl From<SysUser> for UserResponse {
 
 /// 用户登录
 pub async fn login(username: &str, password: &str) -> Result<LoginResponse, String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     info!("用户登录尝试: username={}", username);
 
@@ -165,7 +165,7 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
 
 /// 获取所有用户列表
 pub async fn get_users() -> Result<Vec<UserResponse>, String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
     let users = sqlx::query_as::<_, SysUser>(
         "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE deleted IS NULL OR deleted = 0 ORDER BY id ASC"
     )
@@ -196,7 +196,7 @@ pub async fn insert_user(
     super_user_id: Option<i64>,
     created_by: Option<i64>,
 ) -> Result<UserResponse, String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     info!("新增用户: username={}, real_name={}", username, real_name);
 
@@ -269,7 +269,7 @@ pub async fn update_user(
     super_user_id: Option<i64>,
     updated_by: Option<i64>,
 ) -> Result<UserResponse, String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     info!("更新用户信息: id={}, username={}", id, username);
 
@@ -306,7 +306,7 @@ pub async fn update_user(
 
 /// 删除用户（软删除）
 pub async fn delete_user(id: i64) -> Result<(), String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     info!("删除用户: id={}", id);
 
@@ -325,7 +325,7 @@ pub async fn delete_user(id: i64) -> Result<(), String> {
 
 /// 根据用户ID获取用户信息
 pub async fn get_user_by_id(id: i64) -> Result<UserResponse, String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     let user = sqlx::query_as::<_, SysUser>(
         "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)"
@@ -351,7 +351,7 @@ pub async fn get_user_by_id(id: i64) -> Result<UserResponse, String> {
 
 /// 重置密码
 pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
-    let pool = get_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     info!("重置用户密码: id={}", id);
 

@@ -43,7 +43,6 @@ impl DatabaseConfig {
 }
 
 /// 数据库管理器
-
 pub struct DatabaseManager {
     /// 数据库连接池（PostgreSQL）
     pool: Option<PgPool>,
@@ -61,7 +60,7 @@ impl DatabaseManager {
     pub async fn init(&mut self) -> Result<()> {
         let config = postgres::PostgresConfig::from_env()?;
         postgres::init_postgres_pool(config).await?;
-        let pool = postgres::get_postgres_pool()?;
+        let pool = postgres::get_write_pool()?;
         // 初始化表结构
         postgres::init_postgres_tables(&pool).await?;
         self.pool = Some(pool);
@@ -110,7 +109,7 @@ pub async fn init_database() -> Result<()> {
     Ok(())
 }
 
-/// 获取数据库连接池（便捷函数）
+/// 获取数据库连接池（便捷函数，兼容旧接口，内部调用 get_write_pool）
 pub fn get_pool() -> Result<PgPool> {
     let lock = get_db_manager();
     let guard = lock
@@ -121,6 +120,19 @@ pub fn get_pool() -> Result<PgPool> {
         Some(manager) => manager.pool().cloned(),
         None => Err(anyhow::anyhow!("数据库管理器未初始化")),
     }
+}
+
+/// 获取写连接池（用于 INSERT / UPDATE / DELETE）
+pub fn get_write_pool() -> Result<PgPool> {
+    postgres::get_write_pool()
+}
+
+/// 获取读连接池（用于 SELECT）
+///
+/// 如果有从库，使用加权轮询算法选择从库；
+/// 如果没有从库，回退到主库。
+pub fn get_read_pool() -> Result<PgPool> {
+    postgres::get_read_pool()
 }
 
 /// 关闭所有数据库连接

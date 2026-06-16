@@ -23,6 +23,35 @@ fn load_env() {
             Ok(table) => {
                 for (section, values) in &table {
                     if let Some(sub_table) = values.as_table() {
+                        // 特殊处理 postgres 段的 read_replicas 数组
+                        if section == "postgres" {
+                            if let Some(toml::Value::Array(replicas)) =
+                                sub_table.get("read_replicas")
+                            {
+                                let hosts_str: Vec<String> = replicas
+                                    .iter()
+                                    .filter_map(|v| {
+                                        let table = v.as_table()?;
+                                        let host = table.get("host")?.as_str()?;
+                                        let port = table
+                                            .get("port")
+                                            .and_then(|p| p.as_integer())
+                                            .unwrap_or(5432);
+                                        let weight = table
+                                            .get("weight")
+                                            .and_then(|w| w.as_integer())
+                                            .unwrap_or(1);
+                                        Some(format!("{}:{}:{}", host, port, weight))
+                                    })
+                                    .collect();
+                                if !hosts_str.is_empty() {
+                                    let pg_read_hosts = hosts_str.join(",");
+                                    std::env::set_var("PG_READ_HOSTS", &pg_read_hosts);
+                                    std::env::set_var("POSTGRES_READ_HOSTS", &pg_read_hosts);
+                                }
+                            }
+                        }
+
                         for (key, value) in sub_table {
                             let env_value = match value {
                                 toml::Value::String(s) => s.clone(),
