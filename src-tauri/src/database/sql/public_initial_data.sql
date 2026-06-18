@@ -278,6 +278,56 @@ WHERE
             id = 5
     );
 
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    6,
+    '知识库',
+    NULL,
+    NULL,
+    NULL,
+    'IconBrain',
+    6,
+    true,
+    NULL,
+    1,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 6
+    );
+
 -- =====================
 -- 2. 资产台账 子菜单
 -- =====================
@@ -1038,8 +1088,165 @@ WHERE
     );
 
 -- =====================
--- 5. 系统配置 子菜单
+-- 5. 知识库 子菜单
 -- =====================
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    50,
+    '知识库管理',
+    6,
+    '/knowledge',
+    '/knowledge/page',
+    NULL,
+    1,
+    true,
+    'knowledge:list',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 50
+    );
+
+-- =====================
+-- 6. Zen Engine - Skill 管理 子菜单
+-- =====================
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    7,
+    'AI 工作流',
+    NULL,
+    NULL,
+    NULL,
+    'IconBrain',
+    7,
+    true,
+    NULL,
+    1,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 7
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    60,
+    'Skill 管理',
+    7,
+    '/skills',
+    '/skills/page',
+    NULL,
+    1,
+    true,
+    'skill:list',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 60
+    );
+
+-- =====================
+-- 7. 系统配置 子菜单
+-- =====================
+
 INSERT INTO
     public.sys_menu (
         id,

@@ -1,6 +1,7 @@
 mod api;
 mod commands;
 mod database;
+mod engine;
 mod service;
 mod utils;
 
@@ -99,6 +100,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(commands::skill_commands::SkillRegistryState(
+            std::sync::Arc::new(tokio::sync::Mutex::new(
+                engine::skill_registry::SkillRegistry::new(),
+            )),
+        ))
         .setup(|_app| {
             // 初始化 OpenTelemetry（需要 Tokio 运行时上下文）
             tauri::async_runtime::block_on(async {
@@ -202,6 +208,24 @@ pub fn run() {
             commands::process_commands::insert_purchase,
             commands::process_commands::update_purchase,
             commands::process_commands::delete_purchase,
+            // 知识库
+            commands::knowledge_commands::get_knowledge_tree,
+            commands::knowledge_commands::insert_knowledge_node,
+            commands::knowledge_commands::update_knowledge_node,
+            commands::knowledge_commands::delete_knowledge_node,
+            commands::knowledge_commands::move_knowledge_node,
+            commands::knowledge_commands::get_knowledge_list,
+            commands::knowledge_commands::get_knowledge_by_id,
+            commands::knowledge_commands::insert_knowledge,
+            commands::knowledge_commands::update_knowledge,
+            commands::knowledge_commands::delete_knowledge,
+            // Zen Engine - Skill 管理
+            commands::skill_commands::list_skills,
+            commands::skill_commands::get_skill,
+            commands::skill_commands::execute_skill,
+            commands::skill_commands::register_custom_skill,
+            commands::skill_commands::unregister_skill,
+            commands::skill_commands::get_skill_count,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

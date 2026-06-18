@@ -24,7 +24,9 @@ import {
   IconChartBar,
   IconSettings,
   IconChevronDown,
+  IconBrain,
 } from '@tabler/icons-react';
+
 import { getUserMenus, type MenuItem } from '@/services/menuService';
 import { useAuthStore } from '@/store/authStore';
 
@@ -39,7 +41,9 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   IconListCheck: <IconListCheck size={18} />,
   IconChartBar: <IconChartBar size={18} />,
   IconSettings: <IconSettings size={18} />,
+  IconBrain: <IconBrain size={18} />,
 };
+
 
 /** 根据图标名称获取图标组件 */
 function getIcon(iconName?: string): React.ReactNode {

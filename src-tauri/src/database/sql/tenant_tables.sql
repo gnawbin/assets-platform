@@ -310,9 +310,9 @@ CREATE INDEX IF NOT EXISTS idx_document_asset ON {schema}.asset_documents (asset
 -- 6. 资产知识库表
 CREATE TABLE IF NOT EXISTS {schema}.asset_knowledge (
     id BIGINT PRIMARY KEY,
-    asset_id BIGINT NOT NULL,
-    doc_source VARCHAR(50) NOT NULL,
-    knowledge_type VARCHAR(50) NOT NULL,
+    asset_id BIGINT,                              -- 改为可选，知识条目可不关联资产
+    doc_source VARCHAR(50) NOT NULL DEFAULT 'manual',
+    knowledge_type VARCHAR(50) NOT NULL DEFAULT 'basic',
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     chunk_index INTEGER NOT NULL DEFAULT 0,
@@ -331,9 +331,9 @@ COMMENT ON TABLE {schema}.asset_knowledge IS '资产知识库表（RAG检索 + �
 
 COMMENT ON COLUMN {schema}.asset_knowledge.id IS '主键ID';
 
-COMMENT ON COLUMN {schema}.asset_knowledge.asset_id IS '关联资产主表ID';
+COMMENT ON COLUMN {schema}.asset_knowledge.asset_id IS '关联资产主表ID（可选，知识条目可不关联资产）';
 
-COMMENT ON COLUMN {schema}.asset_knowledge.doc_source IS '数据来源：asset=主表 / hardware=硬件 / intangible=无形资产 / document=合同文书';
+COMMENT ON COLUMN {schema}.asset_knowledge.doc_source IS '数据来源：manual=手动创建 / asset=主表 / hardware=硬件 / intangible=无形资产 / document=合同文书';
 
 COMMENT ON COLUMN {schema}.asset_knowledge.knowledge_type IS '知识类型：basic=基础信息 / contract=合同 / hardware=硬件 / intangible=无形资产';
 
@@ -366,6 +366,43 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_asset ON {schema}.asset_knowledge (asse
 CREATE INDEX IF NOT EXISTS idx_knowledge_type ON {schema}.asset_knowledge (knowledge_type);
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_permission ON {schema}.asset_knowledge (permission_level);
+
+-- 7. 知识树节点表（AIFlowy 风格树形导航）
+CREATE TABLE IF NOT EXISTS {schema}.knowledge_tree (
+    id BIGINT PRIMARY KEY,
+    knowledge_id BIGINT REFERENCES {schema}.asset_knowledge(id) ON DELETE CASCADE,
+    parent_id BIGINT REFERENCES {schema}.knowledge_tree(id),
+    node_type VARCHAR(20) NOT NULL DEFAULT 'document',  -- folder / document / link
+    title VARCHAR(255) NOT NULL,
+    icon VARCHAR(50),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_expanded BOOLEAN NOT NULL DEFAULT true,
+    created_by BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_by BIGINT,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.knowledge_tree IS '知识树节点表（AIFlowy 风格树形导航）';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.knowledge_id IS '关联知识条目ID（folder 类型可为空）';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.parent_id IS '父节点ID（顶级节点为空）';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.node_type IS '节点类型：folder=文件夹 document=文档 link=链接';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.title IS '节点显示名称';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.icon IS '自定义图标';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.sort_order IS '同级排序号（越小越靠前）';
+
+COMMENT ON COLUMN {schema}.knowledge_tree.is_expanded IS '是否展开（保存用户展开状态）';
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_tree_parent ON {schema}.knowledge_tree (parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_tree_knowledge ON {schema}.knowledge_tree (knowledge_id);
 
 -- 8. 资产领用申请表
 CREATE TABLE IF NOT EXISTS {schema}.asset_receive (

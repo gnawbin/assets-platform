@@ -435,13 +435,16 @@ pub struct AssetDocuments {
 pub struct AssetKnowledge {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
-    #[serde(serialize_with = "i64_to_string")]
-    pub asset_id: i64, //关联资产ID
-    pub doc_source: String,     //数据来源：asset/hardware/intangible/document
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub asset_id: Option<i64>, //关联资产ID（可选，知识条目可不关联资产）
+    pub doc_source: String, //数据来源：manual/asset/hardware/intangible/document
     pub knowledge_type: String, //知识类型：basic/contract/hardware/intangible
-    pub title: String,          //知识标题
-    pub content: String,        //知识正文（用于向量化 + 微调）
-    pub chunk_index: i32,       //文本分块序号
+    pub title: String,      //知识标题
+    pub content: String,    //知识正文（用于向量化 + 微调）
+    pub chunk_index: i32,   //文本分块序号
     pub vector_data: Option<Vec<f32>>, //向量数据（Embedding模型输出）
 
     // 权限控制（对接OPA）
@@ -458,6 +461,59 @@ pub struct AssetKnowledge {
     pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
+
+/// 知识树节点（AIFlowy 风格树形导航）
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct KnowledgeTree {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub knowledge_id: Option<i64>, // 关联知识条目ID（folder 类型可为空）
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub parent_id: Option<i64>, // 父节点ID（顶级节点为空）
+    pub node_type: String,    // 节点类型：folder/document/link
+    pub title: String,        // 节点显示名称
+    pub icon: Option<String>, // 自定义图标
+    pub sort_order: i32,      // 同级排序号
+    pub is_expanded: bool,    // 是否展开
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 知识树节点（带子节点，用于前端渲染）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeTreeNode {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub knowledge_id: Option<i64>,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub parent_id: Option<i64>,
+    pub node_type: String,
+    pub title: String,
+    pub icon: Option<String>,
+    pub sort_order: i32,
+    pub is_expanded: bool,
+    pub children: Vec<KnowledgeTreeNode>,
+}
+
 // ======================== 【1】资产领用申请表 ========================
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetReceive {

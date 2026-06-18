@@ -7,11 +7,13 @@ pub mod asset_routes;
 pub mod auth;
 pub mod category_routes;
 pub mod department_routes;
+pub mod knowledge_routes;
 pub mod openapi;
 pub mod process_routes;
 pub mod register_routes;
 pub mod response;
 pub mod role_routes;
+pub mod skill_routes;
 pub mod tenant_routes;
 pub mod user_routes;
 
@@ -22,6 +24,7 @@ use axum::http::Method;
 use axum::middleware;
 use axum::routing::{delete, get, post, put};
 use axum::Router;
+use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -30,6 +33,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use self::auth::auth_middleware;
 use self::openapi::ApiDoc;
+use crate::engine::skill_registry::SkillRegistry;
 
 /// 启动 HTTP API 服务
 ///
@@ -186,6 +190,32 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             "/api/auth/registrations/{id}/reject",
             post(register_routes::reject_registration),
         )
+        // 知识库
+        .route("/api/knowledge/tree", get(knowledge_routes::get_tree))
+        .route("/api/knowledge/node", post(knowledge_routes::insert_node))
+        .route(
+            "/api/knowledge/node/{id}",
+            put(knowledge_routes::update_node),
+        )
+        .route(
+            "/api/knowledge/node/{id}",
+            delete(knowledge_routes::delete_node),
+        )
+        .route(
+            "/api/knowledge/node/{id}/move",
+            put(knowledge_routes::move_node),
+        )
+        .route("/api/knowledge/list", get(knowledge_routes::get_list))
+        .route("/api/knowledge", post(knowledge_routes::insert_knowledge))
+        .route("/api/knowledge/{id}", get(knowledge_routes::get_by_id))
+        .route(
+            "/api/knowledge/{id}",
+            put(knowledge_routes::update_knowledge),
+        )
+        .route(
+            "/api/knowledge/{id}",
+            delete(knowledge_routes::delete_knowledge),
+        )
         // 菜单
         .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
         .route("/api/menus/user", get(role_routes::get_user_menus))
@@ -261,6 +291,13 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         // 应用认证中间件
         .layer(middleware::from_fn(auth_middleware));
 
+    // Skill 路由（使用独立的 SkillRouterState）
+    let skill_registry = Arc::new(Mutex::new(SkillRegistry::new()));
+    let skill_router_state = Arc::new(skill_routes::SkillRouterState {
+        registry: skill_registry,
+    });
+    let skill_routes = skill_routes::skill_routes().with_state(skill_router_state);
+
     // Swagger UI
     let swagger = SwaggerUi::new("/api/swagger-ui").url("/api/openapi.json", ApiDoc::openapi());
 
@@ -268,6 +305,7 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .merge(skill_routes)
         .merge(swagger)
         .with_state(state)
 }
