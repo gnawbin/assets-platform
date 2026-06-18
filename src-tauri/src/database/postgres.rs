@@ -630,11 +630,12 @@ pub async fn init_default_admin(pool: &PgPool) -> Result<()> {
     use argon2::{Argon2, PasswordHasher};
 
     // 检查是否已存在 admin 用户
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM public.sys_user WHERE username = 'admin')")
-            .fetch_one(pool)
-            .await
-            .map_err(|e| anyhow!("检查 admin 用户是否存在时出错: {}", e))?;
+    let exists: bool = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM public.sys_user WHERE username = 'admin')",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| anyhow!("检查 admin 用户是否存在时出错: {}", e))?;
 
     if exists {
         tracing::info!("admin 用户已存在，跳过创建");
@@ -653,11 +654,11 @@ pub async fn init_default_admin(pool: &PgPool) -> Result<()> {
         .map_err(|e| anyhow!("密码加密失败: {}", e))?
         .to_string();
 
-    // 插入 admin 用户
+    // 插入 admin 用户（超级管理员）
     sqlx::query(
         r#"
-        INSERT INTO public.sys_user (id, username, passwd, real_name, tenant_id, created_at)
-        VALUES (1, 'admin', $1, '超级管理员', 1, NOW())
+        INSERT INTO public.sys_user (id, username, passwd, real_name, is_super_admin, tenant_id, created_at)
+        VALUES (1, 'admin', $1, '超级管理员', true, NULL, NOW())
         ON CONFLICT (id) DO NOTHING
         "#,
     )
@@ -703,7 +704,7 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     init_default_admin(&pool).await?;
 
     // 7. 读取默认租户 schema 名称
-    let schema: String = sqlx::query_scalar(
+    let schema: String = sqlx::query_scalar::<_, String>(
         "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true",
     )
     .fetch_optional(&pool)

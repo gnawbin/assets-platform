@@ -9,8 +9,10 @@ pub mod category_routes;
 pub mod department_routes;
 pub mod openapi;
 pub mod process_routes;
+pub mod register_routes;
 pub mod response;
 pub mod role_routes;
+pub mod tenant_routes;
 pub mod user_routes;
 
 use std::net::SocketAddr;
@@ -75,7 +77,7 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     // 公开路由（无需认证）
     let public_routes = Router::new()
         .route("/api/auth/login", post(user_routes::login))
-        .route("/api/auth/register", post(register_placeholder));
+        .route("/api/auth/register", post(register_routes::register));
 
     // 需要认证的路由
     let protected_routes = Router::new()
@@ -166,6 +168,24 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             "/api/roles/{id}/menus",
             post(role_routes::assign_role_menus),
         )
+        // 租户
+        .route("/api/tenants", get(tenant_routes::get_tenants))
+        .route("/api/tenants", post(tenant_routes::insert_tenant))
+        .route("/api/tenants/{id}", put(tenant_routes::update_tenant))
+        .route("/api/tenants/{id}", delete(tenant_routes::delete_tenant))
+        // 注册审核
+        .route(
+            "/api/auth/registrations",
+            get(register_routes::get_registrations),
+        )
+        .route(
+            "/api/auth/registrations/{id}/approve",
+            post(register_routes::approve_registration),
+        )
+        .route(
+            "/api/auth/registrations/{id}/reject",
+            post(register_routes::reject_registration),
+        )
         // 菜单
         .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
         .route("/api/menus/user", get(role_routes::get_user_menus))
@@ -250,11 +270,6 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .merge(protected_routes)
         .merge(swagger)
         .with_state(state)
-}
-
-/// 注册占位（后续实现）
-async fn register_placeholder() -> &'static str {
-    "注册功能待实现"
 }
 
 /// 优雅关闭信号处理

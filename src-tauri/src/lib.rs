@@ -146,6 +146,17 @@ pub fn run() {
             commands::user_commands::delete_user,
             commands::user_commands::get_current_user,
             commands::user_commands::reset_password,
+            // 租户管理
+            commands::tenant_commands::get_tenants,
+            commands::tenant_commands::insert_tenant,
+            commands::tenant_commands::update_tenant,
+            commands::tenant_commands::delete_tenant,
+            commands::tenant_commands::switch_tenant,
+            // 注册申请
+            commands::register_commands::register,
+            commands::register_commands::get_registrations,
+            commands::register_commands::approve_registration,
+            commands::register_commands::reject_registration,
             // 部门管理
             commands::department_commands::get_departments,
             commands::department_commands::insert_department,

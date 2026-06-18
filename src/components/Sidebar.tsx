@@ -26,6 +26,7 @@ import {
   IconChevronDown,
 } from '@tabler/icons-react';
 import { getUserMenus, type MenuItem } from '@/services/menuService';
+import { useAuthStore } from '@/store/authStore';
 
 // ======================== 图标映射 ========================
 
@@ -182,19 +183,36 @@ const Sidebar: React.FC = () => {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { user } = useAuthStore();
 
   useEffect(() => {
     let mounted = true;
 
     async function fetchMenus() {
+      // 如果 user 为 null，说明 auth 尚未初始化完成，跳过请求
+      if (!user) {
+        console.log('[Sidebar] user 为 null，等待 auth 初始化...');
+        if (mounted) {
+          setLoading(true);
+        }
+        return;
+      }
+
+      const userIdStr = user.id?.toString();
+      console.log('[Sidebar] 开始加载菜单, user:', { id: user.id, username: user.username, is_super_admin: user.is_super_admin });
+      console.log('[Sidebar] 调用 getUserMenus, userId:', userIdStr);
+
       try {
         setLoading(true);
         setError(null);
-        const data = await getUserMenus();
+        // 传递当前用户ID，后端根据用户角色过滤菜单
+        const data = await getUserMenus(userIdStr);
+        console.log('[Sidebar] getUserMenus 返回结果:', { count: data.length, data });
         if (mounted) {
           setMenuItems(data);
         }
       } catch (err) {
+        console.error('[Sidebar] getUserMenus 调用失败:', err);
         if (mounted) {
           setError(err instanceof Error ? err.message : '加载菜单失败');
         }
@@ -210,7 +228,7 @@ const Sidebar: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [user?.id]);
 
   return (
     <Paper withBorder h="100%" w={280} style={{ overflow: 'hidden' }}>

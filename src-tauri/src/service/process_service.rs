@@ -12,12 +12,21 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use utoipa::ToSchema;
 
+/// 获取当前租户 schema 前缀
+fn schema_prefix() -> String {
+    let schema = database::postgres::get_current_schema();
+    format!("{}.", schema)
+}
+
 // ======================== 领用管理 ========================
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetReceiveInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub user_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub department_id: i64,
     pub receive_date: String,
     pub reason: String,
@@ -26,8 +35,11 @@ pub struct AssetReceiveInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetReceiveUpdateInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub user_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub department_id: i64,
     pub receive_date: String,
     pub reason: String,
@@ -38,15 +50,18 @@ pub struct AssetReceiveUpdateInput {
 pub async fn get_receives() -> Result<Vec<AssetReceive>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let rows = sqlx::query_as::<_, AssetReceive>(
-        "SELECT id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted FROM asset_receive WHERE deleted = 0 ORDER BY created_at DESC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询领用记录失败: {}", e);
-        format!("查询领用记录失败: {}", e)
-    })?;
+    let prefix = schema_prefix();
+    let sql = format!(
+        "SELECT id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_receive WHERE deleted = 0 ORDER BY created_at DESC",
+        prefix
+    );
+    let rows = sqlx::query_as::<_, AssetReceive>(&sql)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询领用记录失败: {}", e);
+            format!("查询领用记录失败: {}", e)
+        })?;
 
     let count = rows.len();
     info!("查询领用记录成功: 共 {} 条", count);
@@ -64,28 +79,31 @@ pub async fn insert_receive(input: AssetReceiveInput) -> Result<AssetReceive, St
         input.asset_id, input.user_id
     );
 
-    let row = sqlx::query_as::<_, AssetReceive>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        INSERT INTO asset_receive (id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, created_by, created_at, updated_by, updated_at, deleted)
+        INSERT INTO {}asset_receive (id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7, $8, $9, NOW(), $9, NOW(), 0)
         RETURNING id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&receive_no)
-    .bind(input.asset_id)
-    .bind(input.user_id)
-    .bind(input.department_id)
-    .bind(&input.receive_date)
-    .bind(&input.reason)
-    .bind(input.status.unwrap_or(0))
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("新增领用记录失败: {}", e);
-        format!("新增领用记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetReceive>(&sql)
+        .bind(id)
+        .bind(&receive_no)
+        .bind(input.asset_id)
+        .bind(input.user_id)
+        .bind(input.department_id)
+        .bind(&input.receive_date)
+        .bind(&input.reason)
+        .bind(input.status.unwrap_or(0))
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("新增领用记录失败: {}", e);
+            format!("新增领用记录失败: {}", e)
+        })?;
 
     info!(
         "新增领用记录成功: id={}, receive_no={}",
@@ -103,30 +121,33 @@ pub async fn update_receive(
 
     info!("更新领用记录: id={}", id);
 
-    let row = sqlx::query_as::<_, AssetReceive>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        UPDATE asset_receive SET
+        UPDATE {}asset_receive SET
             asset_id = $2, user_id = $3, department_id = $4,
             receive_date = $5::timestamptz, reason = $6, status = $7,
             updated_by = $8, updated_at = NOW()
         WHERE id = $1 AND deleted = 0
         RETURNING id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(input.asset_id)
-    .bind(input.user_id)
-    .bind(input.department_id)
-    .bind(&input.receive_date)
-    .bind(&input.reason)
-    .bind(input.status.unwrap_or(0))
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("更新领用记录失败: id={}, error={}", id, e);
-        format!("更新领用记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetReceive>(&sql)
+        .bind(id)
+        .bind(input.asset_id)
+        .bind(input.user_id)
+        .bind(input.department_id)
+        .bind(&input.receive_date)
+        .bind(&input.reason)
+        .bind(input.status.unwrap_or(0))
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("更新领用记录失败: id={}, error={}", id, e);
+            format!("更新领用记录失败: {}", e)
+        })?;
 
     info!("更新领用记录成功: id={}", id);
     Ok(row)
@@ -138,7 +159,12 @@ pub async fn delete_receive(id: i64) -> Result<(), String> {
 
     info!("删除领用记录: id={}", id);
 
-    sqlx::query("UPDATE asset_receive SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    let prefix = schema_prefix();
+    let sql = format!(
+        "UPDATE {}asset_receive SET deleted = 1, updated_at = NOW() WHERE id = $1",
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(id)
         .execute(&pool)
         .await
@@ -155,24 +181,32 @@ pub async fn delete_receive(id: i64) -> Result<(), String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetReturnInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub receive_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub user_id: i64,
     pub return_date: String,
     pub asset_status: Option<i8>,
     pub remark: Option<String>,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub confirm_by: i64,
     pub confirm_time: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetReturnUpdateInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub receive_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub user_id: i64,
     pub return_date: String,
     pub asset_status: Option<i8>,
     pub remark: Option<String>,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub confirm_by: i64,
     pub confirm_time: String,
 }
@@ -181,15 +215,18 @@ pub struct AssetReturnUpdateInput {
 pub async fn get_returns() -> Result<Vec<AssetReturn>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let rows = sqlx::query_as::<_, AssetReturn>(
-        "SELECT id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted FROM asset_return WHERE deleted = 0 ORDER BY created_at DESC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询归还记录失败: {}", e);
-        format!("查询归还记录失败: {}", e)
-    })?;
+    let prefix = schema_prefix();
+    let sql = format!(
+        "SELECT id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_return WHERE deleted = 0 ORDER BY created_at DESC",
+        prefix
+    );
+    let rows = sqlx::query_as::<_, AssetReturn>(&sql)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询归还记录失败: {}", e);
+            format!("查询归还记录失败: {}", e)
+        })?;
 
     let count = rows.len();
     info!("查询归还记录成功: 共 {} 条", count);
@@ -207,30 +244,33 @@ pub async fn insert_return(input: AssetReturnInput) -> Result<AssetReturn, Strin
         input.asset_id, input.user_id
     );
 
-    let row = sqlx::query_as::<_, AssetReturn>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        INSERT INTO asset_return (id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted)
+        INSERT INTO {}asset_return (id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7, $8, $9, $10::timestamptz, $11, NOW(), $11, NOW(), 0)
         RETURNING id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&return_no)
-    .bind(input.receive_id)
-    .bind(input.asset_id)
-    .bind(input.user_id)
-    .bind(&input.return_date)
-    .bind(input.asset_status.unwrap_or(0))
-    .bind(&input.remark)
-    .bind(input.confirm_by)
-    .bind(&input.confirm_time)
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("新增归还记录失败: {}", e);
-        format!("新增归还记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetReturn>(&sql)
+        .bind(id)
+        .bind(&return_no)
+        .bind(input.receive_id)
+        .bind(input.asset_id)
+        .bind(input.user_id)
+        .bind(&input.return_date)
+        .bind(input.asset_status.unwrap_or(0))
+        .bind(&input.remark)
+        .bind(input.confirm_by)
+        .bind(&input.confirm_time)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("新增归还记录失败: {}", e);
+            format!("新增归还记录失败: {}", e)
+        })?;
 
     info!(
         "新增归还记录成功: id={}, return_no={}",
@@ -245,9 +285,10 @@ pub async fn update_return(id: i64, input: AssetReturnUpdateInput) -> Result<Ass
 
     info!("更新归还记录: id={}", id);
 
-    let row = sqlx::query_as::<_, AssetReturn>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        UPDATE asset_return SET
+        UPDATE {}asset_return SET
             receive_id = $2, asset_id = $3, user_id = $4,
             return_date = $5::timestamptz, asset_status = $6, remark = $7,
             confirm_by = $8, confirm_time = $9::timestamptz,
@@ -255,23 +296,25 @@ pub async fn update_return(id: i64, input: AssetReturnUpdateInput) -> Result<Ass
         WHERE id = $1 AND deleted = 0
         RETURNING id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(input.receive_id)
-    .bind(input.asset_id)
-    .bind(input.user_id)
-    .bind(&input.return_date)
-    .bind(input.asset_status.unwrap_or(0))
-    .bind(&input.remark)
-    .bind(input.confirm_by)
-    .bind(&input.confirm_time)
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("更新归还记录失败: id={}, error={}", id, e);
-        format!("更新归还记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetReturn>(&sql)
+        .bind(id)
+        .bind(input.receive_id)
+        .bind(input.asset_id)
+        .bind(input.user_id)
+        .bind(&input.return_date)
+        .bind(input.asset_status.unwrap_or(0))
+        .bind(&input.remark)
+        .bind(input.confirm_by)
+        .bind(&input.confirm_time)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("更新归还记录失败: id={}, error={}", id, e);
+            format!("更新归还记录失败: {}", e)
+        })?;
 
     info!("更新归还记录成功: id={}", id);
     Ok(row)
@@ -283,7 +326,12 @@ pub async fn delete_return(id: i64) -> Result<(), String> {
 
     info!("删除归还记录: id={}", id);
 
-    sqlx::query("UPDATE asset_return SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    let prefix = schema_prefix();
+    let sql = format!(
+        "UPDATE {}asset_return SET deleted = 1, updated_at = NOW() WHERE id = $1",
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(id)
         .execute(&pool)
         .await
@@ -300,10 +348,15 @@ pub async fn delete_return(id: i64) -> Result<(), String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetTransferInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub out_dept_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub in_dept_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub out_user_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub in_user_id: i64,
     pub transfer_date: String,
     pub reason: String,
@@ -312,10 +365,15 @@ pub struct AssetTransferInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetTransferUpdateInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub out_dept_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub in_dept_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub out_user_id: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub in_user_id: i64,
     pub transfer_date: String,
     pub reason: String,
@@ -326,15 +384,18 @@ pub struct AssetTransferUpdateInput {
 pub async fn get_transfers() -> Result<Vec<AssetTransfer>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let rows = sqlx::query_as::<_, AssetTransfer>(
-        "SELECT id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted FROM asset_transfer WHERE deleted = 0 ORDER BY created_at DESC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询调拨记录失败: {}", e);
-        format!("查询调拨记录失败: {}", e)
-    })?;
+    let prefix = schema_prefix();
+    let sql = format!(
+        "SELECT id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_transfer WHERE deleted = 0 ORDER BY created_at DESC",
+        prefix
+    );
+    let rows = sqlx::query_as::<_, AssetTransfer>(&sql)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询调拨记录失败: {}", e);
+            format!("查询调拨记录失败: {}", e)
+        })?;
 
     let count = rows.len();
     info!("查询调拨记录成功: 共 {} 条", count);
@@ -349,30 +410,33 @@ pub async fn insert_transfer(input: AssetTransferInput) -> Result<AssetTransfer,
 
     info!("新增调拨记录: asset_id={}", input.asset_id);
 
-    let row = sqlx::query_as::<_, AssetTransfer>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        INSERT INTO asset_transfer (id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, created_by, created_at, updated_by, updated_at, deleted)
+        INSERT INTO {}asset_transfer (id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, NOW(), $11, NOW(), 0)
         RETURNING id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&transfer_no)
-    .bind(input.asset_id)
-    .bind(input.out_dept_id)
-    .bind(input.in_dept_id)
-    .bind(input.out_user_id)
-    .bind(input.in_user_id)
-    .bind(&input.transfer_date)
-    .bind(&input.reason)
-    .bind(input.status.unwrap_or(0))
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("新增调拨记录失败: {}", e);
-        format!("新增调拨记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetTransfer>(&sql)
+        .bind(id)
+        .bind(&transfer_no)
+        .bind(input.asset_id)
+        .bind(input.out_dept_id)
+        .bind(input.in_dept_id)
+        .bind(input.out_user_id)
+        .bind(input.in_user_id)
+        .bind(&input.transfer_date)
+        .bind(&input.reason)
+        .bind(input.status.unwrap_or(0))
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("新增调拨记录失败: {}", e);
+            format!("新增调拨记录失败: {}", e)
+        })?;
 
     info!(
         "新增调拨记录成功: id={}, transfer_no={}",
@@ -390,9 +454,10 @@ pub async fn update_transfer(
 
     info!("更新调拨记录: id={}", id);
 
-    let row = sqlx::query_as::<_, AssetTransfer>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        UPDATE asset_transfer SET
+        UPDATE {}asset_transfer SET
             asset_id = $2, out_dept_id = $3, in_dept_id = $4,
             out_user_id = $5, in_user_id = $6,
             transfer_date = $7::timestamptz, reason = $8, status = $9,
@@ -400,23 +465,25 @@ pub async fn update_transfer(
         WHERE id = $1 AND deleted = 0
         RETURNING id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(input.asset_id)
-    .bind(input.out_dept_id)
-    .bind(input.in_dept_id)
-    .bind(input.out_user_id)
-    .bind(input.in_user_id)
-    .bind(&input.transfer_date)
-    .bind(&input.reason)
-    .bind(input.status.unwrap_or(0))
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("更新调拨记录失败: id={}, error={}", id, e);
-        format!("更新调拨记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetTransfer>(&sql)
+        .bind(id)
+        .bind(input.asset_id)
+        .bind(input.out_dept_id)
+        .bind(input.in_dept_id)
+        .bind(input.out_user_id)
+        .bind(input.in_user_id)
+        .bind(&input.transfer_date)
+        .bind(&input.reason)
+        .bind(input.status.unwrap_or(0))
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("更新调拨记录失败: id={}, error={}", id, e);
+            format!("更新调拨记录失败: {}", e)
+        })?;
 
     info!("更新调拨记录成功: id={}", id);
     Ok(row)
@@ -428,7 +495,12 @@ pub async fn delete_transfer(id: i64) -> Result<(), String> {
 
     info!("删除调拨记录: id={}", id);
 
-    sqlx::query("UPDATE asset_transfer SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    let prefix = schema_prefix();
+    let sql = format!(
+        "UPDATE {}asset_transfer SET deleted = 1, updated_at = NOW() WHERE id = $1",
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(id)
         .execute(&pool)
         .await
@@ -445,10 +517,13 @@ pub async fn delete_transfer(id: i64) -> Result<(), String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetRepairInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
     pub fault_desc: String,
     pub repair_desc: Option<String>,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub repair_user_id: Option<i64>,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub repair_dept_id: Option<i64>,
     pub repair_file_url: Option<String>,
     pub repair_type: Option<i8>,
@@ -462,10 +537,13 @@ pub struct AssetRepairInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetRepairUpdateInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
     pub fault_desc: String,
     pub repair_desc: Option<String>,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub repair_user_id: Option<i64>,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub repair_dept_id: Option<i64>,
     pub repair_file_url: Option<String>,
     pub repair_type: Option<i8>,
@@ -481,15 +559,18 @@ pub struct AssetRepairUpdateInput {
 pub async fn get_repairs() -> Result<Vec<AssetRepair>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let rows = sqlx::query_as::<_, AssetRepair>(
-        "SELECT id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted FROM asset_repair WHERE deleted = 0 ORDER BY created_at DESC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询维修记录失败: {}", e);
-        format!("查询维修记录失败: {}", e)
-    })?;
+    let prefix = schema_prefix();
+    let sql = format!(
+        "SELECT id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_repair WHERE deleted = 0 ORDER BY created_at DESC",
+        prefix
+    );
+    let rows = sqlx::query_as::<_, AssetRepair>(&sql)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询维修记录失败: {}", e);
+            format!("查询维修记录失败: {}", e)
+        })?;
 
     let count = rows.len();
     info!("查询维修记录成功: 共 {} 条", count);
@@ -504,35 +585,38 @@ pub async fn insert_repair(input: AssetRepairInput) -> Result<AssetRepair, Strin
 
     info!("新增维修记录: asset_id={}", input.asset_id);
 
-    let row = sqlx::query_as::<_, AssetRepair>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        INSERT INTO asset_repair (id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted)
+        INSERT INTO {}asset_repair (id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz, $13::timestamptz, $14::timestamptz, $15, $16, NOW(), $16, NOW(), 0)
         RETURNING id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&repair_no)
-    .bind(input.asset_id)
-    .bind(&input.fault_desc)
-    .bind(&input.repair_desc)
-    .bind(input.repair_user_id)
-    .bind(input.repair_dept_id)
-    .bind(&input.repair_file_url)
-    .bind(input.repair_type.unwrap_or(0))
-    .bind(&input.vendor)
-    .bind(input.cost)
-    .bind(&input.apply_date)
-    .bind(&input.repair_date)
-    .bind(&input.finish_date)
-    .bind(input.status.unwrap_or(0))
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("新增维修记录失败: {}", e);
-        format!("新增维修记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetRepair>(&sql)
+        .bind(id)
+        .bind(&repair_no)
+        .bind(input.asset_id)
+        .bind(&input.fault_desc)
+        .bind(&input.repair_desc)
+        .bind(input.repair_user_id)
+        .bind(input.repair_dept_id)
+        .bind(&input.repair_file_url)
+        .bind(input.repair_type.unwrap_or(0))
+        .bind(&input.vendor)
+        .bind(input.cost)
+        .bind(&input.apply_date)
+        .bind(&input.repair_date)
+        .bind(&input.finish_date)
+        .bind(input.status.unwrap_or(0))
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("新增维修记录失败: {}", e);
+            format!("新增维修记录失败: {}", e)
+        })?;
 
     info!(
         "新增维修记录成功: id={}, repair_no={}",
@@ -547,9 +631,10 @@ pub async fn update_repair(id: i64, input: AssetRepairUpdateInput) -> Result<Ass
 
     info!("更新维修记录: id={}", id);
 
-    let row = sqlx::query_as::<_, AssetRepair>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        UPDATE asset_repair SET
+        UPDATE {}asset_repair SET
             asset_id = $2, fault_desc = $3, repair_desc = $4,
             repair_user_id = $5, repair_dept_id = $6, repair_file_url = $7,
             repair_type = $8, vendor = $9, cost = $10,
@@ -559,28 +644,30 @@ pub async fn update_repair(id: i64, input: AssetRepairUpdateInput) -> Result<Ass
         WHERE id = $1 AND deleted = 0
         RETURNING id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(input.asset_id)
-    .bind(&input.fault_desc)
-    .bind(&input.repair_desc)
-    .bind(input.repair_user_id)
-    .bind(input.repair_dept_id)
-    .bind(&input.repair_file_url)
-    .bind(input.repair_type.unwrap_or(0))
-    .bind(&input.vendor)
-    .bind(input.cost)
-    .bind(&input.apply_date)
-    .bind(&input.repair_date)
-    .bind(&input.finish_date)
-    .bind(input.status.unwrap_or(0))
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("更新维修记录失败: id={}, error={}", id, e);
-        format!("更新维修记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetRepair>(&sql)
+        .bind(id)
+        .bind(input.asset_id)
+        .bind(&input.fault_desc)
+        .bind(&input.repair_desc)
+        .bind(input.repair_user_id)
+        .bind(input.repair_dept_id)
+        .bind(&input.repair_file_url)
+        .bind(input.repair_type.unwrap_or(0))
+        .bind(&input.vendor)
+        .bind(input.cost)
+        .bind(&input.apply_date)
+        .bind(&input.repair_date)
+        .bind(&input.finish_date)
+        .bind(input.status.unwrap_or(0))
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("更新维修记录失败: id={}, error={}", id, e);
+            format!("更新维修记录失败: {}", e)
+        })?;
 
     info!("更新维修记录成功: id={}", id);
     Ok(row)
@@ -592,7 +679,12 @@ pub async fn delete_repair(id: i64) -> Result<(), String> {
 
     info!("删除维修记录: id={}", id);
 
-    sqlx::query("UPDATE asset_repair SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    let prefix = schema_prefix();
+    let sql = format!(
+        "UPDATE {}asset_repair SET deleted = 1, updated_at = NOW() WHERE id = $1",
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(id)
         .execute(&pool)
         .await
@@ -609,19 +701,23 @@ pub async fn delete_repair(id: i64) -> Result<(), String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetScrapInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
     pub reason: String,
     pub scrap_date: String,
     pub status: Option<i8>,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub handle_user: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetScrapUpdateInput {
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub asset_id: i64,
     pub reason: String,
     pub scrap_date: String,
     pub status: Option<i8>,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub handle_user: Option<i64>,
 }
 
@@ -629,15 +725,18 @@ pub struct AssetScrapUpdateInput {
 pub async fn get_scraps() -> Result<Vec<AssetScrap>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let rows = sqlx::query_as::<_, AssetScrap>(
-        "SELECT id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted FROM asset_scrap WHERE deleted = 0 ORDER BY created_at DESC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询报废记录失败: {}", e);
-        format!("查询报废记录失败: {}", e)
-    })?;
+    let prefix = schema_prefix();
+    let sql = format!(
+        "SELECT id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_scrap WHERE deleted = 0 ORDER BY created_at DESC",
+        prefix
+    );
+    let rows = sqlx::query_as::<_, AssetScrap>(&sql)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询报废记录失败: {}", e);
+            format!("查询报废记录失败: {}", e)
+        })?;
 
     let count = rows.len();
     info!("查询报废记录成功: 共 {} 条", count);
@@ -652,27 +751,30 @@ pub async fn insert_scrap(input: AssetScrapInput) -> Result<AssetScrap, String> 
 
     info!("新增报废记录: asset_id={}", input.asset_id);
 
-    let row = sqlx::query_as::<_, AssetScrap>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        INSERT INTO asset_scrap (id, scrap_no, asset_id, reason, scrap_date, status, handle_user, created_by, created_at, updated_by, updated_at, deleted)
+        INSERT INTO {}asset_scrap (id, scrap_no, asset_id, reason, scrap_date, status, handle_user, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7, $8, NOW(), $8, NOW(), 0)
         RETURNING id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&scrap_no)
-    .bind(input.asset_id)
-    .bind(&input.reason)
-    .bind(&input.scrap_date)
-    .bind(input.status.unwrap_or(0))
-    .bind(input.handle_user)
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("新增报废记录失败: {}", e);
-        format!("新增报废记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetScrap>(&sql)
+        .bind(id)
+        .bind(&scrap_no)
+        .bind(input.asset_id)
+        .bind(&input.reason)
+        .bind(&input.scrap_date)
+        .bind(input.status.unwrap_or(0))
+        .bind(input.handle_user)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("新增报废记录失败: {}", e);
+            format!("新增报废记录失败: {}", e)
+        })?;
 
     info!("新增报废记录成功: id={}, scrap_no={}", row.id, row.scrap_no);
     Ok(row)
@@ -684,29 +786,32 @@ pub async fn update_scrap(id: i64, input: AssetScrapUpdateInput) -> Result<Asset
 
     info!("更新报废记录: id={}", id);
 
-    let row = sqlx::query_as::<_, AssetScrap>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        UPDATE asset_scrap SET
+        UPDATE {}asset_scrap SET
             asset_id = $2, reason = $3, scrap_date = $4::timestamptz,
             status = $5, handle_user = $6,
             updated_by = $7, updated_at = NOW()
         WHERE id = $1 AND deleted = 0
         RETURNING id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(input.asset_id)
-    .bind(&input.reason)
-    .bind(&input.scrap_date)
-    .bind(input.status.unwrap_or(0))
-    .bind(input.handle_user)
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("更新报废记录失败: id={}, error={}", id, e);
-        format!("更新报废记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetScrap>(&sql)
+        .bind(id)
+        .bind(input.asset_id)
+        .bind(&input.reason)
+        .bind(&input.scrap_date)
+        .bind(input.status.unwrap_or(0))
+        .bind(input.handle_user)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("更新报废记录失败: id={}, error={}", id, e);
+            format!("更新报废记录失败: {}", e)
+        })?;
 
     info!("更新报废记录成功: id={}", id);
     Ok(row)
@@ -718,7 +823,12 @@ pub async fn delete_scrap(id: i64) -> Result<(), String> {
 
     info!("删除报废记录: id={}", id);
 
-    sqlx::query("UPDATE asset_scrap SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    let prefix = schema_prefix();
+    let sql = format!(
+        "UPDATE {}asset_scrap SET deleted = 1, updated_at = NOW() WHERE id = $1",
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(id)
         .execute(&pool)
         .await
@@ -736,13 +846,16 @@ pub async fn delete_scrap(id: i64) -> Result<(), String> {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetPurchaseInput {
     pub asset_name: String,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub category_id: i64,
     pub model: Option<String>,
     pub manufacturer: Option<String>,
     pub quantity: i32,
     pub unit_price: Option<f64>,
     pub total_price: Option<f64>,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub apply_user: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub dept_id: i64,
     pub reason: String,
     pub status: Option<i8>,
@@ -754,13 +867,16 @@ pub struct AssetPurchaseInput {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct AssetPurchaseUpdateInput {
     pub asset_name: String,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub category_id: i64,
     pub model: Option<String>,
     pub manufacturer: Option<String>,
     pub quantity: i32,
     pub unit_price: Option<f64>,
     pub total_price: Option<f64>,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub apply_user: i64,
+    #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub dept_id: i64,
     pub reason: String,
     pub status: Option<i8>,
@@ -773,15 +889,18 @@ pub struct AssetPurchaseUpdateInput {
 pub async fn get_purchases() -> Result<Vec<AssetPurchase>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let rows = sqlx::query_as::<_, AssetPurchase>(
-        "SELECT id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted FROM asset_purchase WHERE deleted = 0 ORDER BY created_at DESC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询采购记录失败: {}", e);
-        format!("查询采购记录失败: {}", e)
-    })?;
+    let prefix = schema_prefix();
+    let sql = format!(
+        "SELECT id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_purchase WHERE deleted = 0 ORDER BY created_at DESC",
+        prefix
+    );
+    let rows = sqlx::query_as::<_, AssetPurchase>(&sql)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询采购记录失败: {}", e);
+            format!("查询采购记录失败: {}", e)
+        })?;
 
     let count = rows.len();
     info!("查询采购记录成功: 共 {} 条", count);
@@ -796,36 +915,39 @@ pub async fn insert_purchase(input: AssetPurchaseInput) -> Result<AssetPurchase,
 
     info!("新增采购记录: asset_name={}", input.asset_name);
 
-    let row = sqlx::query_as::<_, AssetPurchase>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        INSERT INTO asset_purchase (id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted)
+        INSERT INTO {}asset_purchase (id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::timestamptz, $16::timestamptz, $17, NOW(), $17, NOW(), 0)
         RETURNING id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&purchase_no)
-    .bind(&input.asset_name)
-    .bind(input.category_id)
-    .bind(&input.model)
-    .bind(&input.manufacturer)
-    .bind(input.quantity)
-    .bind(input.unit_price)
-    .bind(input.total_price)
-    .bind(input.apply_user)
-    .bind(input.dept_id)
-    .bind(&input.reason)
-    .bind(input.status.unwrap_or(0))
-    .bind(&input.supplier)
-    .bind(&input.purchase_date)
-    .bind(&input.arrive_date)
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("新增采购记录失败: {}", e);
-        format!("新增采购记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetPurchase>(&sql)
+        .bind(id)
+        .bind(&purchase_no)
+        .bind(&input.asset_name)
+        .bind(input.category_id)
+        .bind(&input.model)
+        .bind(&input.manufacturer)
+        .bind(input.quantity)
+        .bind(input.unit_price)
+        .bind(input.total_price)
+        .bind(input.apply_user)
+        .bind(input.dept_id)
+        .bind(&input.reason)
+        .bind(input.status.unwrap_or(0))
+        .bind(&input.supplier)
+        .bind(&input.purchase_date)
+        .bind(&input.arrive_date)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("新增采购记录失败: {}", e);
+            format!("新增采购记录失败: {}", e)
+        })?;
 
     info!(
         "新增采购记录成功: id={}, purchase_no={}",
@@ -843,9 +965,10 @@ pub async fn update_purchase(
 
     info!("更新采购记录: id={}", id);
 
-    let row = sqlx::query_as::<_, AssetPurchase>(
+    let prefix = schema_prefix();
+    let sql = format!(
         r#"
-        UPDATE asset_purchase SET
+        UPDATE {}asset_purchase SET
             asset_name = $2, category_id = $3, model = $4, manufacturer = $5,
             quantity = $6, unit_price = $7, total_price = $8,
             apply_user = $9, dept_id = $10, reason = $11, status = $12,
@@ -855,29 +978,31 @@ pub async fn update_purchase(
         WHERE id = $1 AND deleted = 0
         RETURNING id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted
         "#,
-    )
-    .bind(id)
-    .bind(&input.asset_name)
-    .bind(input.category_id)
-    .bind(&input.model)
-    .bind(&input.manufacturer)
-    .bind(input.quantity)
-    .bind(input.unit_price)
-    .bind(input.total_price)
-    .bind(input.apply_user)
-    .bind(input.dept_id)
-    .bind(&input.reason)
-    .bind(input.status.unwrap_or(0))
-    .bind(&input.supplier)
-    .bind(&input.purchase_date)
-    .bind(&input.arrive_date)
-    .bind(1i64)
-    .fetch_one(&pool)
-    .await
-    .map_err(|e| {
-        error!("更新采购记录失败: id={}, error={}", id, e);
-        format!("更新采购记录失败: {}", e)
-    })?;
+        prefix
+    );
+    let row = sqlx::query_as::<_, AssetPurchase>(&sql)
+        .bind(id)
+        .bind(&input.asset_name)
+        .bind(input.category_id)
+        .bind(&input.model)
+        .bind(&input.manufacturer)
+        .bind(input.quantity)
+        .bind(input.unit_price)
+        .bind(input.total_price)
+        .bind(input.apply_user)
+        .bind(input.dept_id)
+        .bind(&input.reason)
+        .bind(input.status.unwrap_or(0))
+        .bind(&input.supplier)
+        .bind(&input.purchase_date)
+        .bind(&input.arrive_date)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .map_err(|e| {
+            error!("更新采购记录失败: id={}, error={}", id, e);
+            format!("更新采购记录失败: {}", e)
+        })?;
 
     info!("更新采购记录成功: id={}", id);
     Ok(row)
@@ -889,7 +1014,12 @@ pub async fn delete_purchase(id: i64) -> Result<(), String> {
 
     info!("删除采购记录: id={}", id);
 
-    sqlx::query("UPDATE asset_purchase SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    let prefix = schema_prefix();
+    let sql = format!(
+        "UPDATE {}asset_purchase SET deleted = 1, updated_at = NOW() WHERE id = $1",
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(id)
         .execute(&pool)
         .await

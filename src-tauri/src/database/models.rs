@@ -57,6 +57,44 @@ where
     }
 }
 
+// 把 Vec<string> 反序列化为 Vec<i64> 的辅助函数
+pub fn vec_i64_from_string<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct VecI64Visitor;
+
+    impl<'de> Visitor<'de> for VecI64Visitor {
+        type Value = Vec<i64>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("an array of strings or numbers")
+        }
+
+        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<i64>, A::Error> {
+            let mut vec = Vec::new();
+            while let Some(value) = seq.next_element::<serde_json::Value>()? {
+                match value {
+                    serde_json::Value::String(s) => {
+                        let n = s.parse::<i64>().map_err(de::Error::custom)?;
+                        vec.push(n);
+                    }
+                    serde_json::Value::Number(n) => {
+                        let n = n
+                            .as_i64()
+                            .ok_or_else(|| de::Error::custom("expected i64 number"))?;
+                        vec.push(n);
+                    }
+                    _ => return Err(de::Error::custom("expected string or number")),
+                }
+            }
+            Ok(vec)
+        }
+    }
+
+    deserializer.deserialize_any(VecI64Visitor)
+}
+
 // 把 Option<string> 反序列化为 Option<i64> 的辅助函数
 pub fn opt_i64_from_string<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
 where
@@ -194,6 +232,7 @@ pub struct SysUser {
     pub phone: Option<String>,  //电话，记录用户的联系电话号码
     #[serde(serialize_with = "opt_i64_to_string")]
     pub department_id: Option<i64>, //部门ID，外键，关联部门表
+    pub is_super_admin: bool,   //是否超级管理员，超级管理员可以管理所有租户
     pub status: i16,            //状态，记录用户的当前状态，如1=正常、0=禁用
     pub nickname: Option<String>, //昵称，记录用户的昵称或别名
     pub avatar: Option<String>, //头像
@@ -201,6 +240,8 @@ pub struct SysUser {
     pub person_code: Option<String>, //工号，记录用户的工号或员工编号
     #[serde(serialize_with = "opt_i64_to_string")]
     pub super_user_id: Option<i64>, //上级用户ID，外键，关联自身id，记录用户的直接上级领导，顶级用户super_user_id为null
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub tenant_id: Option<i64>, //所属租户ID，外键，关联sys_tenant表
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该用户的管理员
     pub created_at: Option<DateTime<Utc>>, //创建时间，记录用户的创建时间
@@ -214,6 +255,8 @@ pub struct SysUser {
 pub struct Department {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64, //主键,唯一标识一条部门记录
+    #[serde(serialize_with = "i64_to_string")]
+    pub tenant_id: i64, //所属租户ID，外键，关联sys_tenant表
     pub department_name: String, //部门名称,记录部门的名称
     #[serde(serialize_with = "opt_i64_to_string")]
     pub parent_id: Option<i64>, //父部门ID，外键，关联自身id，实现部门层级关系，顶级部门parent_id为null
@@ -225,6 +268,25 @@ pub struct Department {
     pub updated_by: Option<i64>, //更新人，记录最后一次修改该部门的管理员
     pub updated_at: Option<DateTime<Utc>>, //更新时间，记录部门的最后修改时间
     pub deleted: Option<i16>,        //删除标志，记录部门是否被删除，0=未删除，1=已删除，软删除使用
+}
+
+/// 租户配置实体
+/// 对应表：public.sys_tenant
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SysTenant {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    pub tenant_name: String,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub parent_id: Option<i64>,
+    pub is_leaf: bool,
+    pub schema_name: Option<String>,
+    pub enable: bool,
+    pub create_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 /// 系统菜单 & 权限按钮实体
@@ -294,6 +356,12 @@ pub struct Role {
     pub role_key: String,  //角色标识，登录系统使用，唯一，如admin、user等
     pub role_name: String, //角色名称，记录角色的名称
     pub description: Option<String>, //描述，记录角色的详细描述信息
+    pub is_super_admin: bool, //是否超级管理员角色
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub tenant_id: Option<i64>, //所属租户ID（超级管理员角色为空）
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该角色的管理员
     pub created_at: Option<DateTime<Utc>>, //创建时间，记录角色的创建时间
@@ -617,6 +685,32 @@ pub struct MantineTree {
     pub label: String,                      // 必须：显示名称
     pub children: Option<Vec<MantineTree>>, // 子节点
     pub checked: Option<bool>,              // 可选：是否选中（权限分配时使用）
+}
+
+/// 用户注册申请实体
+/// 对应表：public.sys_user_register
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SysUserRegister {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    pub username: String,
+    pub passwd: String,
+    pub real_name: String,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub department_name: Option<String>,
+    pub company_name: Option<String>,
+    pub reason: Option<String>,
+    pub status: i16,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub approve_by: Option<i64>,
+    pub approve_time: Option<DateTime<Utc>>,
+    pub approve_remark: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 /// 侧边栏菜单项（用于前端动态渲染）

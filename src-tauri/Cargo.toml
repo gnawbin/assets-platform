@@ -3,7 +3,7 @@ authors = ["gengyuwangbin"]
 description = "资产平台APP"
 edition = "2021"
 name = "assets-platform"
-version = "0.0.3"
+version = "0.0.5"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -41,7 +41,7 @@ opentelemetry_sdk = {version = "0.32.1", features = [
 tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
 
 argon2 = "0.5.3" # 最强密码哈希
-password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具 
+password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具  
 rand = {version = "0.10.1", features = ["std_rng"] } 
 # Tauri 核心（最小特性集）
 tauri = {version = "2.11.2", default-features = false, features = ["wry"] }

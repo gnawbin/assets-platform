@@ -367,65 +367,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_type ON {schema}.asset_knowledge (knowl
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_permission ON {schema}.asset_knowledge (permission_level);
 
--- 7. 部门表
-CREATE TABLE IF NOT EXISTS {schema}.sys_department (
-    id BIGINT PRIMARY KEY,
-    department_name VARCHAR(255) NOT NULL,
-    parent_id BIGINT,
-    description TEXT,
-    created_by BIGINT,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_by BIGINT,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    deleted SMALLINT
-);
-
-COMMENT ON TABLE {schema}.sys_department IS '部门表';
-
--- 8. 角色表
-CREATE TABLE IF NOT EXISTS {schema}.sys_role (
-    id BIGINT PRIMARY KEY,
-    role_key VARCHAR(100) NOT NULL,
-    role_name VARCHAR(100) NOT NULL,
-    description TEXT,
-    created_by BIGINT,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_by BIGINT,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    deleted SMALLINT
-);
-
-COMMENT ON TABLE {schema}.sys_role IS '角色表';
-
--- 9. 用户角色关联表
-CREATE TABLE IF NOT EXISTS {schema}.sys_user_role (
-    id BIGINT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    role_id BIGINT NOT NULL,
-    created_by BIGINT,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_by BIGINT,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    deleted SMALLINT
-);
-
-COMMENT ON TABLE {schema}.sys_user_role IS '用户角色关联表';
-
--- 10. 角色菜单关联表
-CREATE TABLE IF NOT EXISTS {schema}.sys_role_menu (
-    id BIGINT PRIMARY KEY,
-    role_id BIGINT NOT NULL,
-    menu_id BIGINT NOT NULL,
-    created_by BIGINT,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_by BIGINT,
-    updated_at TIMESTAMP WITH TIME ZONE,
-    deleted SMALLINT
-);
-
-COMMENT ON TABLE {schema}.sys_role_menu IS '角色菜单关联表';
-
--- 11. 资产领用申请表
+-- 8. 资产领用申请表
 CREATE TABLE IF NOT EXISTS {schema}.asset_receive (
     id BIGINT PRIMARY KEY,
     receive_no VARCHAR(100) NOT NULL,

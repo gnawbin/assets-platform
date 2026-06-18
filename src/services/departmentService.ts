@@ -19,13 +19,18 @@ export interface Department {
     updated_by: number | null;
     updated_at: string | null;
     deleted: number | null;
+    tenant_id: number;
 }
 
 // ======================== 服务方法 ========================
 
-/** 获取所有部门 */
-export function getDepartments() {
-    return api.get<Department[]>('get_departments');
+/** 获取所有部门（可按租户过滤） */
+export function getDepartments(tenantId?: string) {
+    const args: Record<string, unknown> = {};
+    if (tenantId) {
+        args.tenant_id = tenantId;
+    }
+    return api.get<Department[]>('get_departments', args);
 }
 
 /** 新增部门 */
@@ -34,8 +39,15 @@ export function insertDepartment(params: {
     parentId: string | null;
     description: string | null;
     createdBy: number | null;
+    tenantId: string;
 }) {
-    return api.post<string>('insert_department', params);
+    return api.post<string>('insert_department', {
+        departmentName: params.departmentName,
+        parentId: params.parentId,
+        description: params.description,
+        createdBy: params.createdBy,
+        tenantId: params.tenantId,
+    });
 }
 
 /** 更新部门 */

@@ -14,8 +14,10 @@ import {
   Loader,
   Alert,
   TextInput,
+  Select,
+  Badge,
 } from '@mantine/core';
-import { IconAlertCircle, IconTrash, IconShield } from '@tabler/icons-react';
+import { IconAlertCircle, IconTrash, IconShield, IconSearch } from '@tabler/icons-react';
 import { notifySuccess, notifyError } from '@/utils/notify';
 import { useApi } from '@/hooks/useApi';
 import {
@@ -28,10 +30,16 @@ import {
   type Role,
   type MantineTree,
 } from '@/services/permissionService';
+import { getTenants, type Tenant } from '@/services/tenantService';
 
 const PermissionsPage: React.FC = () => {
   console.log('PermissionsPage RENDERED');
   const [roles, setRoles] = useState<Role[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+
+  // 搜索和筛选
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [filterTenantId, setFilterTenantId] = useState<string | null>(null);
 
   // 使用 useApi 管理数据获取
   const {
@@ -63,6 +71,7 @@ const PermissionsPage: React.FC = () => {
   const [newRoleKey, setNewRoleKey] = useState('');
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDesc, setNewRoleDesc] = useState('');
+  const [newRoleTenantId, setNewRoleTenantId] = useState<string | null>(null);
 
   // 当 fetchedRoles 变化时更新本地状态
   useEffect(() => {
@@ -71,9 +80,15 @@ const PermissionsPage: React.FC = () => {
     }
   }, [fetchedRoles]);
 
+  // 加载租户列表
   useEffect(() => {
-    fetchRoles();
+    getTenants().then(setTenants).catch(console.error);
   }, []);
+
+  // 搜索/筛选时重新获取
+  useEffect(() => {
+    fetchRoles(filterTenantId || undefined, searchKeyword || undefined);
+  }, [filterTenantId, searchKeyword]);
 
   // 打开分配权限弹窗
   const openAssignPermModal = async (role: Role) => {
@@ -131,7 +146,7 @@ const PermissionsPage: React.FC = () => {
       setDeleteModalOpen(false);
       setDeleteTargetRole(null);
       notifySuccess('角色删除成功');
-      fetchRoles();
+      fetchRoles(filterTenantId || undefined, searchKeyword || undefined);
     } catch (err) {
       console.error('删除角色失败:', err);
       notifyError('删除角色失败', typeof err === 'string' ? err : undefined);
@@ -144,22 +159,35 @@ const PermissionsPage: React.FC = () => {
       notifyError('验证失败', '请输入角色标识和角色名称');
       return;
     }
+    if (!newRoleTenantId) {
+      notifyError('验证失败', '请选择所属机构');
+      return;
+    }
     try {
       await doInsertRole({
         role_key: newRoleKey.trim(),
         role_name: newRoleName.trim(),
         description: newRoleDesc.trim() || null,
+        tenant_id: newRoleTenantId,
       });
       setAddModalOpen(false);
       setNewRoleKey('');
       setNewRoleName('');
       setNewRoleDesc('');
+      setNewRoleTenantId(null);
       notifySuccess('角色添加成功');
-      fetchRoles();
+      fetchRoles(filterTenantId || undefined, searchKeyword || undefined);
     } catch (err) {
       console.error('新增角色失败:', err);
       notifyError('新增角色失败', typeof err === 'string' ? err : undefined);
     }
+  };
+
+  // 获取租户名称
+  const getTenantName = (tenantId: string | null) => {
+    if (!tenantId) return '-';
+    const tenant = tenants.find((t) => String(t.id) === tenantId);
+    return tenant ? tenant.tenant_name : tenantId;
   };
 
   // 递归渲染菜单树复选框（depth 控制缩进层级）
@@ -235,6 +263,28 @@ const PermissionsPage: React.FC = () => {
           <Button onClick={() => setAddModalOpen(true)}>新增角色</Button>
         </Group>
 
+        {/* 搜索和筛选栏 */}
+        <Group>
+          <TextInput
+            placeholder="搜索角色名称或标识..."
+            leftSection={<IconSearch size={16} />}
+            value={searchKeyword}
+            onChange={(e) => setSearchKeyword(e.currentTarget.value)}
+            style={{ flex: 1 }}
+          />
+          <Select
+            placeholder="全部机构"
+            data={[
+              { value: '', label: '全部机构' },
+              ...tenants.map((t) => ({ value: String(t.id), label: t.tenant_name })),
+            ]}
+            value={filterTenantId}
+            onChange={(value) => setFilterTenantId(value || null)}
+            clearable
+            style={{ width: 200 }}
+          />
+        </Group>
+
         {error && (
           <Alert icon={<IconAlertCircle size={16} />} title="错误" color="red">
             {error}
@@ -253,13 +303,15 @@ const PermissionsPage: React.FC = () => {
                   <Table.Th>角色名称</Table.Th>
                   <Table.Th>角色标识</Table.Th>
                   <Table.Th>描述</Table.Th>
+                  <Table.Th>超级管理员</Table.Th>
+                  <Table.Th>所属机构</Table.Th>
                   <Table.Th style={{ width: 200 }}>操作</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {roles.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={4}>
+                    <Table.Td colSpan={6}>
                       <Text ta="center" c="dimmed" py="xl">
                         暂无角色数据
                       </Text>
@@ -277,6 +329,18 @@ const PermissionsPage: React.FC = () => {
                       <Table.Td>
                         <Text size="sm" c="dimmed">
                           {role.description || '-'}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {role.is_super_admin ? (
+                          <Badge color="red" variant="light">是</Badge>
+                        ) : (
+                          <Badge color="gray" variant="light">否</Badge>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">
+                          {getTenantName(role.tenant_id)}
                         </Text>
                       </Table.Td>
                       <Table.Td>
@@ -396,6 +460,15 @@ const PermissionsPage: React.FC = () => {
             placeholder="角色描述（可选）"
             value={newRoleDesc}
             onChange={(e) => setNewRoleDesc(e.target.value)}
+          />
+          <Select
+            label="所属机构"
+            placeholder="选择所属机构"
+            data={tenants.map((t) => ({ value: String(t.id), label: t.tenant_name }))}
+            value={newRoleTenantId}
+            onChange={(value) => setNewRoleTenantId(value)}
+            required
+            clearable
           />
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={() => setAddModalOpen(false)}>

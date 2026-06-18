@@ -1340,6 +1340,56 @@ WHERE
             id = 45
     );
 
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    46,
+    '租户管理',
+    5,
+    '/settings/tenants',
+    '/settings/tenants/page',
+    NULL,
+    7,
+    true,
+    'system:tenant:list',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 46
+    );
+
 -- =====================
 -- 6. 按钮级权限
 -- =====================
@@ -2799,3 +2849,225 @@ WHERE
     );
 
 -- 6.5 系统配置按钮
+
+-- 租户管理按钮
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    148,
+    '新增租户',
+    46,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    true,
+    'system:tenant:add',
+    3,
+    false,
+    'insert_tenant',
+    'POST',
+    '/api/tenants',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 148
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    149,
+    '编辑租户',
+    46,
+    NULL,
+    NULL,
+    NULL,
+    2,
+    true,
+    'system:tenant:edit',
+    3,
+    false,
+    'update_tenant',
+    'PUT',
+    '/api/tenants/{id}',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 149
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    150,
+    '禁用租户',
+    46,
+    NULL,
+    NULL,
+    NULL,
+    3,
+    true,
+    'system:tenant:delete',
+    3,
+    false,
+    'delete_tenant',
+    'DELETE',
+    '/api/tenants/{id}',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 150
+    );
+
+-- ==============================
+-- 7. 默认角色
+-- ==============================
+INSERT INTO
+    public.sys_role (
+        id,
+        role_key,
+        role_name,
+        description,
+        is_super_admin,
+        tenant_id,
+        created_by,
+        created_at,
+        deleted
+    )
+SELECT 1, 'super_admin', '超级管理员', '超级管理员角色，拥有所有权限', true, NULL, 1, NOW(), 0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_role
+        WHERE
+            id = 1
+    );
+
+-- ==============================
+-- 8. 默认角色菜单关联（super_admin 角色 → 所有菜单）
+-- ==============================
+INSERT INTO
+    public.sys_role_menu (
+        id,
+        role_id,
+        menu_id,
+        created_by,
+        created_at,
+        deleted
+    )
+SELECT row_number() OVER (
+        ORDER BY m.id
+    ) + 1000, 1, m.id, 1, NOW(), 0
+FROM public.sys_menu m
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_role_menu rm
+        WHERE
+            rm.role_id = 1
+            AND rm.menu_id = m.id
+    );
+
+-- ==============================
+-- 9. 默认用户角色关联（admin 用户 → super_admin 角色）
+-- ==============================
+INSERT INTO
+    public.sys_user_role (
+        id,
+        user_id,
+        role_id,
+        created_by,
+        created_at,
+        deleted
+    )
+SELECT 1, 1, 1, 1, NOW(), 0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_user_role
+        WHERE
+            user_id = 1
+            AND role_id = 1
+    );
