@@ -20,6 +20,7 @@ import {
   ActionIcon,
   Tooltip,
   Divider,
+  Select,
 } from '@mantine/core';
 import {
   IconAlertCircle,
@@ -41,6 +42,8 @@ import {
   deleteDepartment,
   type Department,
 } from '@/services/departmentService';
+import { getTenants, type Tenant } from '@/services/tenantService';
+import { useAuthStore } from '@/store/authStore';
 
 // 树节点接口
 interface TreeNode {
@@ -53,8 +56,16 @@ interface TreeNode {
 }
 
 const DepartmentsPage: React.FC = () => {
+  const { user } = useAuthStore();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [treeData, setTreeData] = useState<TreeNode[]>([]);
+
+  // 租户选择（超级管理员用）
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+
+  // 判断是否为超级管理员
+  const isSuperAdmin = user?.is_super_admin === true;
 
   // 使用 useApi 管理数据获取
   const {
@@ -62,7 +73,7 @@ const DepartmentsPage: React.FC = () => {
     loading,
     error,
     execute: fetchDepartments,
-  } = useApi(getDepartments);
+  } = useApi(() => getDepartments(selectedTenantId ?? undefined));
 
   // 选中的部门
   const [selectedDept, setSelectedDept] = useState<Department | null>(null);
@@ -82,6 +93,25 @@ const DepartmentsPage: React.FC = () => {
   // 删除确认弹窗
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
+  // 初始化：加载租户列表（超级管理员用）
+  useEffect(() => {
+    if (isSuperAdmin) {
+      getTenants().then((list) => {
+        setTenants(list);
+        // 默认选中第一个启用的租户
+        const first = list.find((t) => t.enable);
+        if (first) {
+          setSelectedTenantId(String(first.id));
+        }
+      }).catch((err) => {
+        console.error('加载租户列表失败:', err);
+      });
+    } else if (user?.tenant_id) {
+      // 普通管理员，使用自己的 tenant_id
+      setSelectedTenantId(String(user.tenant_id));
+    }
+  }, [user]);
+
   // 当 fetchedDepartments 变化时更新本地状态
   useEffect(() => {
     if (fetchedDepartments) {
@@ -90,9 +120,12 @@ const DepartmentsPage: React.FC = () => {
     }
   }, [fetchedDepartments]);
 
+  // 当 selectedTenantId 变化时重新获取部门
   useEffect(() => {
-    fetchDepartments();
-  }, []);
+    if (selectedTenantId) {
+      fetchDepartments();
+    }
+  }, [selectedTenantId]);
 
   // 构建树结构
   const buildTree = (depts: Department[]) => {
@@ -174,6 +207,11 @@ const DepartmentsPage: React.FC = () => {
       return;
     }
 
+    if (!selectedTenantId) {
+      notifyError('验证失败', '请先选择租户');
+      return;
+    }
+
     try {
       if (formMode === 'add') {
         await doInsert({
@@ -181,6 +219,7 @@ const DepartmentsPage: React.FC = () => {
           parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
           createdBy: null,
+          tenantId: selectedTenantId,
         });
         notifySuccess('部门添加成功');
       } else {
@@ -318,11 +357,33 @@ const DepartmentsPage: React.FC = () => {
             <Button
               leftSection={<IconPlus size={16} />}
               onClick={() => openAddModal(null)}
+              disabled={!selectedTenantId}
             >
               新增根部门
             </Button>
           </Group>
         </Group>
+
+        {/* 超级管理员：租户选择器 */}
+        {isSuperAdmin && (
+          <Select
+            label="选择租户"
+            placeholder="请选择租户查看其部门"
+            data={tenants
+              .filter((t) => t.enable)
+              .map((t) => ({
+                value: String(t.id),
+                label: t.tenant_name,
+              }))}
+            value={selectedTenantId}
+            onChange={(value) => {
+              setSelectedTenantId(value);
+              setSelectedDept(null);
+            }}
+            clearable={false}
+            w={300}
+          />
+        )}
 
         {error && (
           <Alert icon={<IconAlertCircle size={16} />} title="错误" color="red">
@@ -346,6 +407,10 @@ const DepartmentsPage: React.FC = () => {
               <Group justify="center" py="xl">
                 <Loader />
               </Group>
+            ) : !selectedTenantId ? (
+              <Text ta="center" c="dimmed" py="xl">
+                {isSuperAdmin ? '请先选择租户' : '加载中...'}
+              </Text>
             ) : treeData.length === 0 ? (
               <Text ta="center" c="dimmed" py="xl">
                 暂无部门数据，请新增根部门

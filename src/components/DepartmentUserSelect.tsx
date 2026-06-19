@@ -36,6 +36,8 @@ export interface DepartmentUserSelectProps {
     userLabel?: string;
     /** 是否禁用 */
     disabled?: boolean;
+    /** 按租户过滤部门（可选） */
+    tenantId?: string;
 }
 
 // ======================== 组件 ========================
@@ -48,6 +50,7 @@ const DepartmentUserSelect: React.FC<DepartmentUserSelectProps> = ({
     departmentLabel = '部门选择',
     userLabel = '用户选择',
     disabled = false,
+    tenantId,
 }) => {
     const [departments, setDepartments] = useState<Department[]>([]);
     const [users, setUsers] = useState<User[]>([]);
@@ -62,7 +65,7 @@ const DepartmentUserSelect: React.FC<DepartmentUserSelectProps> = ({
             setError(null);
             try {
                 const [deptData, userData] = await Promise.all([
-                    getDepartments(),
+                    getDepartments(tenantId),
                     getUsers(),
                 ]);
                 setDepartments(deptData);
@@ -75,7 +78,7 @@ const DepartmentUserSelect: React.FC<DepartmentUserSelectProps> = ({
             }
         };
         loadData();
-    }, []);
+    }, [tenantId]);
 
     // 根据选中的部门过滤用户
     const filteredUsers = useMemo(() => {

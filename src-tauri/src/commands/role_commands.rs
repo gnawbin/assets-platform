@@ -4,17 +4,53 @@
 
 use crate::database::models::{MantineTree, Role, SidebarMenuItem};
 use crate::service;
+use tracing::info;
 
 /// 新增角色
 #[tauri::command]
-pub async fn insert_role(role: Role) -> Result<Role, String> {
-    service::role_service::insert_role(&role).await
+pub async fn insert_role(
+    role_key: String,
+    role_name: String,
+    description: Option<String>,
+    tenant_id: String,
+) -> Result<Role, String> {
+    let tid: i64 = tenant_id
+        .parse()
+        .map_err(|e| format!("无效的租户ID: {}", e))?;
+    service::role_service::insert_role_by_params(
+        &role_key,
+        &role_name,
+        description.as_deref(),
+        false, // 新增角色默认非超级管理员
+        Some(tid),
+        Some(1), // created_by
+    )
+    .await
 }
 
-/// 获取所有角色列表
+/// 获取所有角色列表（支持按租户筛选和关键词搜索）
 #[tauri::command]
-pub async fn get_roles() -> Result<Vec<Role>, String> {
-    service::role_service::get_roles().await
+pub async fn get_roles(
+    tenant_id: Option<String>,
+    keyword: Option<String>,
+) -> Result<Vec<Role>, String> {
+    info!(
+        "[DEBUG] get_roles called: tenant_id={:?}, keyword={:?}",
+        tenant_id, keyword
+    );
+    let tid = match tenant_id {
+        Some(ref id) if !id.is_empty() => Some(
+            id.parse::<i64>()
+                .map_err(|e| format!("无效的租户ID: {}", e))?,
+        ),
+        _ => None,
+    };
+    let result = service::role_service::get_roles(tid, keyword).await;
+    info!(
+        "[DEBUG] get_roles result: {:?}",
+        result.as_ref().map(|r| r.len())
+    );
+    result
 }
 
 /// 获取指定角色已分配的菜单权限ID列表
@@ -58,9 +94,19 @@ pub async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
 }
 
 /// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
+///
+/// 根据用户角色过滤菜单：
+/// - 超级管理员：返回所有可见菜单
+/// - 普通用户：只返回其角色已分配的菜单
 #[tauri::command]
-pub async fn get_user_menus() -> Result<Vec<SidebarMenuItem>, String> {
-    service::role_service::get_user_menus().await
+pub async fn get_user_menus(user_id: Option<String>) -> Result<Vec<SidebarMenuItem>, String> {
+    match user_id {
+        Some(uid) => {
+            let user_id: i64 = uid.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+            service::role_service::get_user_menus(user_id).await
+        }
+        None => Ok(Vec::new()), // 未登录时返回空菜单
+    }
 }
 
 /// 获取用户已分配的角色 ID 列表

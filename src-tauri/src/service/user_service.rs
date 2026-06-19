@@ -23,15 +23,20 @@ pub struct Claims {
 /// 登录响应（包含 JWT Token）
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
+    #[serde(serialize_with = "crate::database::models::i64_to_string")]
     pub id: i64,
     pub username: String,
     pub real_name: String,
     pub email: Option<String>,
     pub phone: Option<String>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
     pub department_id: Option<i64>,
+    pub is_super_admin: bool,
     pub status: i16,
     pub nickname: Option<String>,
     pub avatar: Option<String>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
+    pub tenant_id: Option<i64>,
     /// JWT Token，用于后续请求的身份验证
     pub token: String,
 }
@@ -39,20 +44,30 @@ pub struct LoginResponse {
 /// 用户列表响应（不包含密码）
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserResponse {
+    #[serde(serialize_with = "crate::database::models::i64_to_string")]
     pub id: i64,
     pub username: String,
     pub real_name: String,
     pub email: Option<String>,
     pub phone: Option<String>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
     pub department_id: Option<i64>,
+    pub is_super_admin: bool,
     pub status: i16,
     pub nickname: Option<String>,
     pub avatar: Option<String>,
     pub person_id: Option<String>,
     pub person_code: Option<String>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
     pub super_user_id: Option<i64>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
+    pub tenant_id: Option<i64>,
+    /// 机构名称
+    pub tenant_name: Option<String>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
     pub created_by: Option<i64>,
     pub created_at: Option<String>,
+    #[serde(serialize_with = "crate::database::models::opt_i64_to_string")]
     pub updated_by: Option<i64>,
     pub updated_at: Option<String>,
 }
@@ -66,12 +81,15 @@ impl From<SysUser> for UserResponse {
             email: u.email,
             phone: u.phone,
             department_id: u.department_id,
+            is_super_admin: u.is_super_admin,
             status: u.status,
             nickname: u.nickname,
             avatar: u.avatar,
             person_id: u.person_id,
             person_code: u.person_code,
             super_user_id: u.super_user_id,
+            tenant_id: u.tenant_id,
+            tenant_name: None,
             created_by: u.created_by,
             created_at: u.created_at.map(|t| t.to_string()),
             updated_by: u.updated_by,
@@ -86,9 +104,9 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
 
     info!("用户登录尝试: username={}", username);
 
-    // 查询用户
+    // 所有用户都存储在 public.sys_user 中，统一从 public schema 查询
     let user = sqlx::query_as::<_, SysUser>(
-        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE username = $1 AND (deleted IS NULL OR deleted = 0)"
+        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_user WHERE username = $1 AND (deleted IS NULL OR deleted = 0)"
     )
     .bind(username)
     .fetch_optional(&pool)
@@ -118,6 +136,36 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
     if !valid {
         warn!("登录失败，密码错误: username={}", username);
         return Err("用户名或密码错误".to_string());
+    }
+
+    // 登录成功后，根据用户所属租户自动切换 schema
+    // 如果 tenant_id = 1（默认租户），保持 public schema
+    // 否则切换到对应租户的 schema
+    if let Some(tenant_id) = user.tenant_id {
+        if tenant_id != 1 {
+            let schema: Option<String> = sqlx::query_scalar(
+                "SELECT schema_name FROM public.sys_tenant WHERE id = $1 AND enable = true",
+            )
+            .bind(tenant_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| {
+                error!("查询租户 schema 失败: tenant_id={}, error={}", tenant_id, e);
+                format!("查询租户信息失败: {}", e)
+            })?;
+
+            if let Some(schema_name) = schema {
+                crate::database::postgres::set_current_schema(&schema_name);
+                info!("用户 '{}' 已切换到租户 schema: {}", username, schema_name);
+            }
+        } else {
+            // 默认租户（id=1），切换到 public
+            crate::database::postgres::set_current_schema("public");
+            info!("用户 '{}' 使用 public schema（默认租户）", username);
+        }
+    } else {
+        // 没有 tenant_id，使用 public
+        crate::database::postgres::set_current_schema("public");
     }
 
     info!(
@@ -156,29 +204,133 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         email: user.email,
         phone: user.phone,
         department_id: user.department_id,
+        is_super_admin: user.is_super_admin,
         status: user.status,
         nickname: user.nickname,
         avatar: user.avatar,
+        tenant_id: user.tenant_id,
         token,
     })
 }
 
-/// 获取所有用户列表
-pub async fn get_users() -> Result<Vec<UserResponse>, String> {
-    let pool = get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
-    let users = sqlx::query_as::<_, SysUser>(
-        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE deleted IS NULL OR deleted = 0 ORDER BY id ASC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询用户列表失败: {}", e);
-        format!("查询用户列表失败: {}", e)
-    })?;
+/// 用于查询用户列表时携带机构名称的中间结构
+#[derive(Debug)]
+struct UserWithTenant {
+    user: SysUser,
+    tenant_name: Option<String>,
+}
 
-    let count = users.len();
+impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for UserWithTenant {
+    fn from_row(row: &sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        let user = SysUser::from_row(row)?;
+        let tenant_name: Option<String> = row.try_get("tenant_name")?;
+        Ok(UserWithTenant { user, tenant_name })
+    }
+}
+
+/// 获取用户列表
+///
+/// 如果 tenant_id 为 Some，则只查询该机构下的用户；
+/// 如果为 None（超级管理员），则查询所有机构的用户。
+/// keyword 可选，用于按用户名或真实姓名模糊搜索。
+pub async fn get_users(
+    tenant_id: Option<i64>,
+    keyword: Option<String>,
+) -> Result<Vec<UserResponse>, String> {
+    let pool = get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+
+    // 使用 LEFT JOIN 查询用户及其所属机构名称
+    let rows = if let Some(tid) = tenant_id {
+        if let Some(ref kw) = keyword {
+            sqlx::query_as::<_, UserWithTenant>(
+                r#"
+                SELECT u.id, u.username, u.passwd, u.domain, u.real_name, u.email, u.phone, u.department_id, u.is_super_admin, u.status, u.nickname, u.avatar, u.person_id, u.person_code, u.super_user_id, u.tenant_id, u.created_by, u.created_at, u.updated_by, u.updated_at, u.deleted,
+                       t.tenant_name
+                FROM public.sys_user u
+                LEFT JOIN public.sys_tenant t ON u.tenant_id = t.id
+                WHERE (u.deleted IS NULL OR u.deleted = 0) AND u.tenant_id = $1
+                  AND (u.username ILIKE '%' || $2 || '%' OR u.real_name ILIKE '%' || $2 || '%')
+                ORDER BY u.id ASC
+                "#,
+            )
+            .bind(tid)
+            .bind(kw)
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| {
+                error!("查询用户列表失败: {}", e);
+                format!("查询用户列表失败: {}", e)
+            })?
+        } else {
+            sqlx::query_as::<_, UserWithTenant>(
+                r#"
+                SELECT u.id, u.username, u.passwd, u.domain, u.real_name, u.email, u.phone, u.department_id, u.is_super_admin, u.status, u.nickname, u.avatar, u.person_id, u.person_code, u.super_user_id, u.tenant_id, u.created_by, u.created_at, u.updated_by, u.updated_at, u.deleted,
+                       t.tenant_name
+                FROM public.sys_user u
+                LEFT JOIN public.sys_tenant t ON u.tenant_id = t.id
+                WHERE (u.deleted IS NULL OR u.deleted = 0) AND u.tenant_id = $1
+                ORDER BY u.id ASC
+                "#,
+            )
+            .bind(tid)
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| {
+                error!("查询用户列表失败: {}", e);
+                format!("查询用户列表失败: {}", e)
+            })?
+        }
+    } else {
+        if let Some(ref kw) = keyword {
+            sqlx::query_as::<_, UserWithTenant>(
+                r#"
+                SELECT u.id, u.username, u.passwd, u.domain, u.real_name, u.email, u.phone, u.department_id, u.is_super_admin, u.status, u.nickname, u.avatar, u.person_id, u.person_code, u.super_user_id, u.tenant_id, u.created_by, u.created_at, u.updated_by, u.updated_at, u.deleted,
+                       t.tenant_name
+                FROM public.sys_user u
+                LEFT JOIN public.sys_tenant t ON u.tenant_id = t.id
+                WHERE (u.deleted IS NULL OR u.deleted = 0)
+                  AND (u.username ILIKE '%' || $1 || '%' OR u.real_name ILIKE '%' || $1 || '%')
+                ORDER BY u.id ASC
+                "#,
+            )
+            .bind(kw)
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| {
+                error!("查询用户列表失败: {}", e);
+                format!("查询用户列表失败: {}", e)
+            })?
+        } else {
+            sqlx::query_as::<_, UserWithTenant>(
+                r#"
+                SELECT u.id, u.username, u.passwd, u.domain, u.real_name, u.email, u.phone, u.department_id, u.is_super_admin, u.status, u.nickname, u.avatar, u.person_id, u.person_code, u.super_user_id, u.tenant_id, u.created_by, u.created_at, u.updated_by, u.updated_at, u.deleted,
+                       t.tenant_name
+                FROM public.sys_user u
+                LEFT JOIN public.sys_tenant t ON u.tenant_id = t.id
+                WHERE u.deleted IS NULL OR u.deleted = 0
+                ORDER BY u.id ASC
+                "#,
+            )
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| {
+                error!("查询用户列表失败: {}", e);
+                format!("查询用户列表失败: {}", e)
+            })?
+        }
+    };
+
+    let count = rows.len();
     info!("查询用户列表成功: 共 {} 条记录", count);
-    Ok(users.into_iter().map(|u| u.into()).collect())
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let mut resp: UserResponse = row.user.into();
+            resp.tenant_name = row.tenant_name;
+            resp
+        })
+        .collect())
 }
 
 /// 新增用户
@@ -194,15 +346,17 @@ pub async fn insert_user(
     person_id: Option<&str>,
     person_code: Option<&str>,
     super_user_id: Option<i64>,
+    tenant_id: Option<i64>,
     created_by: Option<i64>,
 ) -> Result<UserResponse, String> {
     let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
     info!("新增用户: username={}, real_name={}", username, real_name);
 
+    // sys_user 是公共表，始终从 public schema 查询
     // 检查用户名是否已存在
     let existing = sqlx::query_as::<_, SysUser>(
-        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE username = $1 AND (deleted IS NULL OR deleted = 0)"
+        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_user WHERE username = $1 AND (deleted IS NULL OR deleted = 0)"
     )
     .bind(username)
     .fetch_optional(&pool)
@@ -220,12 +374,15 @@ pub async fn insert_user(
     // 加密密码
     let hashed_password = hash_password(password)?;
 
+    // 确定 tenant_id：如果未指定，保持为 null（超级管理员不属于任何机构）
+    let final_tenant_id = tenant_id;
+
     let user = sqlx::query_as::<_, SysUser>(
         r#"
-        INSERT INTO sys_user (id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), $16, NOW(), 0)
-        RETURNING id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted
-        "#
+        INSERT INTO public.sys_user (id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), $18, NOW(), 0)
+        RETURNING id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted
+        "#,
     )
     .bind(next_id() as i64)
     .bind(username)
@@ -235,12 +392,14 @@ pub async fn insert_user(
     .bind(email)
     .bind(phone)
     .bind(department_id)
+    .bind(false) // is_super_admin: 默认非超级管理员
     .bind(status)
     .bind(nickname)
     .bind(Option::<String>::None) // avatar
     .bind(person_id)
     .bind(person_code)
     .bind(super_user_id)
+    .bind(final_tenant_id)
     .bind(created_by)
     .bind(created_by) // updated_by
     .fetch_one(&pool)
@@ -273,13 +432,14 @@ pub async fn update_user(
 
     info!("更新用户信息: id={}, username={}", id, username);
 
+    // sys_user 是公共表，始终从 public schema 操作
     let user = sqlx::query_as::<_, SysUser>(
         r#"
-        UPDATE sys_user
+        UPDATE public.sys_user
         SET username = $2, real_name = $3, email = $4, phone = $5, department_id = $6, status = $7, nickname = $8, person_id = $9, person_code = $10, super_user_id = $11, updated_by = $12, updated_at = NOW()
         WHERE id = $1 AND (deleted IS NULL OR deleted = 0)
-        RETURNING id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted
-        "#
+        RETURNING id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted
+        "#,
     )
     .bind(id)
     .bind(username)
@@ -305,12 +465,76 @@ pub async fn update_user(
 }
 
 /// 删除用户（软删除）
-pub async fn delete_user(id: i64) -> Result<(), String> {
+///
+/// 权限校验：
+/// - 超级管理员不能被任何人删除（包括超级管理员自己）
+/// - 非超级管理员只能删除自己所在机构的用户
+pub async fn delete_user(
+    id: i64,
+    current_user_id: i64,
+    is_super_admin: bool,
+) -> Result<(), String> {
     let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
-    info!("删除用户: id={}", id);
+    info!(
+        "删除用户: id={}, current_user_id={}, is_super_admin={}",
+        id, current_user_id, is_super_admin
+    );
 
-    sqlx::query("UPDATE sys_user SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    // 先查询目标用户
+    let target_user = sqlx::query_as::<_, SysUser>(
+        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)"
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| {
+        error!("查询目标用户失败: id={}, error={}", id, e);
+        format!("查询用户失败: {}", e)
+    })?
+    .ok_or_else(|| {
+        warn!("要删除的用户不存在: id={}", id);
+        "用户不存在".to_string()
+    })?;
+
+    // 超级管理员不能被任何人删除
+    if target_user.is_super_admin {
+        warn!(
+            "禁止删除超级管理员: id={}, username={}",
+            id, target_user.username
+        );
+        return Err("超级管理员不能被删除".to_string());
+    }
+
+    // 非超级管理员只能删除自己所在机构的用户
+    if !is_super_admin {
+        // 查询当前用户的信息以获取其 tenant_id
+        let current_user = sqlx::query_as::<_, SysUser>(
+            "SELECT id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)"
+        )
+        .bind(current_user_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询当前用户失败: id={}, error={}", current_user_id, e);
+            format!("查询当前用户失败: {}", e)
+        })?
+        .ok_or_else(|| {
+            warn!("当前用户不存在: id={}", current_user_id);
+            "当前用户不存在".to_string()
+        })?;
+
+        if current_user.tenant_id != target_user.tenant_id {
+            warn!(
+                "非超级管理员跨机构删除被拒绝: current_user_tenant={:?}, target_user_tenant={:?}",
+                current_user.tenant_id, target_user.tenant_id
+            );
+            return Err("只能删除本机构的用户".to_string());
+        }
+    }
+
+    // sys_user 是公共表，始终从 public schema 操作
+    sqlx::query("UPDATE public.sys_user SET deleted = 1, updated_at = NOW() WHERE id = $1")
         .bind(id)
         .execute(&pool)
         .await
@@ -327,8 +551,9 @@ pub async fn delete_user(id: i64) -> Result<(), String> {
 pub async fn get_user_by_id(id: i64) -> Result<UserResponse, String> {
     let pool = get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
+    // sys_user 是公共表，始终从 public schema 查询
     let user = sqlx::query_as::<_, SysUser>(
-        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, status, nickname, avatar, person_id, person_code, super_user_id, created_by, created_at, updated_by, updated_at, deleted FROM sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)"
+        "SELECT id, username, passwd, domain, real_name, email, phone, department_id, is_super_admin, status, nickname, avatar, person_id, person_code, super_user_id, tenant_id, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)"
     )
     .bind(id)
     .fetch_optional(&pool)
@@ -357,7 +582,8 @@ pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
 
     let hashed_password = hash_password(new_password)?;
 
-    sqlx::query("UPDATE sys_user SET passwd = $2, updated_at = NOW() WHERE id = $1")
+    // sys_user 是公共表，始终从 public schema 操作
+    sqlx::query("UPDATE public.sys_user SET passwd = $2, updated_at = NOW() WHERE id = $1")
         .bind(id)
         .bind(&hashed_password)
         .execute(&pool)

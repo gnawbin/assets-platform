@@ -40,10 +40,21 @@ import {
 } from '@/services/userService';
 import { getDepartments, type Department } from '@/services/departmentService';
 import { getRoles, getUserRoleIds, assignUserRoles, type Role } from '@/services/permissionService';
+import { getTenants, type Tenant } from '@/services/tenantService';
+import { useAuthStore } from '@/store/authStore';
 
 const UsersPage: React.FC = () => {
+  const currentUser = useAuthStore((s) => s.user);
+  const isSuperAdmin = currentUser?.is_super_admin ?? false;
+
   const [users, setUsers] = useState<User[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+
+  // 搜索筛选
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [filterTenantId, setFilterTenantId] = useState<number | null>(null);
+
 
   // 使用 useApi 管理数据获取
   const {
@@ -68,6 +79,7 @@ const UsersPage: React.FC = () => {
     email: '',
     phone: '',
     department_id: null as number | null,
+    tenant_id: null as number | null,
     status: 1,
     nickname: '',
     person_code: '',
@@ -104,6 +116,17 @@ const UsersPage: React.FC = () => {
   const [roleModalLoading, setRoleModalLoading] = useState(false);
   const { execute: doAssignUserRoles, loading: assigningRoles } = useApi(assignUserRoles);
 
+  // 加载用户列表（带搜索筛选）
+  const loadUsers = React.useCallback(() => {
+    // 非超级管理员只查询自己机构的用户
+    if (!isSuperAdmin && currentUser) {
+      fetchUsers(currentUser.tenant_id, searchKeyword || undefined);
+    } else {
+      fetchUsers(filterTenantId, searchKeyword || undefined);
+    }
+  }, [fetchUsers, isSuperAdmin, currentUser, searchKeyword, filterTenantId]);
+
+
   // 当 fetchedUsers 变化时更新本地状态
   useEffect(() => {
     if (fetchedUsers) {
@@ -112,8 +135,11 @@ const UsersPage: React.FC = () => {
   }, [fetchedUsers]);
 
   useEffect(() => {
-    fetchUsers();
+    loadUsers();
     fetchDepartments();
+    if (isSuperAdmin) {
+      fetchTenants();
+    }
   }, []);
 
   const fetchDepartments = async () => {
@@ -121,14 +147,27 @@ const UsersPage: React.FC = () => {
       const data = await getDepartments();
       setDepartments(data);
     } catch {
-      // 部门接口可能不存在，忽略错误
       console.warn('获取部门列表失败，部门选择将不可用');
+    }
+  };
+
+  const fetchTenants = async () => {
+    try {
+      const data = await getTenants();
+      setTenants(data);
+    } catch {
+      console.warn('获取机构列表失败');
     }
   };
 
   const departmentOptions = departments.map((d) => ({
     value: String(d.id),
     label: d.department_name,
+  }));
+
+  const tenantOptions = tenants.map((t) => ({
+    value: String(t.id),
+    label: t.tenant_name,
   }));
 
   // 新增用户
@@ -159,6 +198,7 @@ const UsersPage: React.FC = () => {
         personId: null,
         personCode: newUser.person_code.trim() || null,
         superUserId: null,
+        tenantId: newUser.tenant_id,
         createdBy: null,
       });
       setAddModalOpen(false);
@@ -169,12 +209,13 @@ const UsersPage: React.FC = () => {
         email: '',
         phone: '',
         department_id: null,
+        tenant_id: null,
         status: 1,
         nickname: '',
         person_code: '',
       });
       notifySuccess('用户添加成功');
-      fetchUsers();
+      loadUsers();
     } catch (err) {
       console.error('新增用户失败:', err);
       notifyError('新增用户失败', typeof err === 'string' ? err : undefined);
@@ -227,7 +268,7 @@ const UsersPage: React.FC = () => {
       setEditModalOpen(false);
       setEditingUser(null);
       notifySuccess('用户更新成功');
-      fetchUsers();
+      loadUsers();
     } catch (err) {
       console.error('更新用户失败:', err);
       notifyError('更新用户失败', typeof err === 'string' ? err : undefined);
@@ -242,13 +283,13 @@ const UsersPage: React.FC = () => {
 
   // 确认删除用户
   const handleDeleteUser = async () => {
-    if (!deleteTargetUser) return;
+    if (!deleteTargetUser || !currentUser) return;
     try {
-      await doDeleteUser(deleteTargetUser.id);
+      await doDeleteUser(deleteTargetUser.id, currentUser.id, isSuperAdmin);
       setDeleteModalOpen(false);
       setDeleteTargetUser(null);
       notifySuccess('用户删除成功');
-      fetchUsers();
+      loadUsers();
     } catch (err) {
       console.error('删除用户失败:', err);
       notifyError('删除用户失败', typeof err === 'string' ? err : undefined);
@@ -295,19 +336,26 @@ const UsersPage: React.FC = () => {
 
   // 打开分配角色弹窗
   const openAssignRoleModal = async (user: User) => {
+    console.log('[DEBUG] openAssignRoleModal called, user:', user?.id, user?.real_name);
     setRoleModalUser(user);
     setRoleModalOpen(true);
     setRoleModalLoading(true);
 
     try {
+      console.log('[DEBUG] Calling getRoles()...');
       const roleList = await getRoles();
+      console.log('[DEBUG] roleList:', JSON.stringify(roleList));
       setRoles(roleList);
+      console.log('[DEBUG] Calling getUserRoleIds()...');
       const userRoleIds = await getUserRoleIds(String(user.id));
+      console.log('[DEBUG] userRoleIds:', JSON.stringify(userRoleIds));
+      console.log('[DEBUG] userRoleIds.map(String):', JSON.stringify(userRoleIds.map(String)));
       setSelectedRoleIds(userRoleIds.map(String));
     } catch (err) {
-      console.error('获取角色数据失败:', err);
+      console.error('[DEBUG] 获取角色数据失败:', err);
       notifyError('获取角色数据失败');
     } finally {
+      console.log('[DEBUG] openAssignRoleModal finally');
       setRoleModalLoading(false);
     }
   };
@@ -327,6 +375,17 @@ const UsersPage: React.FC = () => {
     }
   };
 
+  // 判断当前用户是否有权限删除目标用户
+  const canDeleteUser = (targetUser: User): boolean => {
+    // 超级管理员不能被任何人删除
+    if (targetUser.is_super_admin) return false;
+    // 非超级管理员只能删除本机构的用户
+    if (!isSuperAdmin && currentUser) {
+      return currentUser.tenant_id === targetUser.tenant_id;
+    }
+    return true;
+  };
+
   return (
     <Layout>
       <Stack gap="lg">
@@ -339,14 +398,20 @@ const UsersPage: React.FC = () => {
             <Button
               variant="light"
               leftSection={<IconRefresh size={16} />}
-              onClick={fetchUsers}
+              onClick={loadUsers}
               loading={loading}
             >
               刷新
             </Button>
             <Button
               leftSection={<IconUserPlus size={16} />}
-              onClick={() => setAddModalOpen(true)}
+              onClick={() => {
+                // 非超级管理员新增用户时，自动填充当前用户的机构
+                if (!isSuperAdmin && currentUser) {
+                  setNewUser(prev => ({ ...prev, tenant_id: currentUser.tenant_id }));
+                }
+                setAddModalOpen(true);
+              }}
             >
               新增用户
             </Button>
@@ -359,7 +424,40 @@ const UsersPage: React.FC = () => {
           </Alert>
         )}
 
+        {/* 搜索筛选区域 */}
+        <Card withBorder padding="sm" radius="md">
+          <Group>
+            {isSuperAdmin && (
+              <Select
+                placeholder="选择所属机构"
+                clearable
+                data={[{ value: '', label: '全部机构' }, ...tenantOptions]}
+                value={filterTenantId !== null ? String(filterTenantId) : ''}
+                onChange={(value) => {
+                  setFilterTenantId(value ? Number(value) : null);
+                }}
+                style={{ minWidth: 200 }}
+              />
+            )}
+            <TextInput
+              placeholder="搜索用户名/真实姓名"
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  loadUsers();
+                }
+              }}
+              style={{ minWidth: 250 }}
+            />
+            <Button variant="light" onClick={loadUsers}>
+              搜索
+            </Button>
+          </Group>
+        </Card>
+
         <Card withBorder padding="lg" radius="md">
+
           {loading ? (
             <Group justify="center" py="xl">
               <Loader />
@@ -373,6 +471,8 @@ const UsersPage: React.FC = () => {
                   <Table.Th>工号</Table.Th>
                   <Table.Th>邮箱</Table.Th>
                   <Table.Th>手机</Table.Th>
+                  <Table.Th>超级管理员</Table.Th>
+                  <Table.Th>所属机构</Table.Th>
                   <Table.Th>状态</Table.Th>
                   <Table.Th style={{ width: 380 }}>操作</Table.Th>
                 </Table.Tr>
@@ -380,7 +480,7 @@ const UsersPage: React.FC = () => {
               <Table.Tbody>
                 {users.length === 0 ? (
                   <Table.Tr>
-                    <Table.Td colSpan={7}>
+                    <Table.Td colSpan={9}>
                       <Text ta="center" c="dimmed" py="xl">
                         暂无用户数据
                       </Text>
@@ -403,6 +503,16 @@ const UsersPage: React.FC = () => {
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm">{user.phone || '-'}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {user.is_super_admin ? (
+                          <Badge color="red">是</Badge>
+                        ) : (
+                          <Badge color="gray" variant="light">否</Badge>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{user.tenant_name || '-'}</Text>
                       </Table.Td>
                       <Table.Td>{getStatusBadge(user.status)}</Table.Td>
                       <Table.Td>
@@ -439,6 +549,7 @@ const UsersPage: React.FC = () => {
                             color="red"
                             leftSection={<IconTrash size={14} />}
                             onClick={() => openDeleteModal(user)}
+                            disabled={!canDeleteUser(user)}
                           >
                             删除
                           </Button>
@@ -534,6 +645,27 @@ const UsersPage: React.FC = () => {
               setNewUser({
                 ...newUser,
                 department_id: value ? Number(value) : null,
+              })
+            }
+          />
+          {/* 所属机构选择 */}
+          {/* 超级管理员：可选机构（可为空，因为超级管理员不属于任何机构） */}
+          {/* 普通管理员：自动从当前登录用户获取，不可更改 */}
+          <Select
+            label="所属机构"
+            placeholder={isSuperAdmin ? "请选择机构（可选）" : "自动获取"}
+            clearable={isSuperAdmin}
+            disabled={!isSuperAdmin}
+            data={tenantOptions}
+            value={
+              newUser.tenant_id !== null
+                ? String(newUser.tenant_id)
+                : null
+            }
+            onChange={(value) =>
+              setNewUser({
+                ...newUser,
+                tenant_id: value ? Number(value) : null,
               })
             }
           />
@@ -634,6 +766,12 @@ const UsersPage: React.FC = () => {
                 department_id: value ? Number(value) : null,
               })
             }
+          />
+          {/* 编辑时显示所属机构（只读） */}
+          <TextInput
+            label="所属机构"
+            value={editingUser?.tenant_name || (editingUser?.is_super_admin ? '超级管理员（不属于任何机构）' : '-')}
+            disabled
           />
           <Switch
             label="用户状态"

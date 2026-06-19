@@ -16,6 +16,7 @@ use super::response::{ApiError, ApiResponse};
 pub struct CreateCategoryRequest {
     pub category_name: String,
     pub asset_type: String,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub parent_id: Option<i64>,
     pub sort: i16,
     pub description: Option<String>,
@@ -26,6 +27,7 @@ pub struct CreateCategoryRequest {
 pub struct UpdateCategoryRequest {
     pub category_name: String,
     pub asset_type: String,
+    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
     pub parent_id: Option<i64>,
     pub sort: i16,
     pub description: Option<String>,

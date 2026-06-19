@@ -11,10 +11,17 @@ pub async fn login(username: String, password: String) -> Result<LoginResponse, 
     service::user_service::login(&username, &password).await
 }
 
-/// 获取所有用户列表
+/// 获取用户列表
+///
+/// 如果 tenant_id 为 Some，则只查询该机构下的用户；
+/// 如果为 None（超级管理员），则查询所有机构的用户。
+/// keyword 可选，用于按用户名或真实姓名模糊搜索。
 #[tauri::command]
-pub async fn get_users() -> Result<Vec<UserResponse>, String> {
-    service::user_service::get_users().await
+pub async fn get_users(
+    tenant_id: Option<i64>,
+    keyword: Option<String>,
+) -> Result<Vec<UserResponse>, String> {
+    service::user_service::get_users(tenant_id, keyword).await
 }
 
 /// 新增用户
@@ -31,6 +38,7 @@ pub async fn insert_user(
     person_id: Option<String>,
     person_code: Option<String>,
     super_user_id: Option<i64>,
+    tenant_id: Option<i64>,
     created_by: Option<i64>,
 ) -> Result<UserResponse, String> {
     service::user_service::insert_user(
@@ -45,6 +53,7 @@ pub async fn insert_user(
         person_id.as_deref(),
         person_code.as_deref(),
         super_user_id,
+        tenant_id,
         created_by,
     )
     .await
@@ -85,10 +94,18 @@ pub async fn update_user(
 }
 
 /// 删除用户（软删除）
+///
+/// 权限校验：
+/// - 超级管理员不能被任何人删除（包括超级管理员自己）
+/// - 非超级管理员只能删除自己所在机构的用户
 #[tauri::command]
-pub async fn delete_user(id: String) -> Result<(), String> {
+pub async fn delete_user(
+    id: String,
+    current_user_id: i64,
+    is_super_admin: bool,
+) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::delete_user(id).await
+    service::user_service::delete_user(id, current_user_id, is_super_admin).await
 }
 
 /// 获取当前登录用户信息（从 JWT token 解析用户ID）

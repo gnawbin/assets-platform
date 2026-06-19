@@ -16,12 +16,15 @@ export interface User {
     email: string | null;
     phone: string | null;
     department_id: number | null;
+    is_super_admin: boolean;
     status: number;
     nickname: string | null;
     avatar: string | null;
     person_id: string | null;
     person_code: string | null;
     super_user_id: number | null;
+    tenant_id: number | null;
+    tenant_name: string | null;
     created_by: number | null;
     created_at: string | null;
     updated_by: number | null;
@@ -30,10 +33,18 @@ export interface User {
 
 // ======================== 服务方法 ========================
 
-/** 获取所有用户 */
-export function getUsers() {
-    return api.get<User[]>('get_users');
+/** 获取用户列表 */
+export function getUsers(tenantId?: number | null, keyword?: string) {
+    const args: Record<string, unknown> = {};
+    if (tenantId !== undefined && tenantId !== null) {
+        args.tenant_id = tenantId;
+    }
+    if (keyword) {
+        args.keyword = keyword;
+    }
+    return api.get<User[]>('get_users', Object.keys(args).length > 0 ? args : undefined);
 }
+
 
 /** 新增用户 */
 export function insertUser(params: {
@@ -48,6 +59,7 @@ export function insertUser(params: {
     personId: null;
     personCode: string | null;
     superUserId: null;
+    tenantId: number | null;
     createdBy: null;
 }) {
     return api.post<string>('insert_user', params);
@@ -72,8 +84,8 @@ export function updateUser(params: {
 }
 
 /** 删除用户（软删除） */
-export function deleteUser(id: number) {
-    return api.delete<string>('delete_user', { id });
+export function deleteUser(id: number, currentUserId: number, isSuperAdmin: boolean) {
+    return api.delete<string>('delete_user', { id, current_user_id: currentUserId, is_super_admin: isSuperAdmin });
 }
 
 /** 重置密码 */

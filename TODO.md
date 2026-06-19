@@ -19,3 +19,9 @@
 - [x] 12. 删除无意义的模板测试代码
 - [x] 13. 修复 `register_placeholder` 返回格式
 - [x] 14. 清理未使用的 `database/sql/` 目录
+
+## 🐛 已修复 Bug
+- [x] 15. **Tauri v2 invoke 参数名 camelCase 问题**：`menuService.ts` 中调用 `get_user_menus` 时传参使用 `user_id`（snake_case），但 Tauri v2 的 `invoke()` 要求参数名使用 camelCase，导致 Rust 后端收到 `None`，左侧菜单不显示。修复：将 `{ user_id }` 改为 `{ userId }`。
+
+## ⚠️ 已知问题
+- [ ] 16. **前后端长整数精度失真**：数据库主键为 `bigint`（i64），通过 Tauri invoke 序列化为 JSON 时，JavaScript 的 Number 类型无法精确表示超过 2^53 的整数。需要统一处理：Rust 端将 i64 序列化为字符串，前端使用时再转回。涉及所有表的主键 ID 字段。

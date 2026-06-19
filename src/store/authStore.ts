@@ -10,9 +10,11 @@ export interface UserInfo {
   email: string | null;
   phone: string | null;
   department_id: number | null;
+  is_super_admin: boolean;
   status: number;
   nickname: string | null;
   avatar: string | null;
+  tenant_id: number | null;
 }
 
 export interface LoginResult extends UserInfo {

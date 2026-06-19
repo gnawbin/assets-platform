@@ -3,18 +3,32 @@ use crate::database::models::Department;
 use crate::utils::snowflake::next_id;
 use tracing::{error, info, warn};
 
-/// 获取所有部门列表
-pub async fn get_departments() -> Result<Vec<Department>, String> {
+/// 获取所有部门列表（按租户过滤）
+pub async fn get_departments(tenant_id: Option<i64>) -> Result<Vec<Department>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let departments = sqlx::query_as::<_, Department>(
-        "SELECT id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted FROM sys_department WHERE deleted IS NULL OR deleted = 0 ORDER BY id ASC"
-    )
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| {
-        error!("查询部门列表失败: {}", e);
-        format!("查询部门列表失败: {}", e)
-    })?;
+
+    let departments = if let Some(tid) = tenant_id {
+        sqlx::query_as::<_, Department>(
+            "SELECT id, tenant_id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_department WHERE tenant_id = $1 AND (deleted IS NULL OR deleted = 0) ORDER BY id ASC"
+        )
+        .bind(tid)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询部门列表失败: {}", e);
+            format!("查询部门列表失败: {}", e)
+        })?
+    } else {
+        sqlx::query_as::<_, Department>(
+            "SELECT id, tenant_id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_department WHERE (deleted IS NULL OR deleted = 0) ORDER BY id ASC"
+        )
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询部门列表失败: {}", e);
+            format!("查询部门列表失败: {}", e)
+        })?
+    };
 
     let count = departments.len();
     info!("查询部门列表成功: 共 {} 条记录", count);
@@ -27,22 +41,24 @@ pub async fn insert_department(
     parent_id: Option<i64>,
     description: Option<&str>,
     created_by: Option<i64>,
+    tenant_id: i64,
 ) -> Result<Department, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
     info!(
-        "新增部门: name={}, parent_id={:?}",
-        department_name, parent_id
+        "新增部门: name={}, parent_id={:?}, tenant_id={}",
+        department_name, parent_id, tenant_id
     );
 
     let department = sqlx::query_as::<_, Department>(
         r#"
-        INSERT INTO sys_department (id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted)
-        VALUES ($1, $2, $3, $4, $5, NOW(), $5, NOW(), 0)
-        RETURNING id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted
+        INSERT INTO public.sys_department (id, tenant_id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), $6, NOW(), 0)
+        RETURNING id, tenant_id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted
         "#
     )
     .bind(next_id() as i64)
+    .bind(tenant_id)
     .bind(department_name)
     .bind(parent_id)
     .bind(description)
@@ -75,10 +91,10 @@ pub async fn update_department(
 
     let department = sqlx::query_as::<_, Department>(
         r#"
-        UPDATE sys_department
+        UPDATE public.sys_department
         SET department_name = $2, parent_id = $3, description = $4, updated_by = $5, updated_at = NOW()
         WHERE id = $1 AND (deleted IS NULL OR deleted = 0)
-        RETURNING id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted
+        RETURNING id, tenant_id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted
         "#
     )
     .bind(id)
@@ -105,7 +121,7 @@ pub async fn delete_department(id: i64) -> Result<(), String> {
 
     // 先检查是否有子部门
     let children = sqlx::query_as::<_, Department>(
-        "SELECT id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted FROM sys_department WHERE parent_id = $1 AND (deleted IS NULL OR deleted = 0)"
+        "SELECT id, tenant_id, department_name, parent_id, description, created_by, created_at, updated_by, updated_at, deleted FROM public.sys_department WHERE parent_id = $1 AND (deleted IS NULL OR deleted = 0)"
     )
     .bind(id)
     .fetch_all(&pool)
@@ -124,7 +140,7 @@ pub async fn delete_department(id: i64) -> Result<(), String> {
         return Err("该部门下存在子部门，请先删除子部门".to_string());
     }
 
-    sqlx::query("UPDATE sys_department SET deleted = 1, updated_at = NOW() WHERE id = $1")
+    sqlx::query("UPDATE public.sys_department SET deleted = 1, updated_at = NOW() WHERE id = $1")
         .bind(id)
         .execute(&pool)
         .await
