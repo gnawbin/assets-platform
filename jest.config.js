@@ -19,7 +19,7 @@ const config = {
   coverageReporters: ['text', 'lcov', 'html'],
   transform: {
     '^.+\\.(ts|tsx)$': ['ts-jest', {
-      tsconfig: 'tsconfig.json',
+      tsconfig: 'tsconfig.jest.json',
     }],
   },
 };
