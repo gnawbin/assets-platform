@@ -1,6 +1,43 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
+import Layout from '@/components/Layout';
+import {
+    Title,
+    Text,
+    Card,
+    Stack,
+    Group,
+    Button,
+    Modal,
+    TextInput,
+    Textarea,
+    Select,
+    Loader,
+    Alert,
+    SimpleGrid,
+    Badge,
+    ActionIcon,
+    Tooltip,
+    Paper,
+    ScrollArea,
+    Box,
+    Divider,
+} from '@mantine/core';
+import {
+    IconAlertCircle,
+    IconPlus,
+    IconEdit,
+    IconTrash,
+    IconRefresh,
+    IconFolder,
+    IconFileDescription,
+    IconFolderOpen,
+    IconChevronRight,
+    IconChevronDown,
+    IconBook,
+    IconArrowLeft,
+} from '@tabler/icons-react';
 import {
     getKnowledgeTree,
     getKnowledgeList,
@@ -12,53 +49,8 @@ import {
     updateKnowledge,
     deleteKnowledge,
     type KnowledgeTreeNode,
-    type KnowledgeTree,
     type AssetKnowledge,
 } from '@/services/knowledgeService';
-
-// ======================== 图标组件 ========================
-
-const FolderIcon = () => (
-    <svg className="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
-        <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-    </svg>
-);
-
-const DocumentIcon = () => (
-    <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-        <path d="M9 2a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V6.414A2 2 0 0016.414 5L14 2.586A2 2 0 0012.586 2H9z" />
-    </svg>
-);
-
-const PlusIcon = () => (
-    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-    </svg>
-);
-
-const EditIcon = () => (
-    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-    </svg>
-);
-
-const DeleteIcon = () => (
-    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-    </svg>
-);
-
-const ChevronRight = () => (
-    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-    </svg>
-);
-
-const ChevronDown = () => (
-    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-    </svg>
-);
 
 // ======================== 树节点组件 ========================
 
@@ -89,69 +81,132 @@ const TreeNode: React.FC<TreeNodeProps> = ({
     };
 
     return (
-        <div className="select-none">
-            <div
-                className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer rounded-md text-sm transition-colors ${isSelected
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'hover:bg-gray-100 text-gray-700'
-                    }`}
+        <Box>
+            <Box
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '2px',
+                    padding: '4px 8px',
+                    cursor: 'pointer',
+                    borderRadius: 6,
+                    fontSize: '14px',
+                    backgroundColor: isSelected
+                        ? 'var(--mantine-color-blue-light)'
+                        : 'transparent',
+                    color: isSelected
+                        ? 'var(--mantine-color-blue-filled)'
+                        : 'var(--mantine-color-gray-7)',
+                }}
                 onClick={() => onSelect(node.id)}
+                onMouseEnter={(e) => {
+                    if (!isSelected) {
+                        e.currentTarget.style.backgroundColor =
+                            'var(--mantine-color-gray-light)';
+                    }
+                }}
+                onMouseLeave={(e) => {
+                    if (!isSelected) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                }}
             >
                 {/* 展开/折叠按钮 */}
-                <span
-                    className={`flex-shrink-0 w-4 h-4 flex items-center justify-center transition-transform ${hasChildren ? 'opacity-100' : 'opacity-0'
-                        }`}
+                <Box
+                    style={{
+                        width: 16,
+                        height: 16,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        visibility: hasChildren ? 'visible' : 'hidden',
+                    }}
                     onClick={hasChildren ? toggleExpand : undefined}
                 >
-                    {expanded ? <ChevronDown /> : <ChevronRight />}
-                </span>
+                    {expanded ? (
+                        <IconChevronDown size={14} />
+                    ) : (
+                        <IconChevronRight size={14} />
+                    )}
+                </Box>
 
                 {/* 图标 */}
-                <span className="flex-shrink-0">
-                    {node.node_type === 'folder' ? <FolderIcon /> : <DocumentIcon />}
-                </span>
+                <Box style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                    {node.node_type === 'folder' ? (
+                        expanded && hasChildren ? (
+                            <IconFolderOpen size={16} color="var(--mantine-color-yellow-6)" />
+                        ) : (
+                            <IconFolder size={16} color="var(--mantine-color-yellow-6)" />
+                        )
+                    ) : (
+                        <IconFileDescription size={16} color="var(--mantine-color-blue-6)" />
+                    )}
+                </Box>
 
                 {/* 标题 */}
-                <span className="flex-1 truncate">{node.title}</span>
+                <Text
+                    size="sm"
+                    style={{
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        marginLeft: 4,
+                    }}
+                >
+                    {node.title}
+                </Text>
 
                 {/* 操作按钮 */}
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100">
-                    <button
-                        className="p-0.5 hover:text-green-600"
-                        title="新增子节点"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onAddChild(node.id);
-                        }}
-                    >
-                        <PlusIcon />
-                    </button>
-                    <button
-                        className="p-0.5 hover:text-blue-600"
-                        title="编辑"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onEdit(node);
-                        }}
-                    >
-                        <EditIcon />
-                    </button>
-                    <button
-                        className="p-0.5 hover:text-red-600"
-                        title="删除"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(node.id);
-                        }}
-                    >
-                        <DeleteIcon />
-                    </button>
-                </div>
-            </div>
+                <Group
+                    gap={2}
+                    style={{ opacity: 0 }}
+                    className="tree-actions"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <Tooltip label="新增子节点">
+                        <ActionIcon
+                            variant="subtle"
+                            color="green"
+                            size="sm"
+                            onClick={() => onAddChild(node.id)}
+                        >
+                            <IconPlus size={12} />
+                        </ActionIcon>
+                    </Tooltip>
+                    <Tooltip label="编辑">
+                        <ActionIcon
+                            variant="subtle"
+                            color="blue"
+                            size="sm"
+                            onClick={() => onEdit(node)}
+                        >
+                            <IconEdit size={12} />
+                        </ActionIcon>
+                    </Tooltip>
+                    <Tooltip label="删除">
+                        <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            size="sm"
+                            onClick={() => onDelete(node.id)}
+                        >
+                            <IconTrash size={12} />
+                        </ActionIcon>
+                    </Tooltip>
+                </Group>
+            </Box>
 
             {/* 子节点 */}
             {hasChildren && expanded && (
-                <div className="ml-4 border-l border-gray-200 pl-1">
+                <Box
+                    style={{
+                        marginLeft: 16,
+                        borderLeft: '1px solid var(--mantine-color-gray-3)',
+                        paddingLeft: 4,
+                    }}
+                >
                     {node.children.map((child) => (
                         <TreeNode
                             key={child.id}
@@ -163,9 +218,19 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                             onDelete={onDelete}
                         />
                     ))}
-                </div>
+                </Box>
             )}
-        </div>
+
+            <style jsx>{`
+                .tree-actions {
+                    opacity: 0;
+                    transition: opacity 0.1s;
+                }
+                div:hover > .tree-actions {
+                    opacity: 1;
+                }
+            `}</style>
+        </Box>
     );
 };
 
@@ -369,323 +434,341 @@ export default function KnowledgePage() {
     // ======================== 渲染 ========================
 
     return (
-        <div className="h-full flex">
-            {/* 左侧：知识树 */}
-            <div className="w-72 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-                    <h2 className="text-sm font-semibold text-gray-700">知识库</h2>
-                    <button
-                        className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-                        title="新增根节点"
-                        onClick={() => {
-                            setParentIdForNew(null);
-                            setEditingNode(null);
-                            setNodeForm({ title: '', node_type: 'folder', icon: '' });
-                            setShowNodeDialog(true);
-                        }}
-                    >
-                        <PlusIcon />
-                    </button>
-                </div>
+        <Layout>
+            <Stack gap="lg">
+                {/* 页面标题 */}
+                <Group justify="space-between">
+                    <Group>
+                        <IconBook size={28} />
+                        <div>
+                            <Title order={2}>知识库</Title>
+                            <Text c="dimmed">管理知识树和知识条目</Text>
+                        </div>
+                    </Group>
+                    <Group>
+                        <Button
+                            variant="light"
+                            leftSection={<IconRefresh size={16} />}
+                            onClick={loadTree}
+                            loading={loading}
+                        >
+                            刷新
+                        </Button>
+                    </Group>
+                </Group>
 
-                <div className="flex-1 overflow-y-auto p-2">
-                    {loading ? (
-                        <div className="flex items-center justify-center h-20 text-sm text-gray-400">
-                            加载中...
-                        </div>
-                    ) : error ? (
-                        <div className="text-sm text-red-500 p-2">{error}</div>
-                    ) : tree.length === 0 ? (
-                        <div className="text-sm text-gray-400 p-2 text-center">
-                            暂无知识节点
-                        </div>
-                    ) : (
-                        tree.map((node) => (
-                            <TreeNode
-                                key={node.id}
-                                node={node}
-                                selectedId={selectedNodeId}
-                                onSelect={handleSelectNode}
-                                onAddChild={handleAddChild}
-                                onEdit={handleEditNode}
-                                onDelete={handleDeleteNode}
-                            />
-                        ))
-                    )}
-                </div>
-            </div>
-
-            {/* 右侧：知识条目列表 / 详情 */}
-            <div className="flex-1 flex flex-col bg-gray-50">
-                {selectedKnowledge ? (
-                    // 知识条目详情
-                    <div className="flex-1 flex flex-col">
-                        <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200">
-                            <button
-                                className="text-sm text-blue-600 hover:text-blue-800"
-                                onClick={() => setSelectedKnowledge(null)}
-                            >
-                                ← 返回列表
-                            </button>
-                            <div className="flex gap-2">
-                                <button
-                                    className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded"
-                                    onClick={() => handleEditKnowledge(selectedKnowledge)}
-                                >
-                                    编辑
-                                </button>
-                                <button
-                                    className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded"
-                                    onClick={() => handleDeleteKnowledge(selectedKnowledge.id)}
-                                >
-                                    删除
-                                </button>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-6">
-                            <h1 className="text-xl font-semibold text-gray-800 mb-4">
-                                {selectedKnowledge.title}
-                            </h1>
-                            <div className="flex gap-4 mb-6 text-xs text-gray-500">
-                                <span>类型：{selectedKnowledge.knowledge_type}</span>
-                                <span>来源：{selectedKnowledge.doc_source}</span>
-                                <span>权限：{selectedKnowledge.permission_level}</span>
-                            </div>
-                            <div className="prose prose-sm max-w-none bg-white rounded-lg p-4 border border-gray-200">
-                                {selectedKnowledge.content.split('\n').map((line, i) => (
-                                    <p key={i} className="mb-2">
-                                        {line}
-                                    </p>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    // 知识条目列表
-                    <div className="flex-1 flex flex-col">
-                        <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200">
-                            <h2 className="text-sm font-semibold text-gray-700">
-                                {selectedNodeId ? '知识条目' : '全部知识条目'}
-                            </h2>
-                            <button
-                                className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md"
-                                onClick={handleAddKnowledge}
-                            >
-                                <PlusIcon />
-                                新增
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-4">
-                            {knowledgeList.length === 0 ? (
-                                <div className="flex items-center justify-center h-40 text-sm text-gray-400">
-                                    暂无知识条目
-                                </div>
-                            ) : (
-                                <div className="grid gap-3">
-                                    {knowledgeList.map((item) => (
-                                        <div
-                                            key={item.id}
-                                            className="bg-white rounded-lg border border-gray-200 p-4 cursor-pointer hover:shadow-sm transition-shadow"
-                                            onClick={() => handleViewKnowledge(item.id)}
-                                        >
-                                            <div className="flex items-start justify-between">
-                                                <h3 className="text-sm font-medium text-gray-800">
-                                                    {item.title}
-                                                </h3>
-                                                <div className="flex gap-1">
-                                                    <button
-                                                        className="p-1 text-gray-400 hover:text-blue-600"
-                                                        title="编辑"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleEditKnowledge(item);
-                                                        }}
-                                                    >
-                                                        <EditIcon />
-                                                    </button>
-                                                    <button
-                                                        className="p-1 text-gray-400 hover:text-red-600"
-                                                        title="删除"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteKnowledge(item.id);
-                                                        }}
-                                                    >
-                                                        <DeleteIcon />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <p className="mt-1 text-xs text-gray-500 line-clamp-2">
-                                                {item.content}
-                                            </p>
-                                            <div className="mt-2 flex gap-3 text-xs text-gray-400">
-                                                <span>类型：{item.knowledge_type}</span>
-                                                <span>权限：{item.permission_level}</span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                {error && (
+                    <Alert icon={<IconAlertCircle size={16} />} title="错误" color="red">
+                        {error}
+                    </Alert>
                 )}
-            </div>
+
+                {/* 左右分栏 */}
+                <Group gap="lg" align="flex-start" grow wrap="nowrap">
+                    {/* 左侧：知识树 */}
+                    <Card withBorder padding="lg" radius="md" style={{ maxWidth: 320, minWidth: 280 }}>
+                        <Group justify="space-between" mb="md">
+                            <Text fw={600} size="sm">
+                                知识树
+                            </Text>
+                            <Tooltip label="新增根节点">
+                                <ActionIcon
+                                    variant="light"
+                                    color="blue"
+                                    size="sm"
+                                    onClick={() => {
+                                        setParentIdForNew(null);
+                                        setEditingNode(null);
+                                        setNodeForm({ title: '', node_type: 'folder', icon: '' });
+                                        setShowNodeDialog(true);
+                                    }}
+                                >
+                                    <IconPlus size={14} />
+                                </ActionIcon>
+                            </Tooltip>
+                        </Group>
+                        <Divider mb="md" />
+
+                        {loading ? (
+                            <Group justify="center" py="xl">
+                                <Loader />
+                            </Group>
+                        ) : tree.length === 0 ? (
+                            <Text ta="center" c="dimmed" py="xl" size="sm">
+                                暂无知识节点
+                            </Text>
+                        ) : (
+                            <ScrollArea h={500}>
+                                {tree.map((node) => (
+                                    <TreeNode
+                                        key={node.id}
+                                        node={node}
+                                        selectedId={selectedNodeId}
+                                        onSelect={handleSelectNode}
+                                        onAddChild={handleAddChild}
+                                        onEdit={handleEditNode}
+                                        onDelete={handleDeleteNode}
+                                    />
+                                ))}
+                            </ScrollArea>
+                        )}
+                    </Card>
+
+                    {/* 右侧：知识条目列表 / 详情 */}
+                    <Card withBorder padding="lg" radius="md" style={{ flex: 1 }}>
+                        {selectedKnowledge ? (
+                            // 知识条目详情
+                            <Stack gap="md">
+                                <Group>
+                                    <Button
+                                        variant="subtle"
+                                        leftSection={<IconArrowLeft size={16} />}
+                                        onClick={() => setSelectedKnowledge(null)}
+                                        size="sm"
+                                    >
+                                        返回列表
+                                    </Button>
+                                    <Group gap="xs" ml="auto">
+                                        <Button
+                                            size="compact-sm"
+                                            variant="light"
+                                            leftSection={<IconEdit size={14} />}
+                                            onClick={() => handleEditKnowledge(selectedKnowledge)}
+                                        >
+                                            编辑
+                                        </Button>
+                                        <Button
+                                            size="compact-sm"
+                                            variant="light"
+                                            color="red"
+                                            leftSection={<IconTrash size={14} />}
+                                            onClick={() => handleDeleteKnowledge(selectedKnowledge.id)}
+                                        >
+                                            删除
+                                        </Button>
+                                    </Group>
+                                </Group>
+                                <Divider />
+
+                                <Title order={3}>{selectedKnowledge.title}</Title>
+
+                                <Group gap="lg">
+                                    <Badge variant="light" color="blue" size="sm">
+                                        类型：{selectedKnowledge.knowledge_type}
+                                    </Badge>
+                                    <Badge variant="light" color="gray" size="sm">
+                                        来源：{selectedKnowledge.doc_source}
+                                    </Badge>
+                                    <Badge variant="light" color="teal" size="sm">
+                                        权限：{selectedKnowledge.permission_level}
+                                    </Badge>
+                                </Group>
+
+                                <Paper p="md" withBorder radius="sm">
+                                    <Text size="sm" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+                                        {selectedKnowledge.content}
+                                    </Text>
+                                </Paper>
+                            </Stack>
+                        ) : (
+                            // 知识条目列表
+                            <Stack gap="md">
+                                <Group justify="space-between">
+                                    <Text fw={600} size="sm">
+                                        {selectedNodeId ? '知识条目' : '全部知识条目'}
+                                    </Text>
+                                    <Button
+                                        size="compact-sm"
+                                        leftSection={<IconPlus size={14} />}
+                                        onClick={handleAddKnowledge}
+                                    >
+                                        新增
+                                    </Button>
+                                </Group>
+                                <Divider />
+
+                                {knowledgeList.length === 0 ? (
+                                    <Text ta="center" c="dimmed" py="xl" size="sm">
+                                        暂无知识条目
+                                    </Text>
+                                ) : (
+                                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                                        {knowledgeList.map((item) => (
+                                            <Card
+                                                key={item.id}
+                                                withBorder
+                                                padding="md"
+                                                radius="sm"
+                                                style={{ cursor: 'pointer' }}
+                                                onClick={() => handleViewKnowledge(item.id)}
+                                            >
+                                                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                                                    <Text fw={500} size="sm" lineClamp={1} style={{ flex: 1 }}>
+                                                        {item.title}
+                                                    </Text>
+                                                    <Group gap={2} wrap="nowrap" onClick={(e) => e.stopPropagation()}>
+                                                        <Tooltip label="编辑">
+                                                            <ActionIcon
+                                                                variant="subtle"
+                                                                color="blue"
+                                                                size="sm"
+                                                                onClick={() => handleEditKnowledge(item)}
+                                                            >
+                                                                <IconEdit size={14} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                        <Tooltip label="删除">
+                                                            <ActionIcon
+                                                                variant="subtle"
+                                                                color="red"
+                                                                size="sm"
+                                                                onClick={() => handleDeleteKnowledge(item.id)}
+                                                            >
+                                                                <IconTrash size={14} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                    </Group>
+                                                </Group>
+                                                <Text size="xs" c="dimmed" lineClamp={2} mt="xs">
+                                                    {item.content}
+                                                </Text>
+                                                <Group gap="md" mt="sm">
+                                                    <Badge variant="light" color="blue" size="xs">
+                                                        {item.knowledge_type}
+                                                    </Badge>
+                                                    <Badge variant="light" color="teal" size="xs">
+                                                        {item.permission_level}
+                                                    </Badge>
+                                                </Group>
+                                            </Card>
+                                        ))}
+                                    </SimpleGrid>
+                                )}
+                            </Stack>
+                        )}
+                    </Card>
+                </Group>
+            </Stack>
 
             {/* ======================== 节点对话框 ======================== */}
-            {showNodeDialog && (
-                <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg shadow-xl w-96 p-6">
-                        <h3 className="text-base font-semibold text-gray-800 mb-4">
-                            {editingNode ? '编辑节点' : '新增节点'}
-                        </h3>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-xs text-gray-500 mb-1">节点类型</label>
-                                <select
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                                    value={nodeForm.node_type}
-                                    onChange={(e) =>
-                                        setNodeForm({ ...nodeForm, node_type: e.target.value })
-                                    }
-                                    disabled={!!editingNode}
-                                >
-                                    <option value="folder">文件夹</option>
-                                    <option value="document">文档</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-500 mb-1">标题</label>
-                                <input
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                                    value={nodeForm.title}
-                                    onChange={(e) =>
-                                        setNodeForm({ ...nodeForm, title: e.target.value })
-                                    }
-                                    placeholder="请输入节点标题"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-500 mb-1">图标（可选）</label>
-                                <input
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                                    value={nodeForm.icon}
-                                    onChange={(e) =>
-                                        setNodeForm({ ...nodeForm, icon: e.target.value })
-                                    }
-                                    placeholder="图标名称"
-                                />
-                            </div>
-                        </div>
-                        <div className="flex justify-end gap-2 mt-6">
-                            <button
-                                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md"
-                                onClick={() => setShowNodeDialog(false)}
-                            >
-                                取消
-                            </button>
-                            <button
-                                className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md"
-                                onClick={handleSaveNode}
-                            >
-                                保存
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <Modal
+                opened={showNodeDialog}
+                onClose={() => setShowNodeDialog(false)}
+                title={editingNode ? '编辑节点' : '新增节点'}
+                size="md"
+            >
+                <Stack gap="md">
+                    <Select
+                        label="节点类型"
+                        data={[
+                            { value: 'folder', label: '文件夹' },
+                            { value: 'document', label: '文档' },
+                        ]}
+                        value={nodeForm.node_type}
+                        onChange={(val) =>
+                            setNodeForm({ ...nodeForm, node_type: val || 'folder' })
+                        }
+                        disabled={!!editingNode}
+                    />
+                    <TextInput
+                        label="标题"
+                        placeholder="请输入节点标题"
+                        required
+                        value={nodeForm.title}
+                        onChange={(e) =>
+                            setNodeForm({ ...nodeForm, title: e.target.value })
+                        }
+                    />
+                    <TextInput
+                        label="图标（可选）"
+                        placeholder="图标名称"
+                        value={nodeForm.icon}
+                        onChange={(e) =>
+                            setNodeForm({ ...nodeForm, icon: e.target.value })
+                        }
+                    />
+                    <Group justify="flex-end" mt="md">
+                        <Button variant="default" onClick={() => setShowNodeDialog(false)}>
+                            取消
+                        </Button>
+                        <Button onClick={handleSaveNode}>保存</Button>
+                    </Group>
+                </Stack>
+            </Modal>
 
             {/* ======================== 知识条目对话框 ======================== */}
-            {showKnowledgeDialog && (
-                <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg shadow-xl w-[600px] p-6">
-                        <h3 className="text-base font-semibold text-gray-800 mb-4">
-                            {editingKnowledge ? '编辑知识条目' : '新增知识条目'}
-                        </h3>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-xs text-gray-500 mb-1">标题</label>
-                                <input
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                                    value={knowledgeForm.title}
-                                    onChange={(e) =>
-                                        setKnowledgeForm({
-                                            ...knowledgeForm,
-                                            title: e.target.value,
-                                        })
-                                    }
-                                    placeholder="请输入知识条目标题"
-                                />
-                            </div>
-                            <div className="flex gap-3">
-                                <div className="flex-1">
-                                    <label className="block text-xs text-gray-500 mb-1">知识类型</label>
-                                    <select
-                                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                                        value={knowledgeForm.knowledge_type}
-                                        onChange={(e) =>
-                                            setKnowledgeForm({
-                                                ...knowledgeForm,
-                                                knowledge_type: e.target.value,
-                                            })
-                                        }
-                                    >
-                                        <option value="basic">基础</option>
-                                        <option value="contract">合同</option>
-                                        <option value="hardware">硬件</option>
-                                        <option value="intangible">无形资产</option>
-                                    </select>
-                                </div>
-                                <div className="flex-1">
-                                    <label className="block text-xs text-gray-500 mb-1">权限等级</label>
-                                    <select
-                                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                                        value={knowledgeForm.permission_level}
-                                        onChange={(e) =>
-                                            setKnowledgeForm({
-                                                ...knowledgeForm,
-                                                permission_level: e.target.value,
-                                            })
-                                        }
-                                    >
-                                        <option value="public">公开</option>
-                                        <option value="internal">内部</option>
-                                        <option value="secret">保密</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs text-gray-500 mb-1">内容</label>
-                                <textarea
-                                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm h-40"
-                                    value={knowledgeForm.content}
-                                    onChange={(e) =>
-                                        setKnowledgeForm({
-                                            ...knowledgeForm,
-                                            content: e.target.value,
-                                        })
-                                    }
-                                    placeholder="请输入知识条目内容"
-                                />
-                            </div>
-                        </div>
-                        <div className="flex justify-end gap-2 mt-6">
-                            <button
-                                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md"
-                                onClick={() => setShowKnowledgeDialog(false)}
-                            >
-                                取消
-                            </button>
-                            <button
-                                className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md"
-                                onClick={handleSaveKnowledge}
-                            >
-                                保存
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+            <Modal
+                opened={showKnowledgeDialog}
+                onClose={() => setShowKnowledgeDialog(false)}
+                title={editingKnowledge ? '编辑知识条目' : '新增知识条目'}
+                size="lg"
+            >
+                <Stack gap="md">
+                    <TextInput
+                        label="标题"
+                        placeholder="请输入知识条目标题"
+                        required
+                        value={knowledgeForm.title}
+                        onChange={(e) =>
+                            setKnowledgeForm({
+                                ...knowledgeForm,
+                                title: e.target.value,
+                            })
+                        }
+                    />
+                    <Group grow>
+                        <Select
+                            label="知识类型"
+                            data={[
+                                { value: 'basic', label: '基础' },
+                                { value: 'contract', label: '合同' },
+                                { value: 'hardware', label: '硬件' },
+                                { value: 'intangible', label: '无形资产' },
+                            ]}
+                            value={knowledgeForm.knowledge_type}
+                            onChange={(val) =>
+                                setKnowledgeForm({
+                                    ...knowledgeForm,
+                                    knowledge_type: val || 'basic',
+                                })
+                            }
+                        />
+                        <Select
+                            label="权限等级"
+                            data={[
+                                { value: 'public', label: '公开' },
+                                { value: 'internal', label: '内部' },
+                                { value: 'secret', label: '保密' },
+                            ]}
+                            value={knowledgeForm.permission_level}
+                            onChange={(val) =>
+                                setKnowledgeForm({
+                                    ...knowledgeForm,
+                                    permission_level: val || 'internal',
+                                })
+                            }
+                        />
+                    </Group>
+                    <Textarea
+                        label="内容"
+                        placeholder="请输入知识条目内容"
+                        minRows={8}
+                        value={knowledgeForm.content}
+                        onChange={(e) =>
+                            setKnowledgeForm({
+                                ...knowledgeForm,
+                                content: e.target.value,
+                            })
+                        }
+                    />
+                    <Group justify="flex-end" mt="md">
+                        <Button variant="default" onClick={() => setShowKnowledgeDialog(false)}>
+                            取消
+                        </Button>
+                        <Button onClick={handleSaveKnowledge}>保存</Button>
+                    </Group>
+                </Stack>
+            </Modal>
+        </Layout>
     );
 }
