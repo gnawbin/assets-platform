@@ -31,7 +31,7 @@ function createMockResponse(body: unknown, status = 200, headers: Record<string,
     headers: {
       get: (name: string) => headers[name] ?? null,
       has: (name: string) => name in headers,
-      forEach: () => {},
+      forEach: () => { },
     },
   } as unknown as Response;
 }
@@ -383,6 +383,11 @@ describe('useChunkedUpload', () => {
     it('上传已完成时应直接完成', async () => {
       localStorage.setItem('chunked_upload_id', 'upload-001');
 
+      // 第一步：start 调用 getProgress，返回 completed（需要 mock init 内的 fetch 调用）
+      // 这里需要 mock 一个 init 调用来避免"初始化上传失败"
+      // 但断点续传逻辑只在 autoResume=true 时触发，
+      // getProgress 返回 completed 时，会设置 completed 状态并提前 return
+      // 所以只需要 mock 一个 getProgress 调用
       mockFetch.mockResolvedValueOnce(
         createMockResponse({
           status: 'completed',

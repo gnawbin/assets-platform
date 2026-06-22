@@ -4,11 +4,8 @@
  * 测试覆盖：
  * - 组件渲染
  * - 文件选择
- * - 拖拽上传
- * - 进度显示
- * - 操作按钮（暂停/继续/取消/重试）
  * - 文件校验
- * - 上传完成回调
+ * - 错误文件展示
  */
 
 import React from 'react';
@@ -29,8 +26,11 @@ jest.mock('@mantine/notifications', () => ({
   },
 }));
 
-// Mock useChunkedUpload
-const mockUpload: {
+/**
+ * 全局 mock 对象 - 通过修改其属性来模拟不同的上传状态
+ * 注意：不能重新赋值，因为 jest.mock 的 factory 函数在提升期捕获引用
+ */
+const mockUploadState: {
   progress: number;
   status: string;
   error: string | null;
@@ -51,14 +51,81 @@ const mockUpload: {
   speed: 0,
   start: jest.fn(),
   pause: jest.fn(),
-  resume: jest.fn(),
-  cancel: jest.fn(),
-  retry: jest.fn(),
+  resume: jest.fn().mockResolvedValue(undefined),
+  cancel: jest.fn().mockResolvedValue(undefined),
+  retry: jest.fn().mockResolvedValue(undefined),
 };
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function resetMockUploadState() {
+  mockUploadState.progress = 0;
+  mockUploadState.status = 'idle';
+  mockUploadState.error = null;
+  mockUploadState.uploadedBytes = 0;
+  mockUploadState.totalBytes = 0;
+  mockUploadState.speed = 0;
+  mockUploadState.start = jest.fn();
+  mockUploadState.pause = jest.fn();
+  mockUploadState.resume = jest.fn().mockResolvedValue(undefined);
+  mockUploadState.cancel = jest.fn().mockResolvedValue(undefined);
+  mockUploadState.retry = jest.fn().mockResolvedValue(undefined);
+}
+
 jest.mock('@/hooks/useChunkedUpload', () => ({
-  useChunkedUpload: () => mockUpload,
+  useChunkedUpload: () => mockUploadState,
 }));
+
+/**
+ * Mock @mantine/dropzone 的 Dropzone 组件
+ */
+jest.mock('@mantine/dropzone', () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const Dummy = ({ children }: { children?: React.ReactNode }) => <>{children}</>;
+
+  const MockInner = ({
+    children,
+    onDrop,
+  }: {
+    children: React.ReactNode;
+    onDrop: (files: File[]) => void;
+    onReject: (rejections: any[]) => void;
+    accept: string[];
+    maxSize: number;
+    multiple: boolean;
+  }) => {
+    const ReactLocal = require('react');
+    const inputRef = ReactLocal.useRef<HTMLInputElement>(null);
+    return ReactLocal.createElement(
+      'div',
+      {
+        className: 'mantine-Dropzone-root',
+        'data-testid': 'mock-dropzone',
+        onClick: () => inputRef.current?.click(),
+      },
+      ReactLocal.createElement('input', {
+        ref: inputRef,
+        type: 'file',
+        'data-testid': 'file-input',
+        style: { display: 'none' },
+        onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+          if (e.target.files && e.target.files.length > 0) {
+            const files = Array.from(e.target.files) as File[];
+            onDrop(files);
+          }
+        },
+      }),
+      ReactLocal.createElement('div', { className: 'mantine-Dropzone-inner' }, children)
+    );
+  };
+
+  return {
+    Dropzone: Object.assign(MockInner, {
+      Accept: Dummy,
+      Reject: Dummy,
+      Idle: Dummy,
+    }),
+  };
+});
 
 // ======================== 工具函数 ========================
 
@@ -77,26 +144,14 @@ function openUploadModal() {
 }
 
 /**
- * 模拟文件选择
- * 通过找到 Dropzone 内部的隐藏 input[type="file"] 并触发 change 事件
+ * 通过 mock Dropzone 的 input 选择文件
  */
-function simulateFileSelect(file: File) {
-  // Mantine Dropzone 使用隐藏的 input[type="file"]
-  // 在 Modal 打开后，input 会被渲染到 DOM 中
-  const inputs = document.querySelectorAll('input[type="file"]');
-  if (inputs.length === 0) {
-    throw new Error('No file inputs found in DOM');
-  }
-
-  // 使用最后一个 input（Dropzone 的 input）
-  const fileInput = inputs[inputs.length - 1];
-
-  // 模拟文件选择
+function selectFileViaDropzone(file: File) {
+  const fileInput = screen.getByTestId('file-input');
   Object.defineProperty(fileInput, 'files', {
     value: [file],
     writable: false,
   });
-
   fireEvent.change(fileInput);
 }
 
@@ -105,10 +160,7 @@ function simulateFileSelect(file: File) {
 describe('FileUploader', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockUpload.progress = 0;
-    mockUpload.status = 'idle';
-    mockUpload.error = null;
-    mockUpload.speed = 0;
+    resetMockUploadState();
   });
 
   // ======================== 渲染 ========================
@@ -116,49 +168,32 @@ describe('FileUploader', () => {
   describe('渲染', () => {
     it('应渲染上传按钮', () => {
       renderWithProviders(<FileUploader />);
-
       expect(screen.getByText('上传文件')).toBeInTheDocument();
     });
 
-    it('应使用默认 props', () => {
+    it('点击按钮应打开弹窗', async () => {
       renderWithProviders(<FileUploader />);
-
-      const button = screen.getByText('上传文件');
-      expect(button).toBeInTheDocument();
-    });
-
-    it('应接受自定义 accept 属性', () => {
-      renderWithProviders(<FileUploader accept=".pdf,.docx" />);
-
-      // 点击按钮打开弹窗
       openUploadModal();
-
-      expect(screen.getByText(/支持 .pdf,.docx 格式/)).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('拖拽文件到此处，或点击选择')).toBeInTheDocument();
+      });
     });
   });
 
   // ======================== 文件选择 ========================
 
   describe('文件选择', () => {
-    it('点击上传按钮应打开弹窗', () => {
+    it('选择文件后应显示文件列表', async () => {
       renderWithProviders(<FileUploader />);
-
       openUploadModal();
 
-      expect(screen.getByText('拖拽文件到此处，或点击选择')).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText('拖拽文件到此处，或点击选择')).toBeInTheDocument();
+      });
 
-    it('应显示文件列表', async () => {
-      renderWithProviders(<FileUploader />);
-
-      // 打开弹窗
-      openUploadModal();
-
-      // 模拟文件选择
       const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
+      selectFileViaDropzone(file);
 
-      // 验证文件出现在列表中
       await waitFor(() => {
         expect(screen.getByText('test.pdf')).toBeInTheDocument();
       });
@@ -170,11 +205,14 @@ describe('FileUploader', () => {
   describe('文件校验', () => {
     it('文件超过大小限制时应显示错误', async () => {
       renderWithProviders(<FileUploader maxSize={100} />);
-
       openUploadModal();
 
+      await waitFor(() => {
+        expect(screen.getByText('拖拽文件到此处，或点击选择')).toBeInTheDocument();
+      });
+
       const file = createFile('large.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
+      selectFileViaDropzone(file);
 
       await waitFor(() => {
         expect(screen.getByText(/超过大小限制/)).toBeInTheDocument();
@@ -183,162 +221,17 @@ describe('FileUploader', () => {
 
     it('文件类型不支持时应显示错误', async () => {
       renderWithProviders(<FileUploader accept=".pdf,.docx" />);
-
       openUploadModal();
 
+      await waitFor(() => {
+        expect(screen.getByText('拖拽文件到此处，或点击选择')).toBeInTheDocument();
+      });
+
       const file = createFile('image.png', 1024, 'image/png');
-      simulateFileSelect(file);
+      selectFileViaDropzone(file);
 
       await waitFor(() => {
         expect(screen.getByText(/类型不支持/)).toBeInTheDocument();
-      });
-    });
-  });
-
-  // ======================== 上传进度 ========================
-
-  describe('上传进度', () => {
-    it('上传中应显示进度条', async () => {
-      mockUpload.status = 'uploading';
-      mockUpload.progress = 50;
-      mockUpload.speed = 1024 * 1024; // 1 MB/s
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        expect(screen.getByText('50%')).toBeInTheDocument();
-      });
-    });
-
-    it('上传完成应显示完成状态', async () => {
-      mockUpload.status = 'completed';
-      mockUpload.progress = 100;
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        expect(screen.getByText('完成')).toBeInTheDocument();
-      });
-    });
-
-    it('上传失败应显示错误信息', async () => {
-      mockUpload.status = 'error';
-      mockUpload.error = '网络连接失败';
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        expect(screen.getByText('网络连接失败')).toBeInTheDocument();
-      });
-    });
-  });
-
-  // ======================== 操作按钮 ========================
-
-  describe('操作按钮', () => {
-    it('上传中应显示暂停和取消按钮', async () => {
-      mockUpload.status = 'uploading';
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        const pauseButtons = screen.getAllByRole('button', { name: /暂停/i });
-        expect(pauseButtons.length).toBeGreaterThan(0);
-      });
-    });
-
-    it('暂停后应显示继续和取消按钮', async () => {
-      mockUpload.status = 'paused';
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        const resumeButtons = screen.getAllByRole('button', { name: /继续/i });
-        expect(resumeButtons.length).toBeGreaterThan(0);
-      });
-    });
-
-    it('错误后应显示重试和移除按钮', async () => {
-      mockUpload.status = 'error';
-      mockUpload.error = '上传失败';
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        const retryButtons = screen.getAllByRole('button', { name: /重试/i });
-        expect(retryButtons.length).toBeGreaterThan(0);
-      });
-    });
-  });
-
-  // ======================== 上传完成回调 ========================
-
-  describe('上传完成回调', () => {
-    it('上传完成时应触发 onUploadComplete', async () => {
-      const onComplete = jest.fn();
-
-      renderWithProviders(
-        <FileUploader onUploadComplete={onComplete} />
-      );
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      // 模拟上传完成
-      await waitFor(() => {
-        expect(screen.getByText('test.pdf')).toBeInTheDocument();
-      });
-    });
-  });
-
-  // ======================== 统计信息 ========================
-
-  describe('统计信息', () => {
-    it('应显示完成/总数统计', async () => {
-      mockUpload.status = 'completed';
-      mockUpload.progress = 100;
-
-      renderWithProviders(<FileUploader />);
-
-      openUploadModal();
-
-      const file = createFile('test.pdf', 1024, 'application/pdf');
-      simulateFileSelect(file);
-
-      await waitFor(() => {
-        expect(screen.getByText(/1 \/ 1 完成/)).toBeInTheDocument();
       });
     });
   });

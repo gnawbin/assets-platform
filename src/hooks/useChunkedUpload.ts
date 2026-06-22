@@ -353,6 +353,18 @@ export function useChunkedUpload(
       if (savedId) {
         try {
           const progressData = await uploadServiceRef.current.getProgress(savedId);
+          if (progressData.status === 'completed') {
+            // 已经上传完成，直接设置完成状态
+            setProgress(100);
+            setUploadedBytes(file.size);
+            setStatus('completed');
+            clearStorageId();
+            onComplete?.({
+              fileUrl: '',
+              etag: '',
+            });
+            return;
+          }
           if (progressData.status === 'uploading') {
             // 有未完成的上传，继续
             await startUpload(file, savedId);
@@ -366,7 +378,7 @@ export function useChunkedUpload(
     }
 
     await startUpload(file);
-  }, [autoResume, getStorageId, clearStorageId, startUpload]);
+  }, [autoResume, getStorageId, clearStorageId, startUpload, onComplete]);
 
   // 继续上传（断点续传）
   const resume = useCallback(async () => {

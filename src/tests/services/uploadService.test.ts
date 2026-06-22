@@ -42,15 +42,20 @@ const mockCompleteResponse = {
 // ======================== 工具函数 ========================
 
 function createMockResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  // 将 headers 键统一转为小写，以便 case-insensitive 查找
+  const normalizedHeaders: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    normalizedHeaders[key.toLowerCase()] = value;
+  }
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: status >= 200 && status < 300 ? 'OK' : 'Error',
     json: jest.fn().mockResolvedValue(body),
     headers: {
-      get: (name: string) => headers[name] ?? null,
-      has: (name: string) => name in headers,
-      forEach: () => {},
+      get: (name: string) => normalizedHeaders[name.toLowerCase()] ?? null,
+      has: (name: string) => name.toLowerCase() in normalizedHeaders,
+      forEach: () => { },
     },
   } as unknown as Response;
 }

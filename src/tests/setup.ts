@@ -60,6 +60,25 @@ Object.defineProperty(navigator, 'clipboard', {
   writable: true,
 });
 
+// Mock DataTransfer (jsdom 不支持)
+// Mantine Dropzone 从 event.dataTransfer.files 读取文件
+global.DataTransfer = jest.fn().mockImplementation(() => {
+  const files: File[] = [];
+  return {
+    files: {
+      get length() { return files.length; },
+      item(index: number) { return files[index] ?? null; },
+      [Symbol.iterator]() { return files[Symbol.iterator](); },
+    },
+    items: {
+      add(file: File) { files.push(file); },
+      clear() { files.length = 0; },
+      get length() { return files.length; },
+      [Symbol.iterator]() { return files[Symbol.iterator](); },
+    },
+  };
+}) as unknown as typeof DataTransfer;
+
 // 清理每个测试后的 mock
 beforeEach(() => {
   jest.clearAllMocks();
