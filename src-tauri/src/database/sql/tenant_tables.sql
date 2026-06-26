@@ -542,3 +542,44 @@ CREATE TABLE IF NOT EXISTS {schema}.asset_purchase (
 );
 
 COMMENT ON TABLE {schema}.asset_purchase IS '资产采购申请表';
+
+-- 17. 文件上传记录表（大文件分片上传）
+CREATE TABLE IF NOT EXISTS {schema}.file_uploads (
+    id BIGINT PRIMARY KEY,
+    upload_id VARCHAR(255) NOT NULL,
+    bucket VARCHAR(255) NOT NULL,
+    object_key VARCHAR(1024) NOT NULL,
+    original_filename VARCHAR(512) NOT NULL,
+    file_size BIGINT NOT NULL,
+    mime_type VARCHAR(255),
+    chunk_size INTEGER NOT NULL DEFAULT 5242880,
+    total_chunks INTEGER NOT NULL,
+    received_chunks INTEGER[] NOT NULL DEFAULT '{}',
+    status VARCHAR(20) NOT NULL DEFAULT 'uploading',
+    file_url VARCHAR(2048),
+    etag VARCHAR(255),
+    created_by BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.file_uploads IS '大文件分片上传记录表';
+
+COMMENT ON COLUMN {schema}.file_uploads.upload_id IS 'S3 Multipart Upload ID';
+
+COMMENT ON COLUMN {schema}.file_uploads.bucket IS 'S3 存储桶';
+
+COMMENT ON COLUMN {schema}.file_uploads.object_key IS 'S3 对象键';
+
+COMMENT ON COLUMN {schema}.file_uploads.chunk_size IS '分片大小（字节），默认 5MB';
+
+COMMENT ON COLUMN {schema}.file_uploads.total_chunks IS '总分片数';
+
+COMMENT ON COLUMN {schema}.file_uploads.received_chunks IS '已接收的分片序号数组';
+
+COMMENT ON COLUMN {schema}.file_uploads.status IS '状态：uploading/completed/failed/cancelled';
+
+CREATE INDEX IF NOT EXISTS idx_file_uploads_status ON {schema}.file_uploads (status);
+
+CREATE INDEX IF NOT EXISTS idx_file_uploads_created_by ON {schema}.file_uploads (created_by);

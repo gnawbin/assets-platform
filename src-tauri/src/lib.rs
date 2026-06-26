@@ -3,6 +3,7 @@ mod commands;
 mod database;
 mod engine;
 mod service;
+mod storage;
 mod utils;
 
 /// 加载 .env TOML 配置文件，将值设置为环境变量
