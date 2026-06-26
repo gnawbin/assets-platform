@@ -51,7 +51,7 @@ export function listSkills() {
 
 /** 根据 ID 获取 Skill 详情 */
 export function getSkill(skillId: string) {
-    return api.get<SkillMeta>('get_skill', { skill_id: skillId });
+    return api.get<SkillMeta>('get_skill', { skillId });
 }
 
 /** 执行 Skill */
@@ -63,22 +63,22 @@ export function executeSkill(params: {
     tenant_id: number;
 }) {
     return api.post<SkillResult>('execute_skill', {
-        skill_id: params.skill_id,
-        input_text: params.input_text,
+        skillId: params.skill_id,
+        inputText: params.input_text,
         config: params.config ?? {},
-        user_id: params.user_id,
-        tenant_id: params.tenant_id,
+        userId: params.user_id,
+        tenantId: params.tenant_id,
     });
 }
 
 /** 注册自定义 Skill */
 export function registerCustomSkill(skillMeta: SkillMeta) {
-    return api.post<null>('register_custom_skill', { skill_meta: skillMeta });
+    return api.post<null>('register_custom_skill', { skillMeta });
 }
 
 /** 移除 Skill */
 export function unregisterSkill(skillId: string) {
-    return api.delete<boolean>('unregister_skill', { skill_id: skillId });
+    return api.delete<boolean>('unregister_skill', { skillId });
 }
 
 /** 获取 Skill 数量 */

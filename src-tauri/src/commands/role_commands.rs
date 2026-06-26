@@ -12,17 +12,21 @@ pub async fn insert_role(
     role_key: String,
     role_name: String,
     description: Option<String>,
-    tenant_id: String,
+    tenant_id: Option<String>,
 ) -> Result<Role, String> {
-    let tid: i64 = tenant_id
-        .parse()
-        .map_err(|e| format!("无效的租户ID: {}", e))?;
+    let tid = match tenant_id {
+        Some(ref id) if !id.is_empty() => Some(
+            id.parse::<i64>()
+                .map_err(|e| format!("无效的租户ID: {}", e))?,
+        ),
+        _ => None,
+    };
     service::role_service::insert_role_by_params(
         &role_key,
         &role_name,
         description.as_deref(),
         false, // 新增角色默认非超级管理员
-        Some(tid),
+        tid,
         Some(1), // created_by
     )
     .await

@@ -67,15 +67,23 @@ export function getKnowledgeTree() {
 
 /** 新增知识树节点 */
 export function insertKnowledgeNode(params: {
-    knowledge_id?: string;
-    parent_id?: string;
-    node_type: string;
+    knowledgeId?: string;
+    parentId?: string;
+    nodeType: string;
     title: string;
     icon?: string;
-    sort_order?: number;
-    created_by?: string;
+    sortOrder?: number;
+    createdBy?: string;
 }) {
-    return api.post<KnowledgeTree>('insert_knowledge_node', params);
+    return api.post<KnowledgeTree>('insert_knowledge_node', {
+        knowledgeId: params.knowledgeId,
+        parentId: params.parentId,
+        nodeType: params.nodeType,
+        title: params.title,
+        icon: params.icon,
+        sortOrder: params.sortOrder,
+        createdBy: params.createdBy,
+    });
 }
 
 /** 更新知识树节点 */
@@ -83,9 +91,9 @@ export function updateKnowledgeNode(params: {
     id: string;
     title?: string;
     icon?: string;
-    sort_order?: number;
-    is_expanded?: boolean;
-    updated_by?: string;
+    sortOrder?: number;
+    isExpanded?: boolean;
+    updatedBy?: string;
 }) {
     return api.put<KnowledgeTree>('update_knowledge_node', params);
 }
@@ -98,7 +106,7 @@ export function deleteKnowledgeNode(id: string) {
 /** 移动知识树节点 */
 export function moveKnowledgeNode(params: {
     id: string;
-    new_parent_id?: string;
+    newParentId?: string;
 }) {
     return api.put<KnowledgeTree>('move_knowledge_node', params);
 }
@@ -107,7 +115,7 @@ export function moveKnowledgeNode(params: {
 
 /** 获取知识条目列表 */
 export function getKnowledgeList(params?: {
-    knowledge_id?: string;
+    knowledgeId?: string;
     keyword?: string;
 }) {
     return api.get<AssetKnowledge[]>('get_knowledge_list', params ?? {});
@@ -120,16 +128,15 @@ export function getKnowledgeById(id: string) {
 
 /** 新增知识条目 */
 export function insertKnowledge(params: {
-    knowledge_id?: string;
-    asset_id?: string;
-    doc_source?: string;
-    knowledge_type?: string;
+    knowledgeId?: string;
+    assetId?: string;
+    docSource?: string;
+    knowledgeType?: string;
     title: string;
     content: string;
-    permission_level?: string;
-    created_by?: string;
+    permissionLevel?: string;
+    createdBy?: string;
 }) {
-
     return api.post<AssetKnowledge>('insert_knowledge', params);
 }
 
@@ -138,9 +145,9 @@ export function updateKnowledge(params: {
     id: string;
     title?: string;
     content?: string;
-    knowledge_type?: string;
-    permission_level?: string;
-    updated_by?: string;
+    knowledgeType?: string;
+    permissionLevel?: string;
+    updatedBy?: string;
 }) {
     return api.put<AssetKnowledge>('update_knowledge', params);
 }
