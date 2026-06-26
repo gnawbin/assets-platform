@@ -30,6 +30,25 @@ export interface MarkdownEditorProps {
     fileSize?: number;
     onFileUpload?: (file: File) => Promise<string>;
 
+    /** 上传状态（由父组件管理） */
+    uploadStatus?: 'idle' | 'uploading' | 'paused' | 'completed' | 'error';
+    /** 上传进度 0-100 */
+    uploadProgress?: number;
+    /** 上传速度（字节/秒） */
+    uploadSpeed?: number;
+    /** 错误信息 */
+    uploadError?: string | null;
+    /** 用户选择文件后的回调（将文件传给父组件处理） */
+    onFileSelect?: (file: File) => void;
+    /** 暂停 */
+    onPause?: () => void;
+    /** 继续 */
+    onResume?: () => void;
+    /** 取消/清除 */
+    onCancel?: () => void;
+    /** 重试 */
+    onRetry?: () => void;
+
     // 编辑器模式
     editorMode?: EditorMode;
     onEditorModeChange?: (mode: EditorMode) => void;

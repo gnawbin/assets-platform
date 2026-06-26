@@ -22,7 +22,7 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import MetaPanel from './MetaPanel';
 import FileAttachPanel from './FileAttachPanel';
-import { type MarkdownEditorProps } from './types';
+import { type MarkdownEditorProps, type OkfType } from './types';
 
 // 动态导入 MDXEditor，禁用 SSR（Next.js 兼容）
 const MDXEditorWrapper = dynamic(() => import('@/components/MarkdownEditor/MDXEditorWrapper'), {
@@ -56,6 +56,16 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     onTagsChange,
     onSave,
     saving,
+    // 文件上传状态（由父组件管理）
+    uploadStatus,
+    uploadProgress,
+    uploadSpeed,
+    uploadError,
+    onFileSelect,
+    onPause,
+    onResume,
+    onCancel,
+    onRetry,
 }) => {
     const router = useRouter();
     const [activeTab, setActiveTab] = useState<string | null>('edit');
@@ -136,7 +146,15 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                 fileUrl={fileUrl}
                 fileName={fileName}
                 fileSize={fileSize}
-                onFileUpload={onFileUpload}
+                uploadStatus={uploadStatus}
+                uploadProgress={uploadProgress}
+                uploadSpeed={uploadSpeed}
+                uploadError={uploadError}
+                onFileSelect={onFileSelect}
+                onPause={onPause}
+                onResume={onResume}
+                onCancel={onCancel}
+                onRetry={onRetry}
             />
         </Stack>
     );

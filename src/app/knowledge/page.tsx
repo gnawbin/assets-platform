@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Layout from '@/components/Layout';
 import {
     Title,
@@ -48,11 +48,15 @@ import {
     createKnowledgeAsset,
     updateKnowledgeAsset,
     deleteKnowledgeAsset,
+    attachFileToKnowledge,
     type KnowledgeAsset,
     type OkfType,
 } from '@/services/knowledgeAssetService';
+import { UploadService } from '@/services/uploadService';
+import { notifications } from '@mantine/notifications';
 import MarkdownEditor from '@/components/MarkdownEditor';
 import { OKF_TYPE_OPTIONS } from '@/components/MarkdownEditor/types';
+import type { AttachUploadStatus } from '@/components/MarkdownEditor/FileAttachPanel';
 
 // ======================== 节点图标映射 ========================
 
@@ -195,6 +199,16 @@ export default function KnowledgePage() {
     const [showEditor, setShowEditor] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    // ---- 文件上传状态 ----
+    const [uploadStatus, setUploadStatus] = useState<AttachUploadStatus>('idle');
+    const [uploadProgress, setUploadProgress] = useState(0);
+    const [uploadSpeed, setUploadSpeed] = useState(0);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const uploadServiceRef = useRef(new UploadService());
+    const pausedRef = useRef(false);
+    const selectedFileRef = useRef<File | null>(null);
+    const uploadIdRef = useRef<string | null>(null);
+
     // ---- 节点对话框 ----
     const [showNodeDialog, setShowNodeDialog] = useState(false);
     const [editingNode, setEditingNode] = useState<KnowledgeTreeNode | null>(null);
@@ -220,6 +234,8 @@ export default function KnowledgePage() {
     // ---- 选择节点 → 加载关联资产 ----
     const handleSelectNode = async (id: string) => {
         setSelectedNodeId(id);
+        // 重置上传状态
+        resetUploadState();
         try {
             const asset = await getKnowledgeAssetByTreeNode(id);
             setEditorTitle(asset.title);
@@ -251,43 +267,167 @@ export default function KnowledgePage() {
         }
     };
 
-    // ---- 文件上传 ----
-    const handleFileUpload = async (file: File): Promise<string> => {
-        // 当前简化实现：使用 FileReader 读取文件内容作为 Markdown
-        // TODO: 后续对接 S3 分片上传 + attachFileToKnowledge
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                const content = reader.result as string;
-                // 如果是文本文件，将内容写入编辑器
-                if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
-                    setEditorContent(prev => prev + '\n\n' + content);
-                }
-                // 更新文件信息
-                setEditorFileName(file.name);
-                setEditorFileSize(file.size);
-                setEditorFileUrl(URL.createObjectURL(file));
-                resolve(URL.createObjectURL(file));
-            };
-            reader.onerror = () => reject(new Error('文件读取失败'));
-            if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
-                reader.readAsText(file);
-            } else {
-                // 二进制文件，只记录文件名
-                setEditorFileName(file.name);
-                setEditorFileSize(file.size);
-                resolve(URL.createObjectURL(file));
+    // ---- 重置上传状态 ----
+    const resetUploadState = useCallback(() => {
+        setUploadStatus('idle');
+        setUploadProgress(0);
+        setUploadSpeed(0);
+        setUploadError(null);
+        pausedRef.current = false;
+        selectedFileRef.current = null;
+        uploadIdRef.current = null;
+    }, []);
+
+    // ---- S3 分片上传核心逻辑 ----
+    const startChunkedUpload = useCallback(async (file: File) => {
+        const uploadService = uploadServiceRef.current;
+        pausedRef.current = false;
+        selectedFileRef.current = file;
+
+        setUploadStatus('uploading');
+        setUploadProgress(0);
+        setUploadError(null);
+
+        try {
+            // 1. 初始化分片上传
+            const initResp = await uploadService.init(file.name, file.size, file.type);
+            const { uploadId, chunkSize, totalChunks, presignedUrls } = initResp;
+            uploadIdRef.current = uploadId;
+
+            // 2. 分片
+            const chunks: Blob[] = [];
+            for (let start = 0; start < file.size; start += chunkSize) {
+                chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
             }
-        });
-    };
+
+            // 3. 并发上传分片（并发数 3）
+            const concurrency = 3;
+            let uploadedCount = 0;
+            let lastLoaded = 0;
+            let lastTime = Date.now();
+
+            const uploadOneChunk = async (partNumber: number): Promise<void> => {
+                if (pausedRef.current) return;
+                const presignedUrl = presignedUrls[partNumber - 1];
+                const chunk = chunks[partNumber - 1];
+
+                const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
+                await uploadService.reportChunk(uploadId, partNumber, etag);
+
+                uploadedCount++;
+                const pct = Math.round((uploadedCount / totalChunks) * 100);
+                setUploadProgress(pct);
+
+                // 计算速度
+                const now = Date.now();
+                const elapsed = (now - lastTime) / 1000;
+                if (elapsed > 0.5) {
+                    const currentLoaded = uploadedCount * chunkSize;
+                    const bytesPerSec = (currentLoaded - lastLoaded) / elapsed;
+                    setUploadSpeed(bytesPerSec);
+                    lastLoaded = currentLoaded;
+                    lastTime = now;
+                }
+            };
+
+            const workers = [];
+            for (let i = 0; i < concurrency; i++) {
+                workers.push(
+                    (async () => {
+                        for (let j = i; j < totalChunks; j += concurrency) {
+                            if (pausedRef.current) break;
+                            await uploadOneChunk(j + 1);
+                        }
+                    })()
+                );
+            }
+            await Promise.all(workers);
+
+            // 如果被暂停，不执行 complete
+            if (pausedRef.current) {
+                setUploadStatus('paused');
+                return;
+            }
+
+            // 4. 完成合并
+            const result = await uploadService.complete(uploadId);
+            const uploadedFileUrl = result.fileUrl;
+
+            // 5. 更新编辑器文件信息
+            setEditorFileName(file.name);
+            setEditorFileSize(file.size);
+            setEditorFileUrl(uploadedFileUrl);
+            setUploadStatus('completed');
+
+            notifications.show({
+                title: '上传成功',
+                message: `${file.name} 已上传至对象存储`,
+                color: 'green',
+            });
+        } catch (err: any) {
+            if (pausedRef.current) return;
+            const errMsg = err.message || '上传失败';
+            setUploadError(errMsg);
+            setUploadStatus('error');
+            notifications.show({
+                title: '上传失败',
+                message: errMsg,
+                color: 'red',
+            });
+        }
+    }, []);
+
+    // ---- 文件选择回调（FileAttachPanel -> onFileSelect） ----
+    const handleFileSelect = useCallback((file: File) => {
+        // 用户选择了文件，开始 S3 分片上传
+        startChunkedUpload(file);
+    }, [startChunkedUpload]);
+
+    // ---- 上传控制 ----
+    const handlePause = useCallback(() => {
+        pausedRef.current = true;
+        setUploadStatus('paused');
+    }, []);
+
+    const handleResume = useCallback(() => {
+        if (selectedFileRef.current) {
+            startChunkedUpload(selectedFileRef.current);
+        }
+    }, [startChunkedUpload]);
+
+    const handleCancel = useCallback(async () => {
+        pausedRef.current = true;
+        if (uploadIdRef.current) {
+            try {
+                await uploadServiceRef.current.abort(uploadIdRef.current);
+            } catch {
+                // ignore
+            }
+        }
+        resetUploadState();
+        // 清除编辑器中的文件信息
+        setEditorFileUrl(undefined);
+        setEditorFileName(undefined);
+        setEditorFileSize(undefined);
+    }, [resetUploadState]);
+
+    const handleRetry = useCallback(() => {
+        if (selectedFileRef.current) {
+            resetUploadState();
+            startChunkedUpload(selectedFileRef.current);
+        }
+    }, [resetUploadState, startChunkedUpload]);
 
     // ---- 保存 ----
     const handleSave = async () => {
         if (!selectedNodeId) return;
         setSaving(true);
         try {
+            let updatedAsset: KnowledgeAsset;
+
             if (okfAsset) {
-                const updated = await updateKnowledgeAsset({
+                // 更新已有资产
+                updatedAsset = await updateKnowledgeAsset({
                     id: okfAsset.id,
                     title: editorTitle,
                     content: editorContent,
@@ -297,8 +437,20 @@ export default function KnowledgePage() {
                     status: editorStatus,
                     tags: editorTags,
                 });
-                setOkfAsset(updated);
+
+                // 如果有新上传的文件，绑定到资产
+                if (editorFileUrl && okfAsset.file_url !== editorFileUrl) {
+                    updatedAsset = await attachFileToKnowledge({
+                        assetId: okfAsset.id,
+                        fileUrl: editorFileUrl,
+                        fileName: editorFileName || '',
+                        fileSize: editorFileSize || 0,
+                        fileMime: '',
+                        fileMd5: '',
+                    });
+                }
             } else {
+                // 创建新资产
                 const created = await createKnowledgeAsset({
                     treeNodeId: selectedNodeId,
                     title: editorTitle,
@@ -308,9 +460,23 @@ export default function KnowledgePage() {
                     source: editorSource,
                     tags: editorTags,
                 });
-                setOkfAsset(created);
+                updatedAsset = created;
                 setShowEditor(true);
+
+                // 如果有文件，绑定到新创建的资产
+                if (editorFileUrl) {
+                    updatedAsset = await attachFileToKnowledge({
+                        assetId: created.id,
+                        fileUrl: editorFileUrl,
+                        fileName: editorFileName || '',
+                        fileSize: editorFileSize || 0,
+                        fileMime: '',
+                        fileMd5: '',
+                    });
+                }
             }
+
+            setOkfAsset(updatedAsset);
         } catch (err) {
             console.error('保存失败', err);
         } finally {
@@ -382,7 +548,7 @@ export default function KnowledgePage() {
                         <IconBook size={28} />
                         <div>
                             <Title order={2}>OKF 知识库</Title>
-                            <Text c="dimmed">知识树 + Markdown 编辑器 + 文件上传</Text>
+                            <Text c="dimmed">知识树 + Markdown 编辑器 + S3 分片上传</Text>
                         </div>
                     </Group>
                     <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={loadTree} loading={loading}>
@@ -448,9 +614,18 @@ export default function KnowledgePage() {
                                     fileUrl={editorFileUrl}
                                     fileName={editorFileName}
                                     fileSize={editorFileSize}
-                                    onFileUpload={handleFileUpload}
                                     onSave={handleSave}
                                     saving={saving}
+                                    // 文件上传状态
+                                    uploadStatus={uploadStatus}
+                                    uploadProgress={uploadProgress}
+                                    uploadSpeed={uploadSpeed}
+                                    uploadError={uploadError}
+                                    onFileSelect={handleFileSelect}
+                                    onPause={handlePause}
+                                    onResume={handleResume}
+                                    onCancel={handleCancel}
+                                    onRetry={handleRetry}
                                 />
                             </Stack>
                         ) : (

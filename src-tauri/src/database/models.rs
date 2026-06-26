@@ -793,7 +793,7 @@ pub struct KnowledgeAsset {
     pub okf_type: String,
     pub summary: Option<String>,
     pub source: Option<String>,
-    pub confidence: Option<f32>,
+    pub confidence: Option<f64>,
     pub status: String,
     pub effective_at: Option<DateTime<Utc>>,
     pub expire_at: Option<DateTime<Utc>>,
