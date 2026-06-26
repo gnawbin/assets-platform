@@ -3,27 +3,27 @@ authors = ["gengyuwangbin"]
 description = "资产平台APP"
 edition = "2021"
 name = "assets-platform"
-version = "0.0.5"
+version = "0.0.6"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 name = "assetsplatform_lib"
 
 [build-dependencies]
-tauri-build = {version = "2.5.6", default-features = false, features = [] }# 关闭默认特性
+tauri-build = {version = "2.5.6", default-features = false, features = []}# 关闭默认特性
 
 [dependencies]
 tracing = "0.1.44"
-tracing-subscriber = {version = "0.3.23", features = ["env-filter", "json"] }
+tracing-subscriber = {version = "0.3.23", features = ["env-filter", "json"]}
 
 # 加这两行
-getrandom = {version = "0.4.2", features = ["std"] }
+getrandom = {version = "0.4.2", features = ["std"]}
 thiserror = "2.0.18"
 # OTel 核心
 # 注意：opentelemetry-* 各包版本需保持兼容，当前使用 0.32.x 系列
 # 升级时请参考 https://opentelemetry.io/docs/languages/rust/instrumentation/
 # 确保 opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry / opentelemetry-appender-tracing 版本匹配
-opentelemetry = {version = "0.32.0", features = ["trace", "metrics", "logs"] } 
+opentelemetry = {version = "0.32.0", features = ["trace", "metrics", "logs"]} 
 opentelemetry-appender-tracing = "0.32.0" # 日志桥接
 opentelemetry-otlp = {version = "0.32.0", features = [
   "grpc-tonic",
@@ -31,20 +31,20 @@ opentelemetry-otlp = {version = "0.32.0", features = [
   "trace",
   "logs",
   "metrics",
-] } 
+]} 
 opentelemetry_sdk = {version = "0.32.1", features = [
   "rt-tokio",
   "trace",
   "metrics",
   "logs",
-] } 
+]} 
 tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
 
 argon2 = "0.5.3" # 最强密码哈希
-password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具   
-rand = {version = "0.10.1", features = ["std_rng"] } 
+password-hash = {version = "0.6.1", features = ["rand_core"]}# 哈希工具    
+rand = {version = "0.10.1", features = ["std_rng"]} 
 # Tauri 核心（最小特性集）
-tauri = {version = "2.11.2", default-features = false, features = ["wry"] }
+tauri = {version = "2.11.2", default-features = false, features = ["wry"]}
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-fs = "2.5.1"
 tauri-plugin-opener = {version = "2.5.4", default-features = false}
@@ -55,13 +55,13 @@ tauri-plugin-updater = "2.10.1"
 serde = {version = "1.0", default-features = false, features = [
   "derive",
   "alloc",
-] }
-serde_json = {version = "1.0", default-features = false, features = ["alloc"] }
+]}
+serde_json = {version = "1.0", default-features = false, features = ["alloc"]}
 
 # JWT
 jsonwebtoken = {version = "10.3.0", default-features = false, features = [
   "aws_lc_rs",
-] }
+]}
 
 # 数据库（仅 PostgreSQL）
 sqlx = {version = "0.8.6", default-features = false, features = [
@@ -70,7 +70,7 @@ sqlx = {version = "0.8.6", default-features = false, features = [
   "tls-rustls",
   "macros",
   "chrono",
-] }
+]}
 
 # 异步运行时（只开必须的特性，不要 full）
 tokio = {version = "1.52", default-features = false, features = [
@@ -80,16 +80,16 @@ tokio = {version = "1.52", default-features = false, features = [
   "fs",
   "net",
   "signal",
-] }
+]}
 
 # HTTP 服务框架（用于前后端分离时的 REST API）
-axum = {version = "0.7", features = ["macros"] }
-tower-http = {version = "0.5", features = ["cors", "trace"] }
+axum = {version = "0.7", features = ["macros"]}
+tower-http = {version = "0.5", features = ["cors", "trace"]}
 
 # OpenAPI / Swagger 文档
-utoipa = {version = "5", features = ["axum_extras", "chrono"] }
-utoipa-swagger-ui = {version = "8", features = ["axum", "vendored"] }
-uuid = {version = "1.23.1", features = ["v4"] }
+utoipa = {version = "5", features = ["axum_extras", "chrono"]}
+utoipa-swagger-ui = {version = "8", features = ["axum", "vendored"]}
+uuid = {version = "1.23.1", features = ["v4"]}
 # HTTP 客户端
 reqwest = {version = "0.13.2", features = [
   "json",
@@ -116,18 +116,18 @@ winapi = {version = "0.3", features = [
   "sysinfoapi",
   "processthreadsapi",
   "errhandlingapi",
-] }
+]}
 
 hex = "0.4"
 
 # AWS S3 SDK
-aws-config = {version = "1.5", default-features = false, features = ["rustls"] }
+aws-config = {version = "1.5", default-features = false, features = ["rustls"]}
 aws-credential-types = "1.2"
-aws-sdk-s3 = {version = "1.60", default-features = false, features = ["rustls"] }
+aws-sdk-s3 = {version = "1.60", default-features = false, features = ["rustls"]}
 
 # 工具库
 anyhow = "1.0.98"
-chrono = {version = "0.4", default-features = false, features = ["serde"] }
+chrono = {version = "0.4", default-features = false, features = ["serde"]}
 config = {version = "0.15", default-features = false}
 once_cell = "1.21.4"
 opa-wasm = "0.2.0"
