@@ -1,5 +1,4 @@
 'use client';
-
 import React, { useEffect, useState, useCallback } from 'react';
 import Layout from '@/components/Layout';
 import {
@@ -9,16 +8,19 @@ import {
     Stack,
     Group,
     Button,
-    Modal,
-    TextInput,
-    Select,
     Loader,
     Alert,
+    SimpleGrid,
+    Badge,
     ActionIcon,
     Tooltip,
+    Paper,
     ScrollArea,
     Box,
     Divider,
+    Modal,
+    TextInput,
+    Select,
 } from '@mantine/core';
 import {
     IconAlertCircle,
@@ -28,6 +30,7 @@ import {
     IconRefresh,
     IconFolder,
     IconFileDescription,
+    IconFolderOpen,
     IconChevronRight,
     IconChevronDown,
     IconBook,
@@ -48,13 +51,14 @@ import {
     createKnowledgeAsset,
     updateKnowledgeAsset,
     deleteKnowledgeAsset,
+    listKnowledgeAssets,
     type KnowledgeAsset,
     type OkfType,
 } from '@/services/knowledgeAssetService';
 import MarkdownEditor from '@/components/MarkdownEditor';
 import { OKF_TYPE_OPTIONS } from '@/components/MarkdownEditor/types';
 
-// ======================== 节点图标映射 ========================
+// ======================== 节点图标 ========================
 
 const NODE_ICON_MAP: Record<string, { icon: React.ReactNode; color: string }> = {
     folder: { icon: <IconFolder size={16} />, color: 'var(--mantine-color-yellow-6)' },
@@ -63,6 +67,15 @@ const NODE_ICON_MAP: Record<string, { icon: React.ReactNode; color: string }> = 
     skill: { icon: <IconCode size={16} />, color: 'var(--mantine-color-green-6)' },
     document: { icon: <IconFileDescription size={16} />, color: 'var(--mantine-color-blue-6)' },
     link: { icon: <IconFileDescription size={16} />, color: 'var(--mantine-color-gray-6)' },
+};
+
+const NODE_TYPE_LABELS: Record<string, string> = {
+    folder: '文件夹',
+    wiki_node: '词条',
+    raw_file: '原始文件',
+    skill: 'Skill规则',
+    document: '文档',
+    link: '链接',
 };
 
 // ======================== 树节点组件 ========================
@@ -119,12 +132,14 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                     }
                 }}
             >
-                <Box style={{
-                    width: 16, height: 16, display: 'flex', alignItems: 'center',
-                    justifyContent: 'center', flexShrink: 0,
-                    visibility: hasChildren ? 'visible' : 'hidden'
-                }}
-                    onClick={hasChildren ? (e) => { e.stopPropagation(); setExpanded(!expanded); } : undefined}>
+                <Box
+                    style={{
+                        width: 16, height: 16, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', flexShrink: 0,
+                        visibility: hasChildren ? 'visible' : 'hidden',
+                    }}
+                    onClick={hasChildren ? (e) => { e.stopPropagation(); setExpanded(!expanded); } : undefined}
+                >
                     {expanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                 </Box>
 
@@ -174,14 +189,22 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 
 // ======================== 主页面 ========================
 
-export default function KnowledgePage() {
+export default function KnowledgeAssetPage() {
     const [tree, setTree] = useState<KnowledgeTreeNode[]>([]);
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+    const [assetList, setAssetList] = useState<KnowledgeAsset[]>([]);
+    const [editingAsset, setEditingAsset] = useState<KnowledgeAsset | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
 
-    // ---- 编辑器状态 ----
-    const [okfAsset, setOkfAsset] = useState<KnowledgeAsset | null>(null);
+    // 对话框
+    const [showNodeDialog, setShowNodeDialog] = useState(false);
+    const [editingNode, setEditingNode] = useState<KnowledgeTreeNode | null>(null);
+    const [parentIdForNew, setParentIdForNew] = useState<string | null>(null);
+    const [nodeForm, setNodeForm] = useState({ title: '', node_type: 'folder', icon: '' });
+
+    // 编辑器状态
     const [editorTitle, setEditorTitle] = useState('');
     const [editorContent, setEditorContent] = useState('');
     const [editorOkfType, setEditorOkfType] = useState<OkfType>('raw_source');
@@ -189,19 +212,9 @@ export default function KnowledgePage() {
     const [editorSource, setEditorSource] = useState('');
     const [editorStatus, setEditorStatus] = useState<'draft' | 'valid' | 'outdated'>('draft');
     const [editorTags, setEditorTags] = useState<string[]>([]);
-    const [editorFileUrl, setEditorFileUrl] = useState<string | undefined>();
-    const [editorFileName, setEditorFileName] = useState<string | undefined>();
-    const [editorFileSize, setEditorFileSize] = useState<number | undefined>();
     const [showEditor, setShowEditor] = useState(false);
-    const [saving, setSaving] = useState(false);
 
-    // ---- 节点对话框 ----
-    const [showNodeDialog, setShowNodeDialog] = useState(false);
-    const [editingNode, setEditingNode] = useState<KnowledgeTreeNode | null>(null);
-    const [parentIdForNew, setParentIdForNew] = useState<string | null>(null);
-    const [nodeForm, setNodeForm] = useState({ title: '', node_type: 'folder', icon: '' });
-
-    // ---- 加载知识树 ----
+    // 加载知识树
     const loadTree = useCallback(async () => {
         try {
             setLoading(true);
@@ -215,9 +228,19 @@ export default function KnowledgePage() {
         }
     }, []);
 
-    useEffect(() => { loadTree(); }, [loadTree]);
+    // 加载资产列表
+    const loadAssetList = useCallback(async () => {
+        try {
+            const data = await listKnowledgeAssets();
+            setAssetList(data);
+        } catch {
+            setAssetList([]);
+        }
+    }, []);
 
-    // ---- 选择节点 → 加载关联资产 ----
+    useEffect(() => { loadTree(); loadAssetList(); }, [loadTree, loadAssetList]);
+
+    // 选择节点 → 加载关联资产
     const handleSelectNode = async (id: string) => {
         setSelectedNodeId(id);
         try {
@@ -229,14 +252,10 @@ export default function KnowledgePage() {
             setEditorSource(asset.source || '');
             setEditorStatus(asset.status as 'draft' | 'valid' | 'outdated');
             setEditorTags(asset.tags || []);
-            setEditorFileUrl(asset.file_url || undefined);
-            setEditorFileName(asset.file_name || undefined);
-            setEditorFileSize(asset.file_size || undefined);
-            setOkfAsset(asset);
+            setEditingAsset(asset);
             setShowEditor(true);
         } catch {
-            // 无关联资产
-            setOkfAsset(null);
+            // 无关联资产，新建模式
             setEditorTitle('');
             setEditorContent('');
             setEditorOkfType('raw_source');
@@ -244,51 +263,19 @@ export default function KnowledgePage() {
             setEditorSource('');
             setEditorStatus('draft');
             setEditorTags([]);
-            setEditorFileUrl(undefined);
-            setEditorFileName(undefined);
-            setEditorFileSize(undefined);
-            setShowEditor(false);
+            setEditingAsset(null);
+            setShowEditor(true);
         }
     };
 
-    // ---- 文件上传 ----
-    const handleFileUpload = async (file: File): Promise<string> => {
-        // 当前简化实现：使用 FileReader 读取文件内容作为 Markdown
-        // TODO: 后续对接 S3 分片上传 + attachFileToKnowledge
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                const content = reader.result as string;
-                // 如果是文本文件，将内容写入编辑器
-                if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
-                    setEditorContent(prev => prev + '\n\n' + content);
-                }
-                // 更新文件信息
-                setEditorFileName(file.name);
-                setEditorFileSize(file.size);
-                setEditorFileUrl(URL.createObjectURL(file));
-                resolve(URL.createObjectURL(file));
-            };
-            reader.onerror = () => reject(new Error('文件读取失败'));
-            if (file.type.startsWith('text/') || file.name.endsWith('.md')) {
-                reader.readAsText(file);
-            } else {
-                // 二进制文件，只记录文件名
-                setEditorFileName(file.name);
-                setEditorFileSize(file.size);
-                resolve(URL.createObjectURL(file));
-            }
-        });
-    };
-
-    // ---- 保存 ----
+    // 保存编辑器内容
     const handleSave = async () => {
         if (!selectedNodeId) return;
         setSaving(true);
         try {
-            if (okfAsset) {
+            if (editingAsset) {
                 const updated = await updateKnowledgeAsset({
-                    id: okfAsset.id,
+                    id: editingAsset.id,
                     title: editorTitle,
                     content: editorContent,
                     okfType: editorOkfType,
@@ -297,7 +284,7 @@ export default function KnowledgePage() {
                     status: editorStatus,
                     tags: editorTags,
                 });
-                setOkfAsset(updated);
+                setEditingAsset(updated);
             } else {
                 const created = await createKnowledgeAsset({
                     treeNodeId: selectedNodeId,
@@ -308,9 +295,9 @@ export default function KnowledgePage() {
                     source: editorSource,
                     tags: editorTags,
                 });
-                setOkfAsset(created);
-                setShowEditor(true);
+                setEditingAsset(created);
             }
+            await loadAssetList();
         } catch (err) {
             console.error('保存失败', err);
         } finally {
@@ -318,7 +305,7 @@ export default function KnowledgePage() {
         }
     };
 
-    // ---- 节点操作 ----
+    // 节点操作
     const handleAddChild = (parentId: string) => {
         setParentIdForNew(parentId);
         setEditingNode(null);
@@ -338,11 +325,7 @@ export default function KnowledgePage() {
         try {
             await deleteKnowledgeNode(id);
             await loadTree();
-            if (selectedNodeId === id) {
-                setSelectedNodeId(null);
-                setShowEditor(false);
-                setOkfAsset(null);
-            }
+            if (selectedNodeId === id) { setSelectedNodeId(null); setShowEditor(false); }
         } catch (err: unknown) {
             alert(err instanceof Error ? err.message : '删除失败');
         }
@@ -374,6 +357,19 @@ export default function KnowledgePage() {
         setShowNodeDialog(true);
     };
 
+    const handleDeleteAsset = async (id: string) => {
+        if (!confirm('确定删除此知识资产？')) return;
+        try {
+            await deleteKnowledgeAsset(id);
+            await loadAssetList();
+            if (editingAsset?.id === id) { setEditingAsset(null); setShowEditor(false); }
+        } catch {
+            // ignore
+        }
+    };
+
+    const okfTypeLabel = (t: string) => OKF_TYPE_OPTIONS.find(o => o.value === t)?.label || t;
+
     return (
         <Layout>
             <Stack gap="lg">
@@ -382,7 +378,7 @@ export default function KnowledgePage() {
                         <IconBook size={28} />
                         <div>
                             <Title order={2}>OKF 知识库</Title>
-                            <Text c="dimmed">知识树 + Markdown 编辑器 + 文件上传</Text>
+                            <Text c="dimmed">标准化知识资产 + Markdown 编辑器</Text>
                         </div>
                     </Group>
                     <Button variant="light" leftSection={<IconRefresh size={16} />} onClick={loadTree} loading={loading}>
@@ -419,16 +415,13 @@ export default function KnowledgePage() {
                         )}
                     </Card>
 
-                    {/* 右侧：编辑器 */}
+                    {/* 右侧：编辑器 / 资产列表 */}
                     <Card withBorder padding="lg" radius="md" style={{ flex: 1 }}>
                         {showEditor && selectedNodeId ? (
                             <Stack gap="md">
                                 <Group>
                                     <Button variant="subtle" leftSection={<IconArrowLeft size={16} />}
-                                        onClick={() => setShowEditor(false)} size="sm">返回</Button>
-                                    {!okfAsset && (
-                                        <Button size="sm" onClick={handleSave} loading={saving}>创建资产</Button>
-                                    )}
+                                        onClick={() => setShowEditor(false)} size="sm">返回列表</Button>
                                 </Group>
                                 <MarkdownEditor
                                     title={editorTitle}
@@ -445,10 +438,6 @@ export default function KnowledgePage() {
                                     onStatusChange={setEditorStatus}
                                     tags={editorTags}
                                     onTagsChange={setEditorTags}
-                                    fileUrl={editorFileUrl}
-                                    fileName={editorFileName}
-                                    fileSize={editorFileSize}
-                                    onFileUpload={handleFileUpload}
                                     onSave={handleSave}
                                     saving={saving}
                                 />
@@ -456,32 +445,47 @@ export default function KnowledgePage() {
                         ) : (
                             <Stack gap="md">
                                 <Group justify="space-between">
-                                    <Text fw={600} size="sm">OKF 知识资产</Text>
+                                    <Text fw={600} size="sm">全部知识资产</Text>
                                     <Text size="xs" c="dimmed">选择一个树节点来编辑其关联资产</Text>
                                 </Group>
                                 <Divider />
-                                {selectedNodeId && (
-                                    <Button variant="light" leftSection={<IconEdit size={14} />}
-                                        onClick={() => {
-                                            setEditorTitle('');
-                                            setEditorContent('');
-                                            setEditorOkfType('raw_source');
-                                            setEditorSummary('');
-                                            setEditorSource('');
-                                            setEditorStatus('draft');
-                                            setEditorTags([]);
-                                            setEditorFileUrl(undefined);
-                                            setEditorFileName(undefined);
-                                            setEditorFileSize(undefined);
-                                            setOkfAsset(null);
-                                            setShowEditor(true);
-                                        }}>
-                                        在此节点新建 OKF 资产
-                                    </Button>
+                                {assetList.length === 0 ? (
+                                    <Text ta="center" c="dimmed" py="xl" size="sm">暂无知识资产</Text>
+                                ) : (
+                                    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                                        {assetList.map((item) => (
+                                            <Card key={item.id} withBorder padding="md" radius="sm">
+                                                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                                                    <Text fw={500} size="sm" lineClamp={1} style={{ flex: 1 }}>
+                                                        {item.title}
+                                                    </Text>
+                                                    <Group gap={2} wrap="nowrap">
+                                                        <Tooltip label="编辑">
+                                                            <ActionIcon variant="subtle" color="blue" size="sm"
+                                                                onClick={() => handleSelectNode(item.tree_node_id)}>
+                                                                <IconEdit size={14} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                        <Tooltip label="删除">
+                                                            <ActionIcon variant="subtle" color="red" size="sm"
+                                                                onClick={() => handleDeleteAsset(item.id)}>
+                                                                <IconTrash size={14} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
+                                                    </Group>
+                                                </Group>
+                                                {item.summary && (
+                                                    <Text size="xs" c="dimmed" lineClamp={2} mt="xs">{item.summary}</Text>
+                                                )}
+                                                <Group gap="md" mt="sm">
+                                                    <Badge variant="light" color="violet" size="xs">{okfTypeLabel(item.okf_type)}</Badge>
+                                                    <Badge variant="light" color={item.status === 'valid' ? 'green' : 'gray'} size="xs">{item.status}</Badge>
+                                                    {item.file_name && <Badge variant="light" color="blue" size="xs">{item.file_name}</Badge>}
+                                                </Group>
+                                            </Card>
+                                        ))}
+                                    </SimpleGrid>
                                 )}
-                                <Text ta="center" c="dimmed" py="xl" size="sm">
-                                    {selectedNodeId ? '点击上方按钮创建 OKF 知识资产' : '请在左侧知识树中选择一个节点'}
-                                </Text>
                             </Stack>
                         )}
                     </Card>
@@ -499,7 +503,6 @@ export default function KnowledgePage() {
                             { value: 'raw_file', label: '原始文件' },
                             { value: 'skill', label: 'Skill规则' },
                             { value: 'document', label: '文档' },
-                            { value: 'link', label: '链接' },
                         ]}
                         value={nodeForm.node_type}
                         onChange={(val) => setNodeForm({ ...nodeForm, node_type: val || 'folder' })}

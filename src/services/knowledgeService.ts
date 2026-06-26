@@ -13,7 +13,7 @@ export interface KnowledgeTreeNode {
     id: string;
     knowledge_id: string | null;
     parent_id: string | null;
-    node_type: string; // folder / document / link
+    node_type: string; // folder / document / link / raw_file / wiki_node / skill
     title: string;
     icon: string | null;
     sort_order: number;

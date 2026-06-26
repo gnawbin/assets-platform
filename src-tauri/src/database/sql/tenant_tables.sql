@@ -583,3 +583,50 @@ COMMENT ON COLUMN {schema}.file_uploads.status IS '状态：uploading/completed/
 CREATE INDEX IF NOT EXISTS idx_file_uploads_status ON {schema}.file_uploads (status);
 
 CREATE INDEX IF NOT EXISTS idx_file_uploads_created_by ON {schema}.file_uploads (created_by);
+
+-- 18. OKF 知识资产表（不与现有 asset_knowledge 冲突）
+CREATE TABLE IF NOT EXISTS {schema}.knowledge_asset (
+    id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    tree_node_id BIGINT NOT NULL REFERENCES {schema}.knowledge_tree(id) ON DELETE CASCADE,
+    title VARCHAR(512) NOT NULL,
+    content TEXT,
+    content_html TEXT,
+    okf_type VARCHAR(30) NOT NULL DEFAULT 'raw_source',
+    summary TEXT,
+    source VARCHAR(512),
+    confidence FLOAT DEFAULT 1.0,
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    effective_at TIMESTAMP WITH TIME ZONE,
+    expire_at TIMESTAMP WITH TIME ZONE,
+    relation_ids BIGINT[],
+    tags TEXT[],
+    file_url VARCHAR(1024),
+    file_name VARCHAR(512),
+    file_size BIGINT,
+    file_mime VARCHAR(100),
+    file_md5 VARCHAR(64),
+    editor_mode VARCHAR(20) NOT NULL DEFAULT 'wysiwyg',
+    created_by BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_by BIGINT,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.knowledge_asset IS 'OKF 标准化知识资产表';
+
+COMMENT ON COLUMN {schema}.knowledge_asset.okf_type IS 'OKF知识类型：raw_source=原始素材 concept=概念 fact=事实 rule=规则 param=参数 process=流程 case=案例';
+
+COMMENT ON COLUMN {schema}.knowledge_asset.status IS '状态：draft=草稿 valid=有效 outdated=过期 banned=禁用';
+
+COMMENT ON COLUMN {schema}.knowledge_asset.tree_node_id IS '关联知识树节点ID';
+
+COMMENT ON COLUMN {schema}.knowledge_asset.confidence IS '可信度 0.0~1.0';
+
+COMMENT ON COLUMN {schema}.knowledge_asset.file_md5 IS '文件 MD5 防重复上传';
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_asset_tree_node ON {schema}.knowledge_asset (tree_node_id);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_asset_okf_type ON {schema}.knowledge_asset (okf_type);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_asset_status ON {schema}.knowledge_asset (status);

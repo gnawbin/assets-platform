@@ -777,3 +777,39 @@ pub struct SidebarMenuItem {
     pub icon: Option<String>,                   // 图标名称
     pub children: Option<Vec<SidebarMenuItem>>, // 子菜单
 }
+
+// ======================== OKF 知识资产 ========================
+
+/// OKF 知识资产（全新 knowledge_asset 表，不与旧 asset_knowledge 冲突）
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct KnowledgeAsset {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub tree_node_id: i64,
+    pub title: String,
+    pub content: Option<String>,
+    pub content_html: Option<String>,
+    pub okf_type: String,
+    pub summary: Option<String>,
+    pub source: Option<String>,
+    pub confidence: Option<f32>,
+    pub status: String,
+    pub effective_at: Option<DateTime<Utc>>,
+    pub expire_at: Option<DateTime<Utc>>,
+    pub relation_ids: Option<Vec<i64>>,
+    pub tags: Option<Vec<String>>,
+    pub file_url: Option<String>,
+    pub file_name: Option<String>,
+    pub file_size: Option<i64>,
+    pub file_mime: Option<String>,
+    pub file_md5: Option<String>,
+    pub editor_mode: String,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
