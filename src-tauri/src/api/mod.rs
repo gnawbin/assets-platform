@@ -15,6 +15,7 @@ pub mod response;
 pub mod role_routes;
 pub mod skill_routes;
 pub mod tenant_routes;
+pub mod upload_routes;
 pub mod user_routes;
 
 use std::net::SocketAddr;
@@ -58,8 +59,33 @@ pub async fn start_http_server(pool: sqlx::PgPool) {
         ])
         .allow_headers(Any);
 
+    // 初始化大文件上传路由（S3 客户端初始化需要 async 上下文）
+    let upload_router = {
+        let s3_config = crate::storage::s3::S3Config::from_env().unwrap_or_default();
+        let s3_client = crate::storage::s3::S3Client::new(s3_config.clone())
+            .await
+            .expect("S3 客户端初始化失败");
+        let upload_mgr =
+            crate::storage::upload::UploadManager::new(pool.clone(), s3_client, s3_config);
+        let state = std::sync::Arc::new(upload_routes::UploadRouterState { upload_mgr });
+        Router::new()
+            .route("/api/upload/init", post(upload_routes::init_upload))
+            .route("/api/upload/{id}/chunk", post(upload_routes::report_chunk))
+            .route(
+                "/api/upload/{id}/progress",
+                get(upload_routes::get_progress),
+            )
+            .route(
+                "/api/upload/{id}/complete",
+                post(upload_routes::complete_upload),
+            )
+            .route("/api/upload/{id}", delete(upload_routes::abort_upload))
+            .with_state(state)
+    };
+
     // 构建路由
     let app = create_router(pool)
+        .merge(upload_router)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
@@ -301,7 +327,7 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     // Swagger UI
     let swagger = SwaggerUi::new("/api/swagger-ui").url("/api/openapi.json", ApiDoc::openapi());
 
-    // 合并所有路由
+    // 合并所有路由（大文件上传路由在 start_http_server 中通过 .merge() 添加）
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)

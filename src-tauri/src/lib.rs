@@ -3,6 +3,7 @@ mod commands;
 mod database;
 mod engine;
 mod service;
+mod storage;
 mod utils;
 
 /// 加载 .env TOML 配置文件，将值设置为环境变量
@@ -208,6 +209,14 @@ pub fn run() {
             commands::process_commands::insert_purchase,
             commands::process_commands::update_purchase,
             commands::process_commands::delete_purchase,
+            // 知识资产（OKF 新表）
+            commands::knowledge_asset_commands::get_knowledge_asset_by_tree_node,
+            commands::knowledge_asset_commands::get_knowledge_asset,
+            commands::knowledge_asset_commands::list_knowledge_assets,
+            commands::knowledge_asset_commands::create_knowledge_asset,
+            commands::knowledge_asset_commands::update_knowledge_asset,
+            commands::knowledge_asset_commands::delete_knowledge_asset,
+            commands::knowledge_asset_commands::attach_file_to_knowledge,
             // 知识库
             commands::knowledge_commands::get_knowledge_tree,
             commands::knowledge_commands::insert_knowledge_node,

@@ -1,7 +1,7 @@
 {
   "name": "assets-platform",
   "private": true,
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "scripts": {
     "start": "node script/install-deps.cjs && pnpm tauri-dev",
@@ -13,7 +13,7 @@
     "tauri-dev": "tauri dev",
     "version:update": "node scripts/update-version.js",
     "setup": "node script/install-deps.cjs",
-    "check": "pnpm tauri-dev --help",
+    "check": "pnpm tauri-dev --helppn",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -34,6 +34,7 @@
     "@mantine/nprogress": "^9.3.1",
     "@mantine/spotlight": "^9.3.1",
     "@mantine/tiptap": "^9.3.1",
+    "@mdxeditor/editor": "^4.0.4",
     "@next/bundle-analyzer": "^16.0.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.218.0",

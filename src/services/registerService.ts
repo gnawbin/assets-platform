@@ -40,10 +40,10 @@ export function getRegistrations(status?: number) {
 
 // 审核通过注册申请
 export function approveRegistration(id: number, approve_by: number, tenant_id: number, approve_remark?: string) {
-    return api.post<RegisterResponse>('approve_registration', { id: String(id), approve_by, tenant_id, approve_remark });
+    return api.post<RegisterResponse>('approve_registration', { id: String(id), approveBy: approve_by, tenantId: tenant_id, approveRemark: approve_remark });
 }
 
 // 驳回注册申请
 export function rejectRegistration(id: number, approve_by: number, approve_remark?: string) {
-    return api.post<RegisterResponse>('reject_registration', { id: String(id), approve_by, approve_remark });
+    return api.post<RegisterResponse>('reject_registration', { id: String(id), approveBy: approve_by, approveRemark: approve_remark });
 }

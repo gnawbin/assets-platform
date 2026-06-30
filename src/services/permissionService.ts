@@ -34,7 +34,7 @@ export interface MantineTree {
 
 /** 获取所有角色（支持按租户筛选和关键词搜索） */
 export function getRoles(tenantId?: string, keyword?: string) {
-    return api.get<Role[]>('get_roles', { tenant_id: tenantId, keyword });
+    return api.get<Role[]>('get_roles', { tenantId, keyword });
 }
 
 /** 新增角色 */
@@ -45,16 +45,16 @@ export function insertRole(params: {
     tenant_id: string;
 }) {
     return api.post<Role>('insert_role', {
-        role_key: params.role_key,
-        role_name: params.role_name,
+        roleKey: params.role_key,
+        roleName: params.role_name,
         description: params.description || null,
-        tenant_id: params.tenant_id,
+        tenantId: params.tenant_id,
     });
 }
 
 /** 删除角色 */
 export function deleteRole(roleId: string) {
-    return api.delete<string>('delete_role', { role_id: roleId });
+    return api.delete<string>('delete_role', { roleId });
 }
 
 /** 获取所有菜单树 */
@@ -64,12 +64,12 @@ export function getAllMenusTree() {
 
 /** 获取角色已分配的菜单 ID 列表 */
 export function getRoleMenuIds(roleId: string) {
-    return api.get<number[]>('get_role_menu_ids', { role_id: roleId });
+    return api.get<number[]>('get_role_menu_ids', { roleId });
 }
 
 /** 分配角色菜单权限 */
 export function assignRoleMenus(roleId: string, menuIds: string[]) {
-    return api.post<string>('assign_role_menus', { role_id: roleId, menu_ids: menuIds });
+    return api.post<string>('assign_role_menus', { roleId, menuIds });
 }
 
 
@@ -80,5 +80,5 @@ export function getUserRoleIds(userId: string) {
 
 /** 为用户分配角色 */
 export function assignUserRoles(userId: string, roleIds: string[]) {
-    return api.post<string>('assign_user_roles', { id: userId, role_ids: roleIds });
+    return api.post<string>('assign_user_roles', { id: userId, roleIds });
 }

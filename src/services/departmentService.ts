@@ -28,7 +28,7 @@ export interface Department {
 export function getDepartments(tenantId?: string) {
     const args: Record<string, unknown> = {};
     if (tenantId) {
-        args.tenant_id = tenantId;
+        args.tenantId = tenantId;
     }
     return api.get<Department[]>('get_departments', args);
 }

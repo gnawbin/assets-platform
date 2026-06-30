@@ -37,7 +37,7 @@ export interface User {
 export function getUsers(tenantId?: number | null, keyword?: string) {
     const args: Record<string, unknown> = {};
     if (tenantId !== undefined && tenantId !== null) {
-        args.tenant_id = tenantId;
+        args.tenantId = tenantId;
     }
     if (keyword) {
         args.keyword = keyword;
@@ -85,7 +85,7 @@ export function updateUser(params: {
 
 /** 删除用户（软删除） */
 export function deleteUser(id: number, currentUserId: number, isSuperAdmin: boolean) {
-    return api.delete<string>('delete_user', { id, current_user_id: currentUserId, is_super_admin: isSuperAdmin });
+    return api.delete<string>('delete_user', { id, currentUserId, isSuperAdmin });
 }
 
 /** 重置密码 */

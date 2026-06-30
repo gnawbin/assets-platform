@@ -6,6 +6,7 @@
 pub mod asset_commands;
 pub mod category_commands;
 pub mod department_commands;
+pub mod knowledge_asset_commands;
 pub mod knowledge_commands;
 pub mod process_commands;
 pub mod register_commands;

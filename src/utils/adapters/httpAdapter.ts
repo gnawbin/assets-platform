@@ -90,6 +90,15 @@ const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     get_user_menus: { method: 'GET', path: '/api/menus/user' },
     get_role_menu_ids: { method: 'GET', path: '/api/roles/{id}/menus' },
     assign_role_menus: { method: 'POST', path: '/api/roles/{id}/menus' },
+
+    // ======================== 知识资产（OKF 新表） ========================
+    get_knowledge_asset_by_tree_node: { method: 'GET', path: '/api/knowledge/asset/by-tree/{treeNodeId}' },
+    get_knowledge_asset: { method: 'GET', path: '/api/knowledge/asset/{id}' },
+    list_knowledge_assets: { method: 'GET', path: '/api/knowledge/assets' },
+    create_knowledge_asset: { method: 'POST', path: '/api/knowledge/asset' },
+    update_knowledge_asset: { method: 'PUT', path: '/api/knowledge/asset/{id}' },
+    delete_knowledge_asset: { method: 'DELETE', path: '/api/knowledge/asset/{id}' },
+    attach_file_to_knowledge: { method: 'POST', path: '/api/knowledge/asset/{assetId}/file' },
 };
 
 // ======================== 工具函数 ========================
