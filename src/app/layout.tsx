@@ -6,6 +6,7 @@ import '@mantine/core/styles.css';
 import { Notifications } from '@mantine/notifications';
 import '@mantine/notifications/styles.css';
 import { useAuthStore } from '@/store/authStore';
+import { useAutoLogout } from '@/hooks/useAutoLogout';
 import { initTelemetry } from '@/utils/telemetry';
 import { logger } from '@/utils/logger';
 import { setAdapter } from '@/utils/adapters';
@@ -18,6 +19,9 @@ export default function RootLayout({
   const pathname = usePathname();
   const router = useRouter();
   const { isLoggedIn, isInitializing, init } = useAuthStore();
+
+  // 用户无操作 3 分钟自动登出
+  useAutoLogout();
 
   // 仅在应用启动时初始化一次 OpenTelemetry
   useEffect(() => {

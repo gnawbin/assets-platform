@@ -123,6 +123,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   init: async () => {
+    // 开发模式下清除 localStorage，模拟新用户首次访问
+    if (process.env.NODE_ENV === 'development') {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      localStorage.removeItem('available_tenants');
+      localStorage.removeItem('selected_tenant_id');
+    }
+
     set({ isInitializing: true });
 
     const storedToken = localStorage.getItem('auth_token');
@@ -180,9 +188,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         return;
       } catch {
-        // 后端服务暂时不可用（Tauri 启动时后端未就绪 / 服务中断）
-        // 不清除 localStorage 缓存，保留用户信息供后续重试
-        // 仅设置 isLoggedIn = false 让应用跳转到登录页
+        // 后端服务不可用（未启动 / 故障 / 重启），清除缓存，直接走登录页
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        localStorage.removeItem('available_tenants');
+        localStorage.removeItem('selected_tenant_id');
         set({
           user: null,
           token: null,
