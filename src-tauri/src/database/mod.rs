@@ -37,6 +37,12 @@ pub fn get_read_pool() -> Result<PgPool> {
     postgres::get_read_pool()
 }
 
+/// 获取当前租户 schema 前缀（例如 "single."）
+pub fn schema_prefix() -> String {
+    let schema = postgres::get_current_schema();
+    format!("{}.", schema)
+}
+
 /// 关闭所有数据库连接
 pub async fn close_all_databases() {
     postgres::close_postgres_pool().await;

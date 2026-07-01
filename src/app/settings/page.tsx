@@ -14,7 +14,6 @@ import {
   IconUsers,
   IconBuildingCommunity,
   IconCategory,
-  IconDatabase,
   IconShield,
   IconSettings,
   IconBuildingStore,
@@ -71,13 +70,6 @@ const settingsItems = [
     icon: IconFileText,
     color: 'cyan',
     href: '/settings/process-design',
-  },
-  {
-    title: '数据库管理',
-    description: '数据库连接配置和状态监控',
-    icon: IconDatabase,
-    color: 'red',
-    href: '/settings/database',
   },
   {
     title: '操作日志',

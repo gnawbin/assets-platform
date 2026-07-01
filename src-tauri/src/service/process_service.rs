@@ -12,12 +12,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use utoipa::ToSchema;
 
-/// 获取当前租户 schema 前缀
-fn schema_prefix() -> String {
-    let schema = database::postgres::get_current_schema();
-    format!("{}.", schema)
-}
-
 // ======================== 领用管理 ========================
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -50,7 +44,7 @@ pub struct AssetReceiveUpdateInput {
 pub async fn get_receives() -> Result<Vec<AssetReceive>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_receive WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
@@ -79,7 +73,7 @@ pub async fn insert_receive(input: AssetReceiveInput) -> Result<AssetReceive, St
         input.asset_id, input.user_id
     );
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         INSERT INTO {}asset_receive (id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, created_by, created_at, updated_by, updated_at, deleted)
@@ -121,7 +115,7 @@ pub async fn update_receive(
 
     info!("更新领用记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         UPDATE {}asset_receive SET
@@ -159,7 +153,7 @@ pub async fn delete_receive(id: i64) -> Result<(), String> {
 
     info!("删除领用记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_receive SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
@@ -215,7 +209,7 @@ pub struct AssetReturnUpdateInput {
 pub async fn get_returns() -> Result<Vec<AssetReturn>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_return WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
@@ -244,7 +238,7 @@ pub async fn insert_return(input: AssetReturnInput) -> Result<AssetReturn, Strin
         input.asset_id, input.user_id
     );
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         INSERT INTO {}asset_return (id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted)
@@ -285,7 +279,7 @@ pub async fn update_return(id: i64, input: AssetReturnUpdateInput) -> Result<Ass
 
     info!("更新归还记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         UPDATE {}asset_return SET
@@ -326,7 +320,7 @@ pub async fn delete_return(id: i64) -> Result<(), String> {
 
     info!("删除归还记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_return SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
@@ -384,7 +378,7 @@ pub struct AssetTransferUpdateInput {
 pub async fn get_transfers() -> Result<Vec<AssetTransfer>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_transfer WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
@@ -410,7 +404,7 @@ pub async fn insert_transfer(input: AssetTransferInput) -> Result<AssetTransfer,
 
     info!("新增调拨记录: asset_id={}", input.asset_id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         INSERT INTO {}asset_transfer (id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, created_by, created_at, updated_by, updated_at, deleted)
@@ -454,7 +448,7 @@ pub async fn update_transfer(
 
     info!("更新调拨记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         UPDATE {}asset_transfer SET
@@ -495,7 +489,7 @@ pub async fn delete_transfer(id: i64) -> Result<(), String> {
 
     info!("删除调拨记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_transfer SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
@@ -559,7 +553,7 @@ pub struct AssetRepairUpdateInput {
 pub async fn get_repairs() -> Result<Vec<AssetRepair>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_repair WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
@@ -585,7 +579,7 @@ pub async fn insert_repair(input: AssetRepairInput) -> Result<AssetRepair, Strin
 
     info!("新增维修记录: asset_id={}", input.asset_id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         INSERT INTO {}asset_repair (id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted)
@@ -631,7 +625,7 @@ pub async fn update_repair(id: i64, input: AssetRepairUpdateInput) -> Result<Ass
 
     info!("更新维修记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         UPDATE {}asset_repair SET
@@ -679,7 +673,7 @@ pub async fn delete_repair(id: i64) -> Result<(), String> {
 
     info!("删除维修记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_repair SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
@@ -725,7 +719,7 @@ pub struct AssetScrapUpdateInput {
 pub async fn get_scraps() -> Result<Vec<AssetScrap>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_scrap WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
@@ -751,7 +745,7 @@ pub async fn insert_scrap(input: AssetScrapInput) -> Result<AssetScrap, String> 
 
     info!("新增报废记录: asset_id={}", input.asset_id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         INSERT INTO {}asset_scrap (id, scrap_no, asset_id, reason, scrap_date, status, handle_user, created_by, created_at, updated_by, updated_at, deleted)
@@ -786,7 +780,7 @@ pub async fn update_scrap(id: i64, input: AssetScrapUpdateInput) -> Result<Asset
 
     info!("更新报废记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         UPDATE {}asset_scrap SET
@@ -823,7 +817,7 @@ pub async fn delete_scrap(id: i64) -> Result<(), String> {
 
     info!("删除报废记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_scrap SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
@@ -889,7 +883,7 @@ pub struct AssetPurchaseUpdateInput {
 pub async fn get_purchases() -> Result<Vec<AssetPurchase>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_purchase WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
@@ -915,7 +909,7 @@ pub async fn insert_purchase(input: AssetPurchaseInput) -> Result<AssetPurchase,
 
     info!("新增采购记录: asset_name={}", input.asset_name);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         INSERT INTO {}asset_purchase (id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted)
@@ -965,7 +959,7 @@ pub async fn update_purchase(
 
     info!("更新采购记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"
         UPDATE {}asset_purchase SET
@@ -1014,7 +1008,7 @@ pub async fn delete_purchase(id: i64) -> Result<(), String> {
 
     info!("删除采购记录: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_purchase SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix

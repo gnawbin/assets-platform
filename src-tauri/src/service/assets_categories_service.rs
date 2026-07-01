@@ -3,16 +3,10 @@ use crate::database::models::AssetCategory;
 use crate::utils::snowflake::next_id;
 use tracing::{error, info};
 
-/// 获取当前租户 schema 前缀
-fn schema_prefix() -> String {
-    let schema = database::postgres::get_current_schema();
-    format!("{}.", schema)
-}
-
 /// 获取所有资产类别列表
 pub async fn get_categories() -> Result<Vec<AssetCategory>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM {}asset_category where deleted=0 ORDER BY sort ASC",
         prefix
@@ -33,7 +27,7 @@ pub async fn get_categories() -> Result<Vec<AssetCategory>, String> {
 //获取资产类别最高级别的列表
 pub async fn get_super_categories() -> Result<Vec<AssetCategory>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM {}asset_category WHERE parent_id IS NULL AND deleted=0 ORDER BY sort ASC",
         prefix
@@ -59,7 +53,7 @@ pub async fn insert_category(category: &AssetCategory) -> Result<AssetCategory, 
         category.category_name, category.asset_type
     );
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"INSERT INTO {}asset_category (id,category_name, asset_type, parent_id, sort, description, created_by, updated_by,created_at,updated_at,deleted)
         VALUES ($1, $2, $3, $4, $5, $6, $7,$8, NOW(), NOW(),0)
@@ -99,7 +93,7 @@ pub async fn update_category(category: &AssetCategory) -> Result<AssetCategory, 
         category.id, category.category_name
     );
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         r#"UPDATE {}asset_category
         SET category_name = $2, asset_type = $3, parent_id = $4, sort = $5, description = $6, updated_by = $7, updated_at = NOW(),deleted=0
@@ -133,7 +127,7 @@ pub async fn delete_category(id: i64) -> Result<(), String> {
 
     info!("删除资产类别: id={}", id);
 
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
     let sql = format!(
         "UPDATE {}asset_category SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
