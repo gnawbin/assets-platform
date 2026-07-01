@@ -17,7 +17,7 @@ export default function RootLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isLoggedIn, init } = useAuthStore();
+  const { isLoggedIn, isInitializing, init } = useAuthStore();
 
   // 仅在应用启动时初始化一次 OpenTelemetry
   useEffect(() => {
@@ -62,6 +62,11 @@ export default function RootLayout({
   }, [init]);
 
   useEffect(() => {
+    // 初始化完成前不做任何路由跳转，避免竞态条件
+    if (isInitializing) {
+      return;
+    }
+
     // 如果未登录且不在登录页面，重定向到登录页
     if (!isLoggedIn && pathname !== '/login') {
       logger.info('未登录，重定向到登录页');
@@ -72,7 +77,7 @@ export default function RootLayout({
       logger.info('已登录，重定向到首页');
       router.push('/');
     }
-  }, [isLoggedIn, pathname, router]);
+  }, [isLoggedIn, isInitializing, pathname, router]);
 
   return (
     <html lang="zh-CN">

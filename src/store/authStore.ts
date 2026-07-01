@@ -34,6 +34,7 @@ interface AuthState {
   user: UserInfo | null;
   token: string | null;
   isLoggedIn: boolean;
+  isInitializing: boolean;
   availableTenants: TenantInfo[];
   selectedTenantId: number | null;
   login: (result: LoginResult) => void;
@@ -64,6 +65,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: null,
   isLoggedIn: false,
+  isInitializing: true,
   availableTenants: [],
   selectedTenantId: null,
 
@@ -121,6 +123,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   init: async () => {
+    set({ isInitializing: true });
+
     const storedToken = localStorage.getItem('auth_token');
     const storedUser = localStorage.getItem('auth_user');
     const storedTenants = localStorage.getItem('available_tenants');
@@ -138,6 +142,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           user: null,
           token: null,
           isLoggedIn: false,
+          isInitializing: false,
           availableTenants: [],
           selectedTenantId: null,
         });
@@ -153,6 +158,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           user: freshUser,
           token: storedToken,
           isLoggedIn: true,
+          isInitializing: false,
           availableTenants: storedTenants ? JSON.parse(storedTenants) : [],
           selectedTenantId: storedSelectedTenant ? Number(storedSelectedTenant) : null,
         });
@@ -174,38 +180,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         return;
       } catch {
-        // 后端请求失败，降级使用 localStorage 的缓存
-        try {
-          const user = JSON.parse(storedUser) as UserInfo;
-          set({
-            user,
-            token: storedToken,
-            isLoggedIn: true,
-            availableTenants: storedTenants ? JSON.parse(storedTenants) : [],
-            selectedTenantId: storedSelectedTenant ? Number(storedSelectedTenant) : null,
-          });
-
-          // 也尝试恢复后端缓存
-          if (storedSelectedTenant) {
-            const tenantId = Number(storedSelectedTenant);
-            if (!isNaN(tenantId)) {
-              try {
-                await api.post('switch_tenant', {
-                  user_id: String(user.id ?? ''),
-                  tenant_id: storedSelectedTenant,
-                });
-              } catch {
-                // 静默处理
-              }
-            }
-          }
-        } catch {
-          localStorage.removeItem('auth_token');
-          localStorage.removeItem('auth_user');
-          localStorage.removeItem('available_tenants');
-          localStorage.removeItem('selected_tenant_id');
-        }
+        // 后端服务暂时不可用（Tauri 启动时后端未就绪 / 服务中断）
+        // 不清除 localStorage 缓存，保留用户信息供后续重试
+        // 仅设置 isLoggedIn = false 让应用跳转到登录页
+        set({
+          user: null,
+          token: null,
+          isLoggedIn: false,
+          isInitializing: false,
+          availableTenants: [],
+          selectedTenantId: null,
+        });
       }
     }
+
+    set({ isInitializing: false });
   },
 }));
