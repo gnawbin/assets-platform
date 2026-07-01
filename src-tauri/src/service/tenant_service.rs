@@ -3,7 +3,7 @@
 //! 提供租户的增删改查功能，新增租户时自动创建对应的 PostgreSQL schema
 //! 并初始化业务表结构和默认数据。
 
-use crate::database::models::SysTenant;
+use crate::database::models::{SysTenant, TenantInfo};
 use crate::database::{get_read_pool, get_write_pool};
 use crate::utils::snowflake::next_id;
 use serde::{Deserialize, Serialize};
@@ -307,39 +307,161 @@ pub async fn delete_tenant(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// 切换租户 schema
+/// 切换租户 schema（带权限校验）
 ///
-/// 根据租户ID切换到对应的 schema。
-/// 如果 tenant_id = 1（默认租户），切换到 public schema。
-pub async fn switch_tenant(tenant_id: i64) -> Result<String, String> {
+/// 1. 校验用户是否有权访问该租户
+/// 2. 更新 USER_TENANT_CACHE
+/// 3. 返回租户信息
+pub async fn switch_tenant(user_id: i64, tenant_id: i64) -> Result<TenantInfo, String> {
     let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
 
-    info!("切换租户: tenant_id={}", tenant_id);
+    info!("切换租户: user_id={}, tenant_id={}", user_id, tenant_id);
 
-    if tenant_id == 1 {
-        // 默认租户，切换到 public
-        crate::database::postgres::set_current_schema("public");
-        info!("已切换到 public schema（默认租户）");
-        Ok("public".to_string())
-    } else {
-        // 查询租户的 schema 名称
-        let schema_name = sqlx::query_scalar::<_, String>(
-            "SELECT schema_name FROM public.sys_tenant WHERE id = $1 AND enable = true",
+    // 1. 检查用户是否是超级管理员
+    let is_super_admin: bool =
+        sqlx::query_scalar::<_, bool>("SELECT is_super_admin FROM public.sys_user WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("查询用户失败: {}", e))?
+            .ok_or("用户不存在")?;
+
+    // 2. 校验权限
+    if !is_super_admin {
+        let has_access: Option<bool> = sqlx::query_scalar::<_, Option<bool>>(
+            "SELECT EXISTS(SELECT 1 FROM public.sys_user_tenant WHERE user_id = $1 AND tenant_id = $2)"
         )
+        .bind(user_id)
         .bind(tenant_id)
-        .fetch_optional(&pool)
+        .fetch_one(&pool)
         .await
-        .map_err(|e| {
-            error!("查询租户 schema 失败: tenant_id={}, error={}", tenant_id, e);
-            format!("查询租户信息失败: {}", e)
-        })?
-        .ok_or_else(|| {
-            warn!("租户不存在或已禁用: tenant_id={}", tenant_id);
-            "租户不存在或已禁用".to_string()
-        })?;
+        .map_err(|e| format!("查询权限失败: {}", e))?;
 
-        crate::database::postgres::set_current_schema(&schema_name);
-        info!("已切换到租户 schema: {}", schema_name);
-        Ok(schema_name)
+        if !has_access.unwrap_or(false) {
+            return Err("无权访问该租户".to_string());
+        }
     }
+
+    // 3. 查询 schema_name + 租户信息
+    let schema_name = crate::database::postgres::get_schema_by_tenant_id(&pool, tenant_id).await?;
+
+    // 4. 更新 USER_TENANT_CACHE
+    let cache = crate::database::postgres::get_user_tenant_cache();
+    cache.insert(user_id, tenant_id);
+
+    // 5. 更新 GLOBAL_SCHEMA（Tauri 模式使用，不经过 HTTP 中间件）
+    crate::database::set_global_schema(schema_name.clone());
+
+    // 5. 查询租户信息返回
+    let tenant = sqlx::query_as::<_, SysTenant>(
+        "SELECT id, tenant_name, parent_id, is_leaf, schema_name, enable, create_at, updated_at
+         FROM public.sys_tenant WHERE id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_one(&pool)
+    .await
+    .map_err(|e| format!("查询租户信息失败: {}", e))?;
+
+    info!("切换租户成功: user_id={}, tenant_id={}", user_id, tenant_id);
+    Ok(TenantInfo {
+        id: tenant.id,
+        tenant_name: tenant.tenant_name,
+        schema_name: tenant.schema_name,
+        is_current: true,
+    })
+}
+
+/// 为用户分配租户（覆盖式）
+///
+/// 事务：删除旧关联 → 插入新关联
+pub async fn assign_user_tenants(
+    user_id: i64,
+    tenant_ids: &[i64],
+    current_user_id: i64,
+) -> Result<(), String> {
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+
+    info!(
+        "为用户分配租户: user_id={}, tenant_ids={:?}",
+        user_id, tenant_ids
+    );
+
+    // 事务：删除旧关联 → 插入新关联
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    sqlx::query("DELETE FROM public.sys_user_tenant WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("删除旧关联失败: {}", e))?;
+
+    for tid in tenant_ids {
+        sqlx::query(
+            "INSERT INTO public.sys_user_tenant (id, user_id, tenant_id, created_by)
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(crate::utils::snowflake::next_id() as i64)
+        .bind(user_id)
+        .bind(tid)
+        .bind(current_user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("插入关联失败: {}", e))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
+
+    info!("为用户分配租户成功: user_id={}", user_id);
+    Ok(())
+}
+
+/// 获取用户可访问的租户列表
+pub async fn get_user_tenants(user_id: i64) -> Result<Vec<TenantInfo>, String> {
+    let pool = get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+
+    // 先判断用户是否是超级管理员
+    let is_super_admin: bool =
+        sqlx::query_scalar::<_, bool>("SELECT is_super_admin FROM public.sys_user WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("查询用户失败: {}", e))?
+            .unwrap_or(false);
+
+    let tenants: Vec<SysTenant> = if is_super_admin {
+        sqlx::query_as::<_, SysTenant>(
+            "SELECT id, tenant_name, parent_id, is_leaf, schema_name, enable, create_at, updated_at
+             FROM public.sys_tenant WHERE enable = true ORDER BY id ASC",
+        )
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| format!("查询租户列表失败: {}", e))?
+    } else {
+        sqlx::query_as::<_, SysTenant>(
+            "SELECT t.id, t.tenant_name, t.parent_id, t.is_leaf, t.schema_name, t.enable, t.create_at, t.updated_at
+             FROM public.sys_user_tenant ut
+             JOIN public.sys_tenant t ON t.id = ut.tenant_id
+             WHERE ut.user_id = $1 AND t.enable = true
+             ORDER BY t.id ASC"
+        )
+        .bind(user_id)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| format!("查询用户租户列表失败: {}", e))?
+    };
+
+    Ok(tenants
+        .into_iter()
+        .map(|t| TenantInfo {
+            id: t.id,
+            tenant_name: t.tenant_name,
+            schema_name: t.schema_name,
+            is_current: false,
+        })
+        .collect())
 }

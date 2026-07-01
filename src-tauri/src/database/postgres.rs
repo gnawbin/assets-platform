@@ -4,6 +4,7 @@
 //! 支持读写分离：主库（写）+ 多个从库（读，加权轮询负载均衡）
 
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -329,21 +330,58 @@ impl PgPoolManager {
 /// 全局读写分离连接池管理器
 static PG_POOL_MANAGER: OnceLock<RwLock<Option<PgPoolManager>>> = OnceLock::new();
 
-/// 当前租户 schema 名称（初始化时设置）
-static CURRENT_SCHEMA: OnceLock<RwLock<String>> = OnceLock::new();
+// ======================== 租户缓存（DashMap） ========================
 
-/// 获取当前租户 schema 名称
-pub fn get_current_schema() -> String {
-    CURRENT_SCHEMA
-        .get()
-        .map(|lock| lock.read().unwrap().clone())
-        .unwrap_or_else(|| "public".to_string())
+/// 租户 ID → schema_name 缓存（应用启动时预加载，运行时惰性填充）
+static SCHEMA_CACHE: OnceLock<DashMap<i64, String>> = OnceLock::new();
+
+/// 用户 ID → 当前选中租户 ID 缓存（登录/切换时更新）
+static USER_TENANT_CACHE: OnceLock<DashMap<i64, i64>> = OnceLock::new();
+
+/// 获取 schema 缓存实例
+pub fn get_schema_cache() -> &'static DashMap<i64, String> {
+    SCHEMA_CACHE.get_or_init(|| DashMap::new())
 }
 
-/// 设置当前租户 schema 名称
-pub fn set_current_schema(schema: &str) {
-    let lock = CURRENT_SCHEMA.get_or_init(|| RwLock::new("public".to_string()));
-    *lock.write().unwrap() = schema.to_string();
+/// 获取用户租户缓存实例
+pub fn get_user_tenant_cache() -> &'static DashMap<i64, i64> {
+    USER_TENANT_CACHE.get_or_init(|| DashMap::new())
+}
+
+/// 根据租户ID获取 schema 名称（先查缓存，未命中则查DB）
+pub async fn get_schema_by_tenant_id(pool: &PgPool, tenant_id: i64) -> Result<String, String> {
+    let cache = get_schema_cache();
+    if let Some(schema) = cache.get(&tenant_id) {
+        return Ok(schema.clone());
+    }
+    // 缓存未命中，查数据库
+    let schema = sqlx::query_scalar::<_, String>(
+        "SELECT schema_name FROM public.sys_tenant WHERE id = $1 AND enable = true",
+    )
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("查询租户 schema 失败: {}", e))?
+    .ok_or_else(|| "租户不存在或已禁用".to_string())?;
+    // 写入缓存
+    cache.insert(tenant_id, schema.clone());
+    Ok(schema)
+}
+
+/// 预加载 SCHEMA_CACHE（应用启动时调用）
+pub async fn preload_schema_cache(pool: &PgPool) -> Result<()> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, schema_name FROM public.sys_tenant WHERE enable = true AND schema_name IS NOT NULL"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| anyhow!("预加载 schema 缓存失败: {}", e))?;
+    let cache = get_schema_cache();
+    for (id, schema) in &rows {
+        cache.insert(*id, schema.clone());
+    }
+    tracing::info!("预加载 {} 个租户 schema 到缓存", rows.len());
+    Ok(())
 }
 
 /// 确保目标数据库存在，若不存在则自动创建
@@ -729,9 +767,8 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     tracing::info!("正在初始化租户 '{}' 默认数据...", schema);
     init_tenant_default_data(&pool, &schema).await?;
 
-    // 11. 设置当前 schema（供 service 层查询使用）
-    set_current_schema(&schema);
-    tracing::info!("当前租户 schema 已设置为: {}", schema);
+    // 11. 预加载 schema 缓存（供 middleware/ service 层使用）
+    preload_schema_cache(&pool).await?;
 
     tracing::info!("数据库初始化完成！");
     Ok(())

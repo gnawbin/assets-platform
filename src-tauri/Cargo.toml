@@ -41,7 +41,7 @@ opentelemetry_sdk = {version = "0.32.1", features = [
 tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
 
 argon2 = "0.5.3" # 最强密码哈希
-password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具            
+password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具             
 rand = {version = "0.10.1", features = ["std_rng"] } 
 # Tauri 核心（最小特性集）
 tauri = {version = "2.11.3", default-features = false, features = ["wry"] }
@@ -130,6 +130,7 @@ aws-sdk-s3 = {version = "1.60", default-features = false, features = ["rustls"] 
 anyhow = "1.0.103"
 chrono = {version = "0.4", default-features = false, features = ["serde"] }
 config = {version = "0.15.25", default-features = false}
+dashmap = "6.1.0"
 once_cell = "1.21.4"
 opa-wasm = "0.2.1"
 toml = "1.1.2+spec-1.1.0"

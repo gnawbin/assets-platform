@@ -1,9 +1,10 @@
-use crate::database::models::SysUser;
+use crate::database::models::{SysTenant, SysUser, TenantInfo};
 use crate::database::{get_read_pool, get_write_pool};
 use crate::utils::password_secret::{hash_password, verify_password};
 use crate::utils::snowflake::next_id;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use tracing::{error, info, warn};
 use utoipa::ToSchema;
 
@@ -39,6 +40,8 @@ pub struct LoginResponse {
     pub tenant_id: Option<i64>,
     /// JWT Token，用于后续请求的身份验证
     pub token: String,
+    /// 用户可访问的租户列表
+    pub available_tenants: Vec<TenantInfo>,
 }
 
 /// 用户列表响应（不包含密码）
@@ -98,6 +101,50 @@ impl From<SysUser> for UserResponse {
     }
 }
 
+/// 查询用户可访问的租户列表
+async fn get_available_tenants(pool: &PgPool, user: &SysUser) -> Result<Vec<TenantInfo>, String> {
+    let tenants: Vec<SysTenant> = if user.is_super_admin {
+        // 超级管理员：返回所有启用的租户
+        sqlx::query_as::<_, SysTenant>(
+            "SELECT id, tenant_name, parent_id, is_leaf, schema_name, enable, create_at, updated_at
+             FROM public.sys_tenant WHERE enable = true ORDER BY id ASC",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            error!("查询租户列表失败: {}", e);
+            format!("查询租户列表失败: {}", e)
+        })?
+    } else {
+        // 普通用户：从 sys_user_tenant 关联表查询
+        sqlx::query_as::<_, SysTenant>(
+            "SELECT t.id, t.tenant_name, t.parent_id, t.is_leaf, t.schema_name, t.enable, t.create_at, t.updated_at
+             FROM public.sys_user_tenant ut
+             JOIN public.sys_tenant t ON t.id = ut.tenant_id
+             WHERE ut.user_id = $1 AND t.enable = true
+             ORDER BY t.id ASC"
+        )
+        .bind(user.id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            error!("查询用户租户列表失败: {}", e);
+            format!("查询用户租户列表失败: {}", e)
+        })?
+    };
+
+    let current_tenant_id = user.tenant_id;
+    Ok(tenants
+        .into_iter()
+        .map(|t| TenantInfo {
+            id: t.id,
+            tenant_name: t.tenant_name,
+            schema_name: t.schema_name,
+            is_current: Some(t.id) == current_tenant_id,
+        })
+        .collect())
+}
+
 /// 用户登录
 pub async fn login(username: &str, password: &str) -> Result<LoginResponse, String> {
     let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
@@ -138,34 +185,36 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         return Err("用户名或密码错误".to_string());
     }
 
-    // 登录成功后，根据用户所属租户自动切换 schema
-    // 如果 tenant_id = 1（默认租户），保持 public schema
-    // 否则切换到对应租户的 schema
-    if let Some(tenant_id) = user.tenant_id {
-        if tenant_id != 1 {
-            let schema: Option<String> = sqlx::query_scalar(
-                "SELECT schema_name FROM public.sys_tenant WHERE id = $1 AND enable = true",
-            )
-            .bind(tenant_id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|e| {
-                error!("查询租户 schema 失败: tenant_id={}, error={}", tenant_id, e);
-                format!("查询租户信息失败: {}", e)
-            })?;
+    // 查询用户可访问的租户列表
+    let available_tenants = get_available_tenants(&pool, &user).await?;
 
-            if let Some(schema_name) = schema {
-                crate::database::postgres::set_current_schema(&schema_name);
-                info!("用户 '{}' 已切换到租户 schema: {}", username, schema_name);
+    // 更新 USER_TENANT_CACHE（用户当前选中租户）
+    // 同时更新 GLOBAL_SCHEMA（Tauri 模式使用）
+    let cache = crate::database::postgres::get_user_tenant_cache();
+    if let Some(tenant_id) = user.tenant_id {
+        cache.insert(user.id, tenant_id);
+        // 查询并设置全局 schema
+        if let Some(tenant) = available_tenants.iter().find(|t| t.id == tenant_id) {
+            if let Some(ref sn) = tenant.schema_name {
+                crate::database::set_global_schema(sn.clone());
             }
-        } else {
-            // 默认租户（id=1），切换到 public
-            crate::database::postgres::set_current_schema("public");
-            info!("用户 '{}' 使用 public schema（默认租户）", username);
         }
-    } else {
-        // 没有 tenant_id，使用 public
-        crate::database::postgres::set_current_schema("public");
+        info!(
+            "用户 '{}' 已设置当前租户: tenant_id={}",
+            username, tenant_id
+        );
+    } else if user.is_super_admin && !available_tenants.is_empty() {
+        // 超级管理员没有 tenant_id，默认选中第一个可用租户
+        let first_tenant = &available_tenants[0];
+        cache.insert(user.id, first_tenant.id);
+        // 设置全局 schema
+        if let Some(ref sn) = first_tenant.schema_name {
+            crate::database::set_global_schema(sn.clone());
+        }
+        info!(
+            "超级管理员 '{}' 已默认选中第一个租户: tenant_id={}",
+            username, first_tenant.id
+        );
     }
 
     info!(
@@ -196,7 +245,7 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
     )
     .map_err(|e| format!("生成Token失败: {}", e))?;
 
-    // 返回用户信息（不含密码）+ JWT Token
+    // 返回用户信息（不含密码）+ JWT Token + available_tenants
     Ok(LoginResponse {
         id: user.id,
         username: user.username,
@@ -210,6 +259,7 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         avatar: user.avatar,
         tenant_id: user.tenant_id,
         token,
+        available_tenants,
     })
 }
 
