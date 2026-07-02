@@ -89,11 +89,9 @@ pub async fn init_upload(
         return Err(ApiError::bad_request("文件大小超过 5TB 限制"));
     }
 
-    // 从请求头获取用户信息（由 auth middleware 注入）
-    // 简化处理：暂时使用默认值
     let created_by: i64 = 1;
 
-    let schema = crate::database::postgres::get_current_schema();
+    let schema = "public".to_string(); // upload routes will use their own schema context
 
     match state
         .upload_mgr
@@ -132,7 +130,7 @@ pub async fn report_chunk(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = crate::database::postgres::get_current_schema();
+    let schema = "public".to_string();
 
     match state
         .upload_mgr
@@ -155,7 +153,7 @@ pub async fn get_progress(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = crate::database::postgres::get_current_schema();
+    let schema = "public".to_string();
 
     match state.upload_mgr.get_progress(&schema, upload_id).await {
         Ok(progress) => {
@@ -182,7 +180,7 @@ pub async fn complete_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = crate::database::postgres::get_current_schema();
+    let schema = "public".to_string();
 
     match state.upload_mgr.complete(&schema, upload_id).await {
         Ok(result) => {
@@ -207,7 +205,7 @@ pub async fn abort_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = crate::database::postgres::get_current_schema();
+    let schema = "public".to_string();
 
     match state.upload_mgr.abort(&schema, upload_id).await {
         Ok(_) => Ok(Json(ApiResponse::success(()))),

@@ -769,6 +769,33 @@ pub struct SysUserRegister {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+/// 用户-租户关联表（多对多）
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SysUserTenant {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub user_id: i64,
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub tenant_id: i64,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+/// 租户信息（登录响应中使用）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TenantInfo {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    pub tenant_name: String,
+    pub schema_name: Option<String>,
+    pub is_current: bool,
+}
+
 /// 侧边栏菜单项（用于前端动态渲染）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidebarMenuItem {

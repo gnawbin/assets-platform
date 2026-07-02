@@ -7,16 +7,10 @@ use crate::database;
 use crate::database::models::KnowledgeAsset;
 use tracing::{error, info};
 
-/// 获取当前租户 schema 前缀
-fn schema_prefix() -> String {
-    let schema = database::postgres::get_current_schema();
-    format!("{}.", schema)
-}
-
 /// 根据 tree_node_id 获取关联的知识资产
 pub async fn get_knowledge_asset_by_tree_node(tree_node_id: i64) -> Result<KnowledgeAsset, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     let sql = format!(
         "SELECT id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_asset WHERE tree_node_id = $1 AND (deleted IS NULL OR deleted = 0)",
@@ -40,7 +34,7 @@ pub async fn get_knowledge_asset_by_tree_node(tree_node_id: i64) -> Result<Knowl
 /// 获取单条知识资产
 pub async fn get_knowledge_asset(id: i64) -> Result<KnowledgeAsset, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     let sql = format!(
         "SELECT id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_asset WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
@@ -64,7 +58,7 @@ pub async fn list_knowledge_assets(
     tags: Option<Vec<String>>,
 ) -> Result<Vec<KnowledgeAsset>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     let mut sql = format!(
         "SELECT id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_asset WHERE (deleted IS NULL OR deleted = 0)",
@@ -91,7 +85,7 @@ pub async fn list_knowledge_assets(
 /// 创建知识资产
 pub async fn create_knowledge_asset(asset: &KnowledgeAsset) -> Result<KnowledgeAsset, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("新增知识资产: title={}", asset.title);
 
@@ -143,7 +137,7 @@ pub async fn update_knowledge_asset(
     updated_by: Option<i64>,
 ) -> Result<KnowledgeAsset, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("更新知识资产: id={}", id);
 
@@ -195,7 +189,7 @@ pub async fn update_knowledge_asset(
 /// 删除知识资产（软删除）
 pub async fn delete_knowledge_asset(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("删除知识资产: id={}", id);
 
@@ -226,7 +220,7 @@ pub async fn attach_file_to_asset(
     file_md5: &str,
 ) -> Result<KnowledgeAsset, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!(
         "绑定文件到知识资产: asset_id={}, file={}",

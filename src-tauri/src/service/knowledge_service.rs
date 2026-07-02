@@ -8,18 +8,12 @@ use crate::database::models::{AssetKnowledge, KnowledgeTree, KnowledgeTreeNode};
 use crate::utils::snowflake::next_id;
 use tracing::{error, info};
 
-/// 获取当前租户 schema 前缀
-fn schema_prefix() -> String {
-    let schema = database::postgres::get_current_schema();
-    format!("{}.", schema)
-}
-
 // ======================== 知识树节点 ========================
 
 /// 获取完整知识树（返回树形结构）
 pub async fn get_knowledge_tree() -> Result<Vec<KnowledgeTreeNode>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("获取知识树被调用");
 
@@ -81,7 +75,7 @@ pub async fn insert_knowledge_node(
     created_by: Option<i64>,
 ) -> Result<KnowledgeTree, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("新增知识树节点: title={}, type={}", title, node_type);
 
@@ -123,7 +117,7 @@ pub async fn update_knowledge_node(
     updated_by: Option<i64>,
 ) -> Result<KnowledgeTree, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("更新知识树节点: id={}", id);
 
@@ -171,7 +165,7 @@ pub async fn update_knowledge_node(
 /// 删除知识树节点（软删除）
 pub async fn delete_knowledge_node(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("删除知识树节点: id={}", id);
 
@@ -199,7 +193,7 @@ pub async fn move_knowledge_node(
     new_parent_id: Option<i64>,
 ) -> Result<KnowledgeTree, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!(
         "移动知识树节点: id={}, new_parent_id={:?}",
@@ -232,7 +226,7 @@ pub async fn get_knowledge_list(
     keyword: Option<String>,
 ) -> Result<Vec<AssetKnowledge>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("获取知识条目列表被调用");
 
@@ -272,7 +266,7 @@ pub async fn get_knowledge_list(
 /// 获取单条知识条目
 pub async fn get_knowledge_by_id(id: i64) -> Result<AssetKnowledge, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     let sql = format!(
         "SELECT id, asset_id, doc_source, knowledge_type, title, content, chunk_index, vector_data, permission_level, owner_type, owner_id, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_knowledge WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
@@ -301,7 +295,7 @@ pub async fn insert_knowledge(
     created_by: Option<i64>,
 ) -> Result<AssetKnowledge, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("新增知识条目: title={}", title);
 
@@ -343,7 +337,7 @@ pub async fn update_knowledge(
     updated_by: Option<i64>,
 ) -> Result<AssetKnowledge, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("更新知识条目: id={}", id);
 
@@ -391,7 +385,7 @@ pub async fn update_knowledge(
 /// 删除知识条目（软删除）
 pub async fn delete_knowledge(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+    let prefix = database::schema_prefix();
 
     info!("删除知识条目: id={}", id);
 

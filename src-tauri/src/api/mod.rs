@@ -203,6 +203,12 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/tenants", post(tenant_routes::insert_tenant))
         .route("/api/tenants/{id}", put(tenant_routes::update_tenant))
         .route("/api/tenants/{id}", delete(tenant_routes::delete_tenant))
+        .route("/api/tenants/switch", post(tenant_routes::switch_tenant))
+        .route("/api/tenants/assign", post(tenant_routes::assign_tenants))
+        .route(
+            "/api/users/{id}/tenants",
+            get(tenant_routes::get_user_tenants),
+        )
         // 注册审核
         .route(
             "/api/auth/registrations",

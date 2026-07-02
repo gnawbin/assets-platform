@@ -1,8 +1,8 @@
 /**
  * 大文件分片上传 API 服务
  *
- * 纯 API 封装，不依赖任何 UI 框架。
- * 封装 S3 原生分片上传的 5 个核心接口：
+ * 封装 S3 原生分片上传的 5 个核心接口。
+ * 通过 HTTP fetch 直接调用后端 API（上传接口只有 HTTP 路由，没有 Tauri 命令）。
  * - init: 初始化分片上传
  * - uploadChunk: 上传单个分片到 S3 Presigned URL
  * - reportChunk: 上报分片完成
@@ -43,8 +43,12 @@ export interface ReportChunkRequest {
 export class UploadService {
   private baseUrl: string;
 
-  constructor(baseUrl = '/api') {
-    this.baseUrl = baseUrl;
+  constructor() {
+    // 上传接口只有 HTTP 路由（无 Tauri 命令），直接调用后端 HTTP API
+    const envBaseUrl = typeof process !== 'undefined'
+      ? process.env?.NEXT_PUBLIC_API_BASE_URL
+      : undefined;
+    this.baseUrl = envBaseUrl || 'http://localhost:3001/api';
   }
 
   /** 初始化分片上传 */

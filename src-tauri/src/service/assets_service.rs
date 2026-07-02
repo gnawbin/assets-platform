@@ -317,7 +317,9 @@ fn row_to_intangible_view(row: &sqlx::postgres::PgRow) -> IntangibleAssetView {
 
 // ======================== 固定资产 CRUD ========================
 
-const HARDWARE_SELECT_SQL: &str = r#"
+fn hardware_select_sql(prefix: &str) -> String {
+    format!(
+        r#"
 SELECT
     a.id, a.asset_no, a.asset_type, a.category_id, a.asset_name,
     a.manufacturer, a.model, a.department_id, a.user_id, a.status,
@@ -327,16 +329,23 @@ SELECT
     h.id as hard_id, h.sn, h.mac_address, h.location, h.hardware_config,
     h.use_user_id, h.use_start_date::text as use_start_date, h.maintenance_vendor,
     h.maintenance_type, h.maintenance_expire_date::text as maintenance_expire_date, h.fault_desc
-FROM assets a
-LEFT JOIN hard_assets h ON h.asset_id = a.id AND (h.deleted IS NULL OR h.deleted = 0)
+FROM {}assets a
+LEFT JOIN {}hard_assets h ON h.asset_id = a.id AND (h.deleted IS NULL OR h.deleted = 0)
 WHERE a.asset_type = 'fixed' AND (a.deleted IS NULL OR a.deleted = 0)
-"#;
+"#,
+        prefix, prefix
+    )
+}
 
 /// 获取所有固定资产列表（JOIN assets + hard_assets）
 pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
 
-    let sql = format!("{} ORDER BY a.created_at DESC", HARDWARE_SELECT_SQL);
+    let sql = format!(
+        "{} ORDER BY a.created_at DESC",
+        hardware_select_sql(&prefix)
+    );
     let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
         error!("查询固定资产列表失败: {}", e);
         format!("查询固定资产失败: {}", e)
@@ -354,6 +363,7 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
     let asset_id = next_id() as i64;
     let hard_id = next_id() as i64;
     let asset_no = format!("{}", next_id());
+    let prefix = database::schema_prefix();
 
     info!(
         "新增固定资产: name={}, category_id={}",
@@ -361,62 +371,66 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
     );
 
     // 插入 assets 主表
-    sqlx::query(
+    let sql = format!(
         r#"
-        INSERT INTO assets (id, asset_no, asset_type, category_id, asset_name, manufacturer, model,
+        INSERT INTO {}assets (id, asset_no, asset_type, category_id, asset_name, manufacturer, model,
             department_id, user_id, status, purchase_date, purchase_price, quantity, used_quantity,
             expire_date, description, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, 'fixed', $3, $4, $5, $6, $7, $8, $9,
             $10::timestamp, $11, $12, $13, $14::timestamp, $15,
             $16, NOW(), $16, NOW(), 0)
         "#,
-    )
-    .bind(asset_id)
-    .bind(&asset_no)
-    .bind(input.category_id)
-    .bind(&input.asset_name)
-    .bind(&input.manufacturer)
-    .bind(&input.model)
-    .bind(input.department_id)
-    .bind(input.user_id)
-    .bind(input.status.unwrap_or(0))
-    .bind(&input.purchase_date)
-    .bind(input.purchase_price)
-    .bind(input.quantity)
-    .bind(input.used_quantity)
-    .bind(&input.expire_date)
-    .bind(&input.description)
-    .bind(1i64) // created_by 暂时写1
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("插入资产主表失败: {}", e))?;
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(asset_id)
+        .bind(&asset_no)
+        .bind(input.category_id)
+        .bind(&input.asset_name)
+        .bind(&input.manufacturer)
+        .bind(&input.model)
+        .bind(input.department_id)
+        .bind(input.user_id)
+        .bind(input.status.unwrap_or(0))
+        .bind(&input.purchase_date)
+        .bind(input.purchase_price)
+        .bind(input.quantity)
+        .bind(input.used_quantity)
+        .bind(&input.expire_date)
+        .bind(&input.description)
+        .bind(1i64) // created_by 暂时写1
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("插入资产主表失败: {}", e))?;
 
     // 插入 hard_assets 扩展表
-    sqlx::query(
+    let sql = format!(
         r#"
-        INSERT INTO hard_assets (id, asset_id, sn, mac_address, location, hardware_config,
+        INSERT INTO {}hard_assets (id, asset_id, sn, mac_address, location, hardware_config,
             use_user_id, use_start_date, maintenance_vendor, maintenance_type,
             maintenance_expire_date, fault_desc, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10,
             $11::timestamp, $12, $13, NOW(), $13, NOW(), 0)
         "#,
-    )
-    .bind(hard_id)
-    .bind(asset_id)
-    .bind(&input.sn)
-    .bind(&input.mac_address)
-    .bind(&input.location)
-    .bind(&input.hardware_config)
-    .bind(input.use_user_id)
-    .bind(&input.use_start_date)
-    .bind(&input.maintenance_vendor)
-    .bind(&input.maintenance_type)
-    .bind(&input.maintenance_expire_date)
-    .bind(&input.fault_desc)
-    .bind(1i64)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(hard_id)
+        .bind(asset_id)
+        .bind(&input.sn)
+        .bind(&input.mac_address)
+        .bind(&input.location)
+        .bind(&input.hardware_config)
+        .bind(input.use_user_id)
+        .bind(&input.use_start_date)
+        .bind(&input.maintenance_vendor)
+        .bind(&input.maintenance_type)
+        .bind(&input.maintenance_expire_date)
+        .bind(&input.fault_desc)
+        .bind(1i64)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
 
     // 返回刚插入的数据
     let result = get_hardware_asset_by_id(asset_id).await;
@@ -432,8 +446,9 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
 /// 根据ID查询单个固定资产
 async fn get_hardware_asset_by_id(asset_id: i64) -> Result<HardwareAssetView, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
 
-    let sql = format!("{} AND a.id = $1", HARDWARE_SELECT_SQL);
+    let sql = format!("{} AND a.id = $1", hardware_select_sql(&prefix));
     let row = sqlx::query(&sql)
         .bind(asset_id)
         .fetch_optional(&pool)
@@ -456,13 +471,14 @@ pub async fn update_hardware_asset(
     input: HardwareAssetInput,
 ) -> Result<HardwareAssetView, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
 
     info!("更新固定资产: id={}, name={}", id, input.asset_name);
 
     // 更新 assets 主表
-    sqlx::query(
+    let sql = format!(
         r#"
-        UPDATE assets SET
+        UPDATE {}assets SET
             category_id = $2, asset_name = $3, manufacturer = $4, model = $5,
             department_id = $6, user_id = $7, status = $8,
             purchase_date = $9::timestamp, purchase_price = $10,
@@ -471,39 +487,42 @@ pub async fn update_hardware_asset(
             updated_by = $15, updated_at = NOW()
         WHERE id = $1 AND asset_type = 'fixed' AND (deleted IS NULL OR deleted = 0)
         "#,
-    )
-    .bind(id)
-    .bind(input.category_id)
-    .bind(&input.asset_name)
-    .bind(&input.manufacturer)
-    .bind(&input.model)
-    .bind(input.department_id)
-    .bind(input.user_id)
-    .bind(input.status.unwrap_or(0))
-    .bind(&input.purchase_date)
-    .bind(input.purchase_price)
-    .bind(input.quantity)
-    .bind(input.used_quantity)
-    .bind(&input.expire_date)
-    .bind(&input.description)
-    .bind(1i64)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("更新资产主表失败: {}", e))?;
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(id)
+        .bind(input.category_id)
+        .bind(&input.asset_name)
+        .bind(&input.manufacturer)
+        .bind(&input.model)
+        .bind(input.department_id)
+        .bind(input.user_id)
+        .bind(input.status.unwrap_or(0))
+        .bind(&input.purchase_date)
+        .bind(input.purchase_price)
+        .bind(input.quantity)
+        .bind(input.used_quantity)
+        .bind(&input.expire_date)
+        .bind(&input.description)
+        .bind(1i64)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("更新资产主表失败: {}", e))?;
 
     // 检查 hard_assets 是否存在，存在则更新，不存在则插入
-    let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM hard_assets WHERE asset_id = $1 AND (deleted IS NULL OR deleted = 0)",
-    )
+    let existing = sqlx::query_scalar::<_, i64>(&format!(
+        "SELECT id FROM {}hard_assets WHERE asset_id = $1 AND (deleted IS NULL OR deleted = 0)",
+        prefix
+    ))
     .bind(id)
     .fetch_optional(&pool)
     .await
     .map_err(|e| format!("查询硬件扩展表失败: {}", e))?;
 
     if let Some(hard_id) = existing {
-        sqlx::query(
+        let sql = format!(
             r#"
-            UPDATE hard_assets SET
+            UPDATE {}hard_assets SET
                 sn = $2, mac_address = $3, location = $4, hardware_config = $5,
                 use_user_id = $6, use_start_date = $7::timestamp,
                 maintenance_vendor = $8, maintenance_type = $9,
@@ -511,49 +530,53 @@ pub async fn update_hardware_asset(
                 updated_by = $12, updated_at = NOW()
             WHERE id = $1
             "#,
-        )
-        .bind(hard_id)
-        .bind(&input.sn)
-        .bind(&input.mac_address)
-        .bind(&input.location)
-        .bind(&input.hardware_config)
-        .bind(input.use_user_id)
-        .bind(&input.use_start_date)
-        .bind(&input.maintenance_vendor)
-        .bind(&input.maintenance_type)
-        .bind(&input.maintenance_expire_date)
-        .bind(&input.fault_desc)
-        .bind(1i64)
-        .execute(&pool)
-        .await
-        .map_err(|e| format!("更新硬件扩展表失败: {}", e))?;
+            prefix
+        );
+        sqlx::query(&sql)
+            .bind(hard_id)
+            .bind(&input.sn)
+            .bind(&input.mac_address)
+            .bind(&input.location)
+            .bind(&input.hardware_config)
+            .bind(input.use_user_id)
+            .bind(&input.use_start_date)
+            .bind(&input.maintenance_vendor)
+            .bind(&input.maintenance_type)
+            .bind(&input.maintenance_expire_date)
+            .bind(&input.fault_desc)
+            .bind(1i64)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("更新硬件扩展表失败: {}", e))?;
     } else {
         let new_hard_id = next_id() as i64;
-        sqlx::query(
+        let sql = format!(
             r#"
-            INSERT INTO hard_assets (id, asset_id, sn, mac_address, location, hardware_config,
+            INSERT INTO {}hard_assets (id, asset_id, sn, mac_address, location, hardware_config,
                 use_user_id, use_start_date, maintenance_vendor, maintenance_type,
                 maintenance_expire_date, fault_desc, created_by, created_at, updated_by, updated_at, deleted)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10,
                 $11::timestamp, $12, $13, NOW(), $13, NOW(), 0)
             "#,
-        )
-        .bind(new_hard_id)
-        .bind(id)
-        .bind(&input.sn)
-        .bind(&input.mac_address)
-        .bind(&input.location)
-        .bind(&input.hardware_config)
-        .bind(input.use_user_id)
-        .bind(&input.use_start_date)
-        .bind(&input.maintenance_vendor)
-        .bind(&input.maintenance_type)
-        .bind(&input.maintenance_expire_date)
-        .bind(&input.fault_desc)
-        .bind(1i64)
-        .execute(&pool)
-        .await
-        .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
+            prefix
+        );
+        sqlx::query(&sql)
+            .bind(new_hard_id)
+            .bind(id)
+            .bind(&input.sn)
+            .bind(&input.mac_address)
+            .bind(&input.location)
+            .bind(&input.hardware_config)
+            .bind(input.use_user_id)
+            .bind(&input.use_start_date)
+            .bind(&input.maintenance_vendor)
+            .bind(&input.maintenance_type)
+            .bind(&input.maintenance_expire_date)
+            .bind(&input.fault_desc)
+            .bind(1i64)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
     }
 
     let result = get_hardware_asset_by_id(id).await;
@@ -566,19 +589,22 @@ pub async fn update_hardware_asset(
 /// 删除固定资产（软删除）
 pub async fn delete_hardware_asset(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
 
     info!("删除固定资产: id={}", id);
 
-    sqlx::query(
-        "UPDATE assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'fixed'",
-    )
-    .bind(id)
-    .execute(&pool)
-    .await
-    .map_err(|e| {
-        error!("删除固定资产失败: id={}, error={}", id, e);
-        format!("删除固定资产失败: {}", e)
-    })?;
+    let sql = format!(
+        "UPDATE {}assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'fixed'",
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .map_err(|e| {
+            error!("删除固定资产失败: id={}, error={}", id, e);
+            format!("删除固定资产失败: {}", e)
+        })?;
 
     info!("删除固定资产成功: id={}", id);
     Ok(())
@@ -586,7 +612,9 @@ pub async fn delete_hardware_asset(id: i64) -> Result<(), String> {
 
 // ======================== 无形资产 CRUD ========================
 
-const INTANGIBLE_SELECT_SQL: &str = r#"
+fn intangible_select_sql(prefix: &str) -> String {
+    format!(
+        r#"
 SELECT
     a.id, a.asset_no, a.asset_type, a.category_id, a.asset_name,
     a.manufacturer, a.model, a.department_id, a.user_id, a.status,
@@ -599,16 +627,23 @@ SELECT
     i.license_key, i.license_type, i.authorized_scope, i.assigned_user_ids,
     i.bind_type, i.bind_info, i.version, i.download_link,
     i.amortization_method, i.useful_life, i.amortization_amount, i.residual_rate
-FROM assets a
-LEFT JOIN intangible_assets i ON i.asset_id = a.id AND (i.deleted IS NULL OR i.deleted = 0)
+FROM {}assets a
+LEFT JOIN {}intangible_assets i ON i.asset_id = a.id AND (i.deleted IS NULL OR i.deleted = 0)
 WHERE a.asset_type = 'intangible' AND (a.deleted IS NULL OR a.deleted = 0)
-"#;
+"#,
+        prefix, prefix
+    )
+}
 
 /// 获取所有无形资产列表（JOIN assets + intangible_assets）
 pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
 
-    let sql = format!("{} ORDER BY a.created_at DESC", INTANGIBLE_SELECT_SQL);
+    let sql = format!(
+        "{} ORDER BY a.created_at DESC",
+        intangible_select_sql(&prefix)
+    );
     let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
         error!("查询无形资产列表失败: {}", e);
         format!("查询无形资产失败: {}", e)
@@ -628,6 +663,7 @@ pub async fn insert_intangible_asset(
     let asset_id = next_id() as i64;
     let intangible_id = next_id() as i64;
     let asset_no = format!("{}", next_id());
+    let prefix = database::schema_prefix();
 
     info!(
         "新增无形资产: name={}, category_id={}",
@@ -635,40 +671,42 @@ pub async fn insert_intangible_asset(
     );
 
     // 插入 assets 主表
-    sqlx::query(
+    let sql = format!(
         r#"
-        INSERT INTO assets (id, asset_no, asset_type, category_id, asset_name, manufacturer, model,
+        INSERT INTO {}assets (id, asset_no, asset_type, category_id, asset_name, manufacturer, model,
             department_id, user_id, status, purchase_date, purchase_price, quantity, used_quantity,
             expire_date, description, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, 'intangible', $3, $4, $5, $6, $7, $8, $9,
             $10::timestamp, $11, $12, $13, $14::timestamp, $15,
             $16, NOW(), $16, NOW(), 0)
         "#,
-    )
-    .bind(asset_id)
-    .bind(&asset_no)
-    .bind(input.category_id)
-    .bind(&input.asset_name)
-    .bind(&input.manufacturer)
-    .bind(&input.model)
-    .bind(input.department_id)
-    .bind(input.user_id)
-    .bind(input.status.unwrap_or(0))
-    .bind(&input.purchase_date)
-    .bind(input.purchase_price)
-    .bind(input.quantity)
-    .bind(input.used_quantity)
-    .bind(&input.expire_date)
-    .bind(&input.description)
-    .bind(1i64)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("插入资产主表失败: {}", e))?;
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(asset_id)
+        .bind(&asset_no)
+        .bind(input.category_id)
+        .bind(&input.asset_name)
+        .bind(&input.manufacturer)
+        .bind(&input.model)
+        .bind(input.department_id)
+        .bind(input.user_id)
+        .bind(input.status.unwrap_or(0))
+        .bind(&input.purchase_date)
+        .bind(input.purchase_price)
+        .bind(input.quantity)
+        .bind(input.used_quantity)
+        .bind(&input.expire_date)
+        .bind(&input.description)
+        .bind(1i64)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("插入资产主表失败: {}", e))?;
 
     // 插入 intangible_assets 扩展表
-    sqlx::query(
+    let sql = format!(
         r#"
-        INSERT INTO intangible_assets (
+        INSERT INTO {}intangible_assets (
             id, asset_id, intangible_type, register_no, register_owner, register_date,
             valid_start_date, valid_end_date, right_status,
             license_key, license_type, authorized_scope, assigned_user_ids,
@@ -682,175 +720,11 @@ pub async fn insert_intangible_asset(
             $18, $19, $20, $21,
             $22, NOW(), $22, NOW(), 0)
         "#,
-    )
-    .bind(intangible_id)
-    .bind(asset_id)
-    .bind(&input.intangible_type)
-    .bind(&input.register_no)
-    .bind(&input.register_owner)
-    .bind(&input.register_date)
-    .bind(&input.valid_start_date)
-    .bind(&input.valid_end_date)
-    .bind(&input.right_status)
-    .bind(&input.license_key)
-    .bind(&input.license_type)
-    .bind(&input.authorized_scope)
-    .bind(&input.assigned_user_ids)
-    .bind(&input.bind_type)
-    .bind(&input.bind_info)
-    .bind(&input.version)
-    .bind(&input.download_link)
-    .bind(&input.amortization_method)
-    .bind(input.useful_life)
-    .bind(input.amortization_amount)
-    .bind(input.residual_rate)
-    .bind(1i64)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
-
-    let result = get_intangible_asset_by_id(asset_id).await;
-    if let Ok(ref asset) = result {
-        info!(
-            "新增无形资产成功: id={}, name={}, asset_no={}",
-            asset.id, asset.asset_name, asset.asset_no
-        );
-    }
-    result
-}
-
-/// 根据ID查询单个无形资产
-async fn get_intangible_asset_by_id(asset_id: i64) -> Result<IntangibleAssetView, String> {
-    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-
-    let sql = format!("{} AND a.id = $1", INTANGIBLE_SELECT_SQL);
-    let row = sqlx::query(&sql)
-        .bind(asset_id)
-        .fetch_optional(&pool)
-        .await
-        .map_err(|e| {
-            error!("查询无形资产失败: id={}, error={}", asset_id, e);
-            format!("查询无形资产失败: {}", e)
-        })?
-        .ok_or_else(|| {
-            warn!("无形资产不存在: id={}", asset_id);
-            "无形资产不存在".to_string()
-        })?;
-
-    Ok(row_to_intangible_view(&row))
-}
-
-/// 修改无形资产
-pub async fn update_intangible_asset(
-    id: i64,
-    input: IntangibleAssetInput,
-) -> Result<IntangibleAssetView, String> {
-    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-
-    info!("更新无形资产: id={}, name={}", id, input.asset_name);
-
-    // 更新 assets 主表
-    sqlx::query(
-        r#"
-        UPDATE assets SET
-            category_id = $2, asset_name = $3, manufacturer = $4, model = $5,
-            department_id = $6, user_id = $7, status = $8,
-            purchase_date = $9::timestamp, purchase_price = $10,
-            quantity = $11, used_quantity = $12,
-            expire_date = $13::timestamp, description = $14,
-            updated_by = $15, updated_at = NOW()
-        WHERE id = $1 AND asset_type = 'intangible' AND (deleted IS NULL OR deleted = 0)
-        "#,
-    )
-    .bind(id)
-    .bind(input.category_id)
-    .bind(&input.asset_name)
-    .bind(&input.manufacturer)
-    .bind(&input.model)
-    .bind(input.department_id)
-    .bind(input.user_id)
-    .bind(input.status.unwrap_or(0))
-    .bind(&input.purchase_date)
-    .bind(input.purchase_price)
-    .bind(input.quantity)
-    .bind(input.used_quantity)
-    .bind(&input.expire_date)
-    .bind(&input.description)
-    .bind(1i64)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("更新资产主表失败: {}", e))?;
-
-    // 检查 intangible_assets 是否存在
-    let existing = sqlx::query_scalar::<_, i64>(
-        "SELECT id FROM intangible_assets WHERE asset_id = $1 AND (deleted IS NULL OR deleted = 0)",
-    )
-    .bind(id)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| format!("查询无形资产扩展表失败: {}", e))?;
-
-    if let Some(intangible_id) = existing {
-        sqlx::query(
-            r#"
-            UPDATE intangible_assets SET
-                intangible_type = $2, register_no = $3, register_owner = $4,
-                register_date = $5::timestamp, valid_start_date = $6::timestamp,
-                valid_end_date = $7::timestamp, right_status = $8,
-                license_key = $9, license_type = $10, authorized_scope = $11,
-                assigned_user_ids = $12, bind_type = $13, bind_info = $14,
-                version = $15, download_link = $16,
-                amortization_method = $17, useful_life = $18,
-                amortization_amount = $19, residual_rate = $20,
-                updated_by = $21, updated_at = NOW()
-            WHERE id = $1
-            "#,
-        )
+        prefix
+    );
+    sqlx::query(&sql)
         .bind(intangible_id)
-        .bind(&input.intangible_type)
-        .bind(&input.register_no)
-        .bind(&input.register_owner)
-        .bind(&input.register_date)
-        .bind(&input.valid_start_date)
-        .bind(&input.valid_end_date)
-        .bind(&input.right_status)
-        .bind(&input.license_key)
-        .bind(&input.license_type)
-        .bind(&input.authorized_scope)
-        .bind(&input.assigned_user_ids)
-        .bind(&input.bind_type)
-        .bind(&input.bind_info)
-        .bind(&input.version)
-        .bind(&input.download_link)
-        .bind(&input.amortization_method)
-        .bind(input.useful_life)
-        .bind(input.amortization_amount)
-        .bind(input.residual_rate)
-        .bind(1i64)
-        .execute(&pool)
-        .await
-        .map_err(|e| format!("更新无形资产扩展表失败: {}", e))?;
-    } else {
-        let new_intangible_id = next_id() as i64;
-        sqlx::query(
-            r#"
-            INSERT INTO intangible_assets (
-                id, asset_id, intangible_type, register_no, register_owner, register_date,
-                valid_start_date, valid_end_date, right_status,
-                license_key, license_type, authorized_scope, assigned_user_ids,
-                bind_type, bind_info, version, download_link,
-                amortization_method, useful_life, amortization_amount, residual_rate,
-                created_by, created_at, updated_by, updated_at, deleted)
-            VALUES ($1, $2, $3, $4, $5, $6::timestamp,
-                $7::timestamp, $8::timestamp, $9,
-                $10, $11, $12, $13,
-                $14, $15, $16, $17,
-                $18, $19, $20, $21,
-                $22, NOW(), $22, NOW(), 0)
-            "#,
-        )
-        .bind(new_intangible_id)
-        .bind(id)
+        .bind(asset_id)
         .bind(&input.intangible_type)
         .bind(&input.register_no)
         .bind(&input.register_owner)
@@ -874,6 +748,183 @@ pub async fn update_intangible_asset(
         .execute(&pool)
         .await
         .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
+
+    let result = get_intangible_asset_by_id(asset_id).await;
+    if let Ok(ref asset) = result {
+        info!(
+            "新增无形资产成功: id={}, name={}, asset_no={}",
+            asset.id, asset.asset_name, asset.asset_no
+        );
+    }
+    result
+}
+
+/// 根据ID查询单个无形资产
+async fn get_intangible_asset_by_id(asset_id: i64) -> Result<IntangibleAssetView, String> {
+    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
+
+    let sql = format!("{} AND a.id = $1", intangible_select_sql(&prefix));
+    let row = sqlx::query(&sql)
+        .bind(asset_id)
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询无形资产失败: id={}, error={}", asset_id, e);
+            format!("查询无形资产失败: {}", e)
+        })?
+        .ok_or_else(|| {
+            warn!("无形资产不存在: id={}", asset_id);
+            "无形资产不存在".to_string()
+        })?;
+
+    Ok(row_to_intangible_view(&row))
+}
+
+/// 修改无形资产
+pub async fn update_intangible_asset(
+    id: i64,
+    input: IntangibleAssetInput,
+) -> Result<IntangibleAssetView, String> {
+    let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
+
+    info!("更新无形资产: id={}, name={}", id, input.asset_name);
+
+    // 更新 assets 主表
+    let sql = format!(
+        r#"
+        UPDATE {}assets SET
+            category_id = $2, asset_name = $3, manufacturer = $4, model = $5,
+            department_id = $6, user_id = $7, status = $8,
+            purchase_date = $9::timestamp, purchase_price = $10,
+            quantity = $11, used_quantity = $12,
+            expire_date = $13::timestamp, description = $14,
+            updated_by = $15, updated_at = NOW()
+        WHERE id = $1 AND asset_type = 'intangible' AND (deleted IS NULL OR deleted = 0)
+        "#,
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(id)
+        .bind(input.category_id)
+        .bind(&input.asset_name)
+        .bind(&input.manufacturer)
+        .bind(&input.model)
+        .bind(input.department_id)
+        .bind(input.user_id)
+        .bind(input.status.unwrap_or(0))
+        .bind(&input.purchase_date)
+        .bind(input.purchase_price)
+        .bind(input.quantity)
+        .bind(input.used_quantity)
+        .bind(&input.expire_date)
+        .bind(&input.description)
+        .bind(1i64)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("更新资产主表失败: {}", e))?;
+
+    // 检查 intangible_assets 是否存在
+    let existing = sqlx::query_scalar::<_, i64>(
+        &format!(
+            "SELECT id FROM {}intangible_assets WHERE asset_id = $1 AND (deleted IS NULL OR deleted = 0)",
+            prefix
+        ),
+    )
+    .bind(id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("查询无形资产扩展表失败: {}", e))?;
+
+    if let Some(intangible_id) = existing {
+        let sql = format!(
+            r#"
+            UPDATE {}intangible_assets SET
+                intangible_type = $2, register_no = $3, register_owner = $4,
+                register_date = $5::timestamp, valid_start_date = $6::timestamp,
+                valid_end_date = $7::timestamp, right_status = $8,
+                license_key = $9, license_type = $10, authorized_scope = $11,
+                assigned_user_ids = $12, bind_type = $13, bind_info = $14,
+                version = $15, download_link = $16,
+                amortization_method = $17, useful_life = $18,
+                amortization_amount = $19, residual_rate = $20,
+                updated_by = $21, updated_at = NOW()
+            WHERE id = $1
+            "#,
+            prefix
+        );
+        sqlx::query(&sql)
+            .bind(intangible_id)
+            .bind(&input.intangible_type)
+            .bind(&input.register_no)
+            .bind(&input.register_owner)
+            .bind(&input.register_date)
+            .bind(&input.valid_start_date)
+            .bind(&input.valid_end_date)
+            .bind(&input.right_status)
+            .bind(&input.license_key)
+            .bind(&input.license_type)
+            .bind(&input.authorized_scope)
+            .bind(&input.assigned_user_ids)
+            .bind(&input.bind_type)
+            .bind(&input.bind_info)
+            .bind(&input.version)
+            .bind(&input.download_link)
+            .bind(&input.amortization_method)
+            .bind(input.useful_life)
+            .bind(input.amortization_amount)
+            .bind(input.residual_rate)
+            .bind(1i64)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("更新无形资产扩展表失败: {}", e))?;
+    } else {
+        let new_intangible_id = next_id() as i64;
+        let sql = format!(
+            r#"
+            INSERT INTO {}intangible_assets (
+                id, asset_id, intangible_type, register_no, register_owner, register_date,
+                valid_start_date, valid_end_date, right_status,
+                license_key, license_type, authorized_scope, assigned_user_ids,
+                bind_type, bind_info, version, download_link,
+                amortization_method, useful_life, amortization_amount, residual_rate,
+                created_by, created_at, updated_by, updated_at, deleted)
+            VALUES ($1, $2, $3, $4, $5, $6::timestamp,
+                $7::timestamp, $8::timestamp, $9,
+                $10, $11, $12, $13,
+                $14, $15, $16, $17,
+                $18, $19, $20, $21,
+                $22, NOW(), $22, NOW(), 0)
+            "#,
+            prefix
+        );
+        sqlx::query(&sql)
+            .bind(new_intangible_id)
+            .bind(id)
+            .bind(&input.intangible_type)
+            .bind(&input.register_no)
+            .bind(&input.register_owner)
+            .bind(&input.register_date)
+            .bind(&input.valid_start_date)
+            .bind(&input.valid_end_date)
+            .bind(&input.right_status)
+            .bind(&input.license_key)
+            .bind(&input.license_type)
+            .bind(&input.authorized_scope)
+            .bind(&input.assigned_user_ids)
+            .bind(&input.bind_type)
+            .bind(&input.bind_info)
+            .bind(&input.version)
+            .bind(&input.download_link)
+            .bind(&input.amortization_method)
+            .bind(input.useful_life)
+            .bind(input.amortization_amount)
+            .bind(input.residual_rate)
+            .bind(1i64)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
     }
 
     let result = get_intangible_asset_by_id(id).await;
@@ -886,19 +937,22 @@ pub async fn update_intangible_asset(
 /// 删除无形资产（软删除）
 pub async fn delete_intangible_asset(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = database::schema_prefix();
 
     info!("删除无形资产: id={}", id);
 
-    sqlx::query(
-        "UPDATE assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'intangible'",
-    )
-    .bind(id)
-    .execute(&pool)
-    .await
-    .map_err(|e| {
-        error!("删除无形资产失败: id={}, error={}", id, e);
-        format!("删除无形资产失败: {}", e)
-    })?;
+    let sql = format!(
+        "UPDATE {}assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'intangible'",
+        prefix
+    );
+    sqlx::query(&sql)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .map_err(|e| {
+            error!("删除无形资产失败: id={}, error={}", id, e);
+            format!("删除无形资产失败: {}", e)
+        })?;
 
     info!("删除无形资产成功: id={}", id);
     Ok(())

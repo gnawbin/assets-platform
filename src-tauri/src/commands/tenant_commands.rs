@@ -54,14 +54,18 @@ pub async fn delete_tenant(id: String) -> Result<(), String> {
     service::tenant_service::delete_tenant(id).await
 }
 
-/// 切换租户 schema
+/// 切换租户 schema（需要 user_id）
 ///
 /// 前端选择租户时调用，切换到对应租户的 schema。
 /// tenant_id = 1 表示默认租户（public schema）。
 #[tauri::command]
-pub async fn switch_tenant(tenant_id: String) -> Result<String, String> {
+pub async fn switch_tenant(user_id: String, tenant_id: String) -> Result<String, String> {
+    let user_id: i64 = user_id
+        .parse()
+        .map_err(|e| format!("无效的用户ID: {}", e))?;
     let tenant_id: i64 = tenant_id
         .parse()
         .map_err(|e| format!("无效的租户ID: {}", e))?;
-    service::tenant_service::switch_tenant(tenant_id).await
+    let info = service::tenant_service::switch_tenant(user_id, tenant_id).await?;
+    Ok(info.schema_name.unwrap_or_default())
 }

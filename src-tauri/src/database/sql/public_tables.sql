@@ -243,6 +243,24 @@ COMMENT ON COLUMN public.sys_user_register.approve_time IS '审核时间';
 
 COMMENT ON COLUMN public.sys_user_register.approve_remark IS '审核备注';
 
+-- 8. 用户-租户关联表（多对多）
+CREATE TABLE IF NOT EXISTS public.sys_user_tenant (
+    id BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES public.sys_user (id) ON DELETE CASCADE,
+    tenant_id BIGINT NOT NULL REFERENCES public.sys_tenant (id) ON DELETE CASCADE,
+    created_by BIGINT,
+    created_at TIMESTAMP
+    WITH
+        TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, tenant_id)
+);
+
+COMMENT ON TABLE public.sys_user_tenant IS '用户-租户关联表（多对多）';
+
+COMMENT ON COLUMN public.sys_user_tenant.user_id IS '用户ID';
+
+COMMENT ON COLUMN public.sys_user_tenant.tenant_id IS '租户ID';
+
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_username ON public.sys_user (username);
 
@@ -251,3 +269,7 @@ CREATE INDEX IF NOT EXISTS idx_public_sys_user_tenant_id ON public.sys_user (ten
 CREATE INDEX IF NOT EXISTS idx_public_sys_menu_parent_id ON public.sys_menu (parent_id);
 
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_register_status ON public.sys_user_register (status);
+
+CREATE INDEX IF NOT EXISTS idx_public_sys_user_tenant_user_id ON public.sys_user_tenant (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_public_sys_user_tenant_tenant_id ON public.sys_user_tenant (tenant_id);

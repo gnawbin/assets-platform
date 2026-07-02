@@ -77,7 +77,7 @@ const CategoriesPage: React.FC = () => {
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [formParentId, setFormParentId] = useState<string>("0");
   const [formName, setFormName] = useState('');
-  const [formAssetType, setFormAssetType] = useState('hardware');
+  const [formAssetType, setFormAssetType] = useState('fixed');
   const [formSort, setFormSort] = useState<number>(0);
   const [formDesc, setFormDesc] = useState('');
 
@@ -169,7 +169,7 @@ const CategoriesPage: React.FC = () => {
     setFormMode('add');
     setFormParentId(parentId);
     setFormName('');
-    setFormAssetType('hardware');
+    setFormAssetType('fixed');
     setFormSort(0);
     setFormDesc('');
     setFormModalOpen(true);
@@ -313,10 +313,10 @@ const CategoriesPage: React.FC = () => {
           <Badge
             size="xs"
             variant="light"
-            color={node.asset_type === 'hardware' ? 'blue' : 'violet'}
+            color={node.asset_type === 'fixed' ? 'blue' : 'violet'}
             ml="auto"
           >
-            {node.asset_type === 'hardware' ? '固定资产' : '无形资产'}
+            {node.asset_type === 'fixed' ? '固定资产' : '无形资产'}
           </Badge>
         </Box>
         {hasChildren && node.expanded && (
@@ -445,7 +445,7 @@ const CategoriesPage: React.FC = () => {
                       <Badge
                         variant="light"
                         color={
-                          selectedCategory.asset_type === 'hardware'
+                          selectedCategory.asset_type === 'fixed'
                             ? 'blue'
                             : 'violet'
                         }
@@ -538,11 +538,11 @@ const CategoriesPage: React.FC = () => {
             placeholder="请选择资产类型"
             required
             data={[
-              { value: 'hardware', label: '硬件资产' },
+              { value: 'fixed', label: '硬件资产' },
               { value: 'intangible', label: '无形资产' },
             ]}
             value={formAssetType}
-            onChange={(val) => setFormAssetType(val || 'hardware')}
+            onChange={(val) => setFormAssetType(val || 'fixed')}
           />
           <NumberInput
             label="排序"
