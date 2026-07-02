@@ -166,7 +166,7 @@ mod tests {
     async fn test_wf_engine_new() {
         // 注意：此测试需要数据库连接，此处只验证类型
         // 实际运行需要 PostgreSQL 支持
-        let _ = std::mem::size_of::<WfEngine>();
+        let _engine: WfEngine = panic!("not executed - requires PostgreSQL");
         assert!(true);
     }
 
