@@ -171,23 +171,68 @@ ADD COLUMN IF NOT EXISTS workflow_id VARCHAR(64);
 
 ---
 
-## 四、审批步骤实现
+## 四、目录结构与工具类设计
 
-### 4.1 目录结构
+### 4.1 整合目录结构
 
 ```
-src-tauri/src/workflow/              # [新增] 工作流模块
-├── mod.rs                           # 模块入口
-├── definitions.rs                   # 流程定义：设备领用、维修、采购等
+src-tauri/src/workflow/              # [新增] 工作流模块（整合 wfe-core / wfe-postgres / wfe-yaml）
+├── mod.rs                           # 模块入口 + WfEngine 统一工具类
 ├── steps.rs                         # 自定义审批 StepBody 实现
+├── definitions.rs                   # 流程定义：设备领用、维修、采购等
 ├── persistence.rs                   # PostgreSQL PersistenceProvider 实现
-├── queue.rs                         # QueueProvider 实现（同步简化版）
 ├── lock.rs                          # LockProvider 实现（本地锁）
+├── queue.rs                         # QueueProvider 实现（同步简化版）
 ├── executor.rs                      # 封装 WorkflowExecutor 启动
-└── commands.rs                      # Tauri Command（审批操作）
+├── commands.rs                      # Tauri Command（审批操作）
+└── tests/
+    ├── mod.rs                       # 测试模块入口
+    ├── steps_test.rs                # 步骤单元测试
+    ├── definitions_test.rs          # 流程定义测试（含 YAML 解析测试）
+    ├── executor_test.rs             # 执行器测试
+    ├── persistence_test.rs          # 持久化层测试（mock）
+    └── integration_test.rs          # 集成测试
 ```
 
-### 4.2 自定义审批步骤
+### 4.2 WfEngine 统一工具类
+
+```rust
+// workflow/mod.rs 核心设计
+
+/// WfEngine — 工作流引擎工具类
+///
+/// 将 wfe-core / wfe-postgres / wfe-yaml 整合为一个统一的接口，
+/// 供 service 层和 commands 层调用，无需关心底层实现细节。
+///
+/// # 功能
+/// - 初始化和管理工作流引擎生命周期
+/// - 提供统一的审批流程创建、执行、事件发布接口
+/// - 封装 WorkflowBuilder 的流程定义管理
+/// - 提供 YAML 定义加载能力（wfe-yaml）
+pub struct WfEngine {
+    executor: Arc<WorkflowExecutor>,
+    registry: Arc<StepRegistry>,
+    persistence: Arc<PostgresPersistenceProvider>,
+}
+```
+
+### 4.3 整合要点
+
+| 组件 | 来源 | 职责 | 关键 API |
+|------|------|------|----------|
+| `StepBody` / `StepRegistry` | `wfe-core` | 定义审批步骤行为 | `registry.register::<T>()` |
+| `WorkflowBuilder` | `wfe-core` | 构建流程定义 | `WorkflowBuilder::new() ... build()` |
+| `WorkflowExecutor` | `wfe-core` | 执行工作流实例 | `executor.execute()` |
+| `PersistenceProvider` | **wfe-postgres** | PostgreSQL 持久化 | 已实现，直接复用 |
+| `QueueProvider` | 自定义 | 同步队列（本地实现） | 简化版，不依赖外部队列 |
+| `DistributedLockProvider` | 自定义 | 本地互斥锁 | 简化版，后续可替换 |
+| YAML 定义加载 | **wfe-yaml** | 从 YAML 文件加载流程 | `yaml::from_reader()` 或 git 加载 |
+
+---
+
+## 五、审批步骤实现
+
+### 5.1 自定义审批步骤
 
 ```rust
 // workflow/steps.rs
@@ -309,7 +354,7 @@ impl StepBody for NotifyStep {
 }
 ```
 
-### 4.3 流程定义
+### 5.2 流程定义
 
 ```rust
 // workflow/definitions.rs
@@ -446,156 +491,63 @@ pub fn asset_purchase_workflow() -> WorkflowDefinition {
 
 ---
 
-## 五、持久化实现
+## 六、持久化实现
 
-### 5.1 PersistenceProvider（PostgreSQL）
+### 6.1 PersistenceProvider（PostgreSQL）
+
+使用 `wfe-postgres` crate 提供的现成实现，避免重复造轮子。
 
 ```rust
 // workflow/persistence.rs
 
 use async_trait::async_trait;
-use wfe_core::models::{
-    Event, ExecutionError, ExecutionPointer, Subscription, WorkflowInstance, WorkflowStatus,
-};
 use wfe_core::traits::{
-    DistributedLockProvider, EventRepository, PersistenceProvider, QueueProvider,
-    SubscriptionRepository, WorkflowRepository,
+    DistributedLockProvider, PersistenceProvider, QueueProvider,
 };
+use wfe_postgres::provider::PostgresPersistenceProvider;
+use wfe_postgres::provider::PostgresPersistenceOptions;
 
 use crate::database;
 
-/// PostgreSQL 实现的持久化提供者
-pub struct PostgresPersistenceProvider;
+/// 创建 PostgreSQL 持久化提供者实例
+///
+/// 使用 wfe-postgres 提供的 PostgresPersistenceProvider，
+/// 传入 database::schema_prefix() 实现多租户 schema 隔离。
+pub fn create_persistence_provider() -> PostgresPersistenceProvider {
+    let schema = database::schema_prefix()
+        .trim_end_matches('.')
+        .to_string();
 
-fn schema_prefix() -> String {
-    let schema = database::postgres::get_current_schema();
-    format!("{}.", schema)
+    let options = PostgresPersistenceOptions {
+        schema: if schema.is_empty() { "public".into() } else { schema },
+        // 使用现有的 database::get_write_pool() 和 database::get_read_pool()
+        write_pool: database::get_write_pool().expect("无法获取写连接池"),
+        read_pool: database::get_read_pool().expect("无法获取读连接池"),
+    };
+
+    PostgresPersistenceProvider::new(options)
 }
+```
 
-#[async_trait]
-impl WorkflowRepository for PostgresPersistenceProvider {
-    async fn create_new_workflow(&self, instance: &WorkflowInstance) -> wfe_core::Result<()> {
-        let pool = database::get_write_pool()
-            .map_err(|e| wfe_core::WfeError::Persistence(e))?;
-        let prefix = schema_prefix();
+### 6.2 本地锁提供者
 
-        let sql = format!(
-            r#"INSERT INTO {}wf_instance
-               (id, wf_definition_id, version, status, data, next_execution, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, $5::jsonb, $6, NOW(), NOW())"#,
-            prefix
-        );
+```rust
+// workflow/lock.rs
 
-        sqlx::query(&sql)
-            .bind(&instance.id)
-            .bind(&instance.workflow_definition_id)
-            .bind(instance.version as i32)
-            .bind(format!("{:?}", instance.status))
-            .bind(&serde_json::to_value(&instance.data)
-                .map_err(|e| wfe_core::WfeError::Persistence(e.to_string()))?)
-            .bind(instance.next_execution)
-            .execute(&pool)
-            .await
-            .map_err(|e| wfe_core::WfeError::Persistence(e.to_string()))?;
-
-        // 写入执行指针
-        for pointer in &instance.execution_pointers {
-            self.create_pointer(&instance.id, pointer).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn get_workflow_instance(&self, workflow_id: &str) -> wfe_core::Result<WorkflowInstance> {
-        let pool = database::get_read_pool()
-            .map_err(|e| wfe_core::WfeError::Persistence(e))?;
-        let prefix = schema_prefix();
-
-        let sql = format!(
-            "SELECT id, wf_definition_id, version, status, data, next_execution
-             FROM {}wf_instance WHERE id = $1",
-            prefix
-        );
-
-        let row = sqlx::query(&sql)
-            .bind(workflow_id)
-            .fetch_one(&pool)
-            .await
-            .map_err(|e| wfe_core::WfeError::Persistence(e.to_string()))?;
-
-        use sqlx::Row;
-        let status_str: String = row.try_get("status").unwrap_or_default();
-        let status = match status_str.as_str() {
-            "Runnable" => WorkflowStatus::Runnable,
-            "Complete" => WorkflowStatus::Complete,
-            "Terminated" => WorkflowStatus::Terminated,
-            "Suspended" => WorkflowStatus::Suspended,
-            _ => WorkflowStatus::Runnable,
-        };
-
-        let data_val: serde_json::Value = row.try_get("data").unwrap_or(json!({}));
-
-        let mut instance = WorkflowInstance {
-            id: row.try_get("id").unwrap_or_default(),
-            workflow_definition_id: row.try_get("wf_definition_id").unwrap_or_default(),
-            version: row.try_get::<i32, _>("version").unwrap_or(1) as u32,
-            status,
-            data: data_val,
-            execution_pointers: Vec::new(),
-            next_execution: row.try_get("next_execution").unwrap_or(None),
-            complete_time: None,
-        };
-
-        // 加载执行指针
-        let pointers = self.get_pointers(workflow_id).await?;
-        instance.execution_pointers = pointers;
-
-        Ok(instance)
-    }
-
-    async fn persist_workflow(&self, instance: &WorkflowInstance) -> wfe_core::Result<()> {
-        let pool = database::get_write_pool()
-            .map_err(|e| wfe_core::WfeError::Persistence(e))?;
-        let prefix = schema_prefix();
-
-        // 更新实例状态
-        let sql = format!(
-            r#"UPDATE {}wf_instance SET
-               status = $2, data = $3::jsonb, next_execution = $4, updated_at = NOW()
-               WHERE id = $1"#,
-            prefix
-        );
-
-        sqlx::query(&sql)
-            .bind(&instance.id)
-            .bind(format!("{:?}", instance.status))
-            .bind(&serde_json::to_value(&instance.data)
-                .map_err(|e| wfe_core::WfeError::Persistence(e.to_string()))?)
-            .bind(instance.next_execution)
-            .execute(&pool)
-            .await
-            .map_err(|e| wfe_core::WfeError::Persistence(e.to_string()))?;
-
-        // 更新所有指针
-        for pointer in &instance.execution_pointers {
-            self.upsert_pointer(&instance.id, pointer).await?;
-        }
-
-        Ok(())
-    }
-
-    // ... 其他方法类似实现：create_pointer, get_pointers, upsert_pointer 等
-}
+use async_trait::async_trait;
+use wfe_core::traits::DistributedLockProvider;
+use std::collections::HashSet;
+use std::sync::Mutex;
 
 /// 简单的内存锁（单机足够，后续可替换为 Redis 锁）
 pub struct LocalLockProvider {
-    locked: std::sync::Mutex<std::collections::HashSet<String>>,
+    locked: Mutex<HashSet<String>>,
 }
 
 impl LocalLockProvider {
     pub fn new() -> Self {
         Self {
-            locked: std::sync::Mutex::new(std::collections::HashSet::new()),
+            locked: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -618,22 +570,43 @@ impl DistributedLockProvider for LocalLockProvider {
         Ok(())
     }
 }
+```
+
+### 6.3 同步队列提供者
+
+```rust
+// workflow/queue.rs
+
+use async_trait::async_trait;
+use wfe_core::models::QueueType;
+use wfe_core::traits::QueueProvider;
 
 /// 同步 QueueProvider：直接在当前线程执行
+/// MVP 不进行异步调度，WorkflowExecutor 会直接再次执行
 pub struct SyncQueueProvider;
 
 #[async_trait]
 impl QueueProvider for SyncQueueProvider {
-    async fn queue_work(&self, _workflow_id: &str, _queue_type: wfe_core::models::QueueType)
-        -> wfe_core::Result<()>
-    {
+    async fn queue_work(
+        &self,
+        _workflow_id: &str,
+        _queue_type: QueueType,
+    ) -> wfe_core::Result<()> {
         // MVP：不进行异步调度，WorkflowExecutor 会直接再次执行
         Ok(())
     }
 
     async fn dequeue_work(
         &self,
-        _queue_type: wfe_core::models::QueueType,
+        _queue_type: QueueType,
+    ) -> wfe_core::Result<Option<(String, String)>> {
+        Ok(None)
+    }
+
+    async fn dequeue_work_by_id(
+        &self,
+        _queue_type: QueueType,
+        _workflow_id: &str,
     ) -> wfe_core::Result<Option<(String, String)>> {
         Ok(None)
     }
@@ -642,12 +615,12 @@ impl QueueProvider for SyncQueueProvider {
 
 ---
 
-## 六、启动和执行
+## 七、WfEngine 工具类与执行器
 
-### 6.1 初始化
+### 7.1 WfEngine 工具类（workflow/mod.rs）
 
 ```rust
-// workflow/executor.rs
+// workflow/mod.rs
 
 use std::sync::Arc;
 use wfe_core::executor::step_registry::StepRegistry;
@@ -655,342 +628,109 @@ use wfe_core::executor::WorkflowExecutor;
 use wfe_core::models::{ExecutionPointer, WorkflowInstance, WorkflowStatus};
 use serde_json::json;
 
-use super::definitions::*;
-use super::persistence::{PostgresPersistenceProvider, LocalLockProvider, SyncQueueProvider};
-use super::steps::{ApprovalStep, AutoStep, NotifyStep};
-use crate::database;
-use crate::database::models::SysUser;
+mod steps;
+mod definitions;
+mod persistence;
+mod lock;
+mod queue;
+mod executor;
+pub mod commands;
 
-/// 全局审批执行器
-static WORKFLOW_EXECUTOR: once_cell::sync::OnceCell<WorkflowExecutor> = once_cell::sync::OnceCell::new();
+pub use steps::*;
+pub use definitions::*;
+pub use persistence::*;
+pub use lock::*;
+pub use queue::*;
+pub use executor::*;
 
-/// 初始化工作流引擎
-pub fn init_workflow_engine() {
-    let persistence = Arc::new(PostgresPersistenceProvider);
-    let lock = Arc::new(LocalLockProvider::new());
-    let queue = Arc::new(SyncQueueProvider);
-
-    let executor = WorkflowExecutor::new(persistence, lock, queue);
-
-    WORKFLOW_EXECUTOR.set(executor).ok();
-}
-
-/// 获取全局执行器
-fn get_executor() -> &'static WorkflowExecutor {
-    WORKFLOW_EXECUTOR.get().expect("工作流引擎未初始化")
-}
-
-/// 构建全局 StepRegistry
-pub fn create_step_registry() -> StepRegistry {
-    let mut registry = StepRegistry::new();
-    registry.register::<ApprovalStep>();
-    registry.register::<AutoStep>();
-    registry.register::<NotifyStep>();
-    registry
-}
-```
-
-### 6.2 启动审批流程
-
-```rust
-// 发起设备领用申请时，启动工作流
-
-pub async fn start_receive_workflow(
-    receive: &AssetReceive,
-    applicant: &SysUser,
-    superior_id: i64,
-    asset_manager_id: i64,
-) -> Result<String, String> {
-    let definition = asset_receive_workflow();
-    let registry = create_step_registry();
-
-    // 构建工作流数据
-    let data = serde_json::json!({
-        "biz_type": "receive",
-        "biz_id": receive.id,
-        "applicant_id": applicant.id,
-        "department_id": applicant.department_id,
-        "superior_id": superior_id,
-        "asset_manager_id": asset_manager_id,
-        "apply_reason": receive.reason,
-    });
-
-    // 创建工作流实例
-    let instance_id = format!("wf-recv-{}", receive.id);
-    let mut instance = WorkflowInstance::new(&instance_id, 1, data);
-    instance.workflow_definition_id = "asset_receive".to_string();
-
-    // 添加初始执行指针（指向第一步）
-    let pointer = ExecutionPointer::new(definition.steps[0].id);
-    instance.execution_pointers.push(pointer);
-
-    // 持久化实例
-    let persistence = PostgresPersistenceProvider;
-    persistence.create_new_workflow(&instance)
-        .await
-        .map_err(|e| format!("创建审批流程失败: {}", e))?;
-
-    // 执行第一步
-    let executor = get_executor();
-    executor.execute(&instance_id, &definition, &registry, None)
-        .await
-        .map_err(|e| format!("执行审批流程失败: {}", e))?;
-
-    Ok(instance_id)
-}
-```
-
-### 6.3 审批操作（前端触发）
-
-```rust
-// workflow/commands.rs
-
-use super::definitions::*;
-use super::steps::ApprovalEvent;
-use super::persistence::PostgresPersistenceProvider;
-use super::executor::{get_executor, create_step_registry};
 use crate::database;
 
-/// 审批操作：通过/驳回
-#[tauri::command]
-pub async fn approve_workflow_step(
-    workflow_id: String,
-    action: String,       // "approve" | "reject"
-    comment: String,
-    user_id: String,
-) -> Result<(), String> {
-    let uid: i64 = user_id.parse().map_err(|e| format!("无效用户ID: {}", e))?;
+/// WfEngine — 工作流引擎工具类
+///
+/// 整合 wfe-core / wfe-postgres / wfe-yaml 为统一接口。
+/// 用法：
+/// ```rust
+/// let engine = WfEngine::new().await;
+/// let wf_id = engine.create_workflow("asset_receive", data).await?;
+/// engine.approve_step(&wf_id, 1, "approve", "同意", 1001).await?;
+/// ```
+pub struct WfEngine {
+    executor: Arc<WorkflowExecutor>,
+    registry: Arc<StepRegistry>,
+}
 
-    // 1. 从数据库加载工作流实例
-    let persistence = PostgresPersistenceProvider;
-    let instance = persistence.get_workflow_instance(&workflow_id)
-        .await
-        .map_err(|e| format!("加载审批流程失败: {}", e))?;
+impl WfEngine {
+    /// 创建并初始化工作流引擎
+    pub async fn new() -> Self {
+        let registry = Arc::new(create_step_registry());
+        let persistence = Arc::new(create_persistence_provider());
+        let lock = Arc::new(LocalLockProvider::new());
+        let queue = Arc::new(SyncQueueProvider);
 
-    // 2. 找到当前活跃的审批步骤
-    let active_pointer = instance.execution_pointers
-        .iter()
-        .find(|p| p.active && p.status == wfe_core::models::PointerStatus::WaitingForEvent)
-        .ok_or("没有待审批的步骤")?;
+        let executor = Arc::new(
+            WorkflowExecutor::new(persistence, lock, queue)
+        );
 
-    // 3. 发布审批事件
-    let event = wfe_core::models::Event::new(
-        "approval.event",
-        &format!("{}-approval-{}", workflow_id, active_pointer.step_id),
-        serde_json::json!({
-            "action": action,
-            "comment": comment,
-            "user_id": uid,
-        }),
-    );
-
-    // 使用 PersistenceProvider 创建事件
-    persistence.create_event(&event)
-        .await
-        .map_err(|e| format!("创建审批事件失败: {}", e))?;
-    persistence.publish_event(&event.id)
-        .await
-        .map_err(|e| format!("发布审批事件失败: {}", e))?;
-
-    // 4. 记录审批记录
-    let pool = database::get_write_pool()
-        .map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
-    sqlx::query(&format!(
-        r#"INSERT INTO {}wf_approval_record
-           (workflow_id, step_id, step_name, approver_id, action, comment, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, NOW())"#,
-        prefix
-    ))
-    .bind(&workflow_id)
-    .bind(active_pointer.step_id as i32)
-    .bind(&active_pointer.step_name)
-    .bind(uid)
-    .bind(&action)
-    .bind(&comment)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("记录审批日志失败: {}", e))?;
-
-    // 5. 重新执行工作流（推进到下一步）
-    let definition = match instance.workflow_definition_id.as_str() {
-        "asset_receive" => asset_receive_workflow(),
-        "asset_repair" => asset_repair_workflow(),
-        "asset_purchase" => asset_purchase_workflow(),
-        other => return Err(format!("未知的工作流定义: {}", other)),
-    };
-
-    let registry = create_step_registry();
-    let executor = get_executor();
-
-    executor.execute(&workflow_id, &definition, &registry, None)
-        .await
-        .map_err(|e| format!("推进审批流程失败: {}", e))?;
-
-    // 6. 如果是驳回，将业务表状态更新为"已驳回"
-    if action == "reject" {
-        update_biz_status_rejected(&instance).await?;
+        WfEngine { executor, registry }
     }
 
-    Ok(())
-}
+    /// 创建并启动审批流程
+    pub async fn create_workflow(
+        &self,
+        def_id: &str,
+        biz_type: &str,
+        biz_id: i64,
+        applicant_id: i64,
+    ) -> Result<String, String> {
+        let definition = get_definition(def_id)?;
+        let instance_id = format!("wf-{}-{}-{}", def_id, biz_id, chrono::Utc::now().timestamp());
 
-/// 更新业务表状态为已驳回
-async fn update_biz_status_rejected(instance: &WorkflowInstance) -> Result<(), String> {
-    let biz_type = instance.data["biz_type"].as_str().unwrap_or("");
-    let biz_id = instance.data["biz_id"].as_i64().unwrap_or(0);
-    let pool = database::get_write_pool()
-        .map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
+        let data = json!({
+            "biz_type": biz_type,
+            "biz_id": biz_id,
+            "applicant_id": applicant_id,
+        });
 
-    match biz_type {
-        "receive" => {
-            sqlx::query(&format!(
-                "UPDATE {}asset_receive SET status = 2, updated_at = NOW() WHERE id = $1",
-                prefix
-            ))
-            .bind(biz_id)
-            .execute(&pool)
+        let mut instance = WorkflowInstance::new(&instance_id, 1, data);
+        instance.workflow_definition_id = def_id.to_string();
+
+        let pointer = ExecutionPointer::new(definition.steps[0].id);
+        instance.execution_pointers.push(pointer);
+
+        self.executor
+            .execute(&instance_id, &definition, &self.registry, None)
             .await
-            .map_err(|e| format!("更新状态失败: {}", e))?;
-        }
-        "repair" => {
-            sqlx::query(&format!(
-                "UPDATE {}asset_repair SET status = 0, updated_at = NOW() WHERE id = $1",
-                prefix
-            ))
-            .bind(biz_id)
-            .execute(&pool)
-            .await
-            .map_err(|e| format!("更新状态失败: {}", e))?;
-        }
-        // ... 其他业务表
-        _ => {}
+            .map_err(|e| format!("执行审批流程失败: {}", e))?;
+
+        Ok(instance_id)
     }
-    Ok(())
-}
-```
 
-### 6.4 查询审批状态
-
-```rust
-/// 查询某个业务记录的审批流程状态
-#[tauri::command]
-pub async fn get_workflow_status(
-    biz_type: String,
-    biz_id: String,
-) -> Result<serde_json::Value, String> {
-    let bid: i64 = biz_id.parse().map_err(|e| format!("无效ID: {}", e))?;
-    let pool = database::get_read_pool()
-        .map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = schema_prefix();
-
-    // 查询工作流实例
-    let row = sqlx::query(&format!(
-        "SELECT id, status, data::text, created_at, updated_at
-         FROM {}wf_instance
-         WHERE biz_type = $1 AND biz_id = $2
-         ORDER BY created_at DESC LIMIT 1",
-        prefix
-    ))
-    .bind(&biz_type)
-    .bind(bid)
-    .fetch_optional(&pool)
-    .await
-    .map_err(|e| format!("查询失败: {}", e))?;
-
-    match row {
-        Some(r) => {
-            use sqlx::Row;
-            let workflow_id: String = r.try_get("id").unwrap_or_default();
-            let status: String = r.try_get("status").unwrap_or_default();
-
-            // 查询审批记录
-            let records = sqlx::query(&format!(
-                "SELECT step_id, step_name, approver_id, action, comment, created_at
-                 FROM {}wf_approval_record
-                 WHERE workflow_id = $1
-                 ORDER BY created_at",
-                prefix
-            ))
-            .bind(&workflow_id)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| format!("查询审批记录失败: {}", e))?;
-
-            let approval_records: Vec<serde_json::Value> = records.iter().map(|rec| {
-                use sqlx::Row;
-                json!({
-                    "step_id": rec.try_get::<i32, _>("step_id").unwrap_or(0),
-                    "step_name": rec.try_get::<String, _>("step_name").unwrap_or_default(),
-                    "approver_id": rec.try_get::<i64, _>("approver_id").unwrap_or(0),
-                    "action": rec.try_get::<String, _>("action").unwrap_or_default(),
-                    "comment": rec.try_get::<String, _>("comment").unwrap_or_default(),
-                    "created_at": rec.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|t| t.to_rfc3339()).unwrap_or_default(),
-                })
-            }).collect();
-
-            Ok(json!({
-                "workflow_id": workflow_id,
-                "status": status,
-                "approval_records": approval_records,
-            }))
-        }
-        None => Ok(json!({
-            "workflow_id": null,
-            "status": "none",
-            "approval_records": [],
-        })),
+    /// 执行审批操作（通过/驳回）
+    pub async fn approve_step(
+        &self,
+        workflow_id: &str,
+        action: &str,       // "approve" | "reject"
+        comment: &str,
+        approver_id: i64,
+    ) -> Result<(), String> {
+        approve_workflow_step_inner(
+            &self.executor,
+            &self.registry,
+            workflow_id,
+            action,
+            comment,
+            approver_id,
+        ).await
     }
-}
-```
 
----
-
-## 七、前端组件
-
-### 7.1 目录结构
-
-```
-src/
-└── components/
-    └── ApprovalFlow/               # [新增] 审批流组件
-        ├── index.tsx               # 审批流程展示组件
-        ├── ApprovalTimeline.tsx    # 审批时间线
-        ├── ApprovalAction.tsx      # 通过/驳回按钮
-        ├── ApprovalComment.tsx     # 审批意见输入
-        └── types.ts                # 类型定义
-
-    └── pages/
-        └── MyApprovals.tsx         # [新增] 我的待审批
-        └── ApprovalDetail.tsx      # [新增] 审批详情
-```
-
-### 7.2 前端类型
-
-```typescript
-// types/workflow.ts
-
-export interface WorkflowStatus {
-  workflow_id: string | null;
-  status: 'Runnable' | 'Complete' | 'Terminated' | 'Suspended' | 'none';
-  approval_records: ApprovalRecord[];
-}
-
-export interface ApprovalRecord {
-  step_id: number;
-  step_name: string;
-  approver_id: string;
-  action: 'approve' | 'reject';
-  comment: string;
-  created_at: string;
-}
-
-export interface ApprovalAction {
-  workflow_id: string;
-  action: 'approve' | 'reject';
-  comment: string;
-  user_id: string;
+    /// 获取工作流状态
+    pub async fn get_status(
+        &self,
+        biz_type: &str,
+        biz_id: i64,
+    ) -> Result<serde_json::Value, String> {
+        get_workflow_status_inner(biz_type, biz_id).await
+    }
 }
 ```
 
@@ -1067,9 +807,10 @@ export interface ApprovalAction {
 
 ```toml
 [dependencies]
-# 新增工作流引擎
-wfe-core = { version = "1.10.0", default-features = false }
-# 注意：wfe-core 默认依赖 opentelemetry，用 default-features = false 关闭
+# 工作流引擎（已添加）
+wfe-core = "1.10.0"
+wfe-postgres = "1.10.0"
+wfe-yaml = "1.10.0"
 
 # 异步 trait
 async-trait = "0.1"
@@ -1085,29 +826,58 @@ once_cell = "1.21"
 
 ---
 
-## 十、实施路线图
+## 十、测试方案
 
-| 阶段 | 内容 | 工期 | 前置 |
-|------|------|------|------|
-| **Phase 1** | 新增数据库表 + Rust struct | 1天 | 无 |
-| **Phase 2** | 实现 PostgreSQL PersistenceProvider | 2天 | Phase 1 |
-| **Phase 3** | 实现审批步骤 + 流程定义 | 1天 | Phase 2 |
-| **Phase 4** | 实现审批 Command + 事件驱动 | 1天 | Phase 3 |
-| **Phase 5** | 迁移设备领用流程（第一个业务验证） | 1天 | Phase 4 |
-| **Phase 6** | 迁移其余 5 个流程（归还/调拨/维修/报废/采购） | 2天 | Phase 5 |
-| **Phase 7** | 前端组件 + 待审批页面 | 2天 | Phase 5 |
-| **Phase 8** | 旧 AssetApproval 表数据迁移 + 下线 | 1天 | Phase 7 |
+### 10.1 单元测试（不需要数据库）
 
-**总计：约 11 天**
+| 测试文件 | 测试内容 |
+|----------|----------|
+| `steps_test.rs` | ApprovalStep 配置解析、等待事件/恢复执行/驳回逻辑 |
+| `definitions_test.rs` | WorkflowBuilder 构建、流程定义序列化/反序列化 |
+| `lock_test.rs` | LocalLockProvider 加锁/解锁/并发 |
+| `queue_test.rs` | SyncQueueProvider |
+
+### 10.2 集成测试（需要内存数据库或 Mock）
+
+| 测试文件 | 测试内容 |
+|----------|----------|
+| `executor_test.rs` | WfEngine 初始化、创建流程、审批推进 |
+| `persistence_test.rs` | 使用 `sqlx::PgPool` mock 测试持久化层 |
+| `integration_test.rs` | 完整审批流程端到端：创建 → 审批通过 → 完成 / 驳回 |
+
+### 10.3 测试覆盖场景
+
+1. ✅ 正常审批通过流程
+2. ✅ 审批驳回流程
+3. ✅ 多级审批链推进
+4. ✅ 工作流实例创建与持久化
+5. ✅ 审批事件发布与消费
+6. ✅ 流程定义 YAML 序列化/反序列化
+7. ✅ LocalLockProvider 并发安全
 
 ---
 
-## 十一、关键设计决策
+## 十一、实施路线图
+
+| 阶段 | 内容 | 前置 |
+|------|------|------|
+| **Phase 1** | 创建 workflow 模块 + WfEngine 工具类 | 无 |
+| **Phase 2** | 实现审批步骤 + 流程定义 + 持久化层 | Phase 1 |
+| **Phase 3** | 实现审批 Command + 事件驱动 | Phase 2 |
+| **Phase 4** | 编写单元测试 + 集成测试 | Phase 3 |
+| **Phase 5** | 迁移设备领用流程（第一个业务验证） | Phase 4 |
+| **Phase 6** | 迁移其余流程（归还/调拨/维修/报废/采购） | Phase 5 |
+| **Phase 7** | 前端组件 + 待审批页面 | Phase 6 |
+| **Phase 8** | 旧 AssetApproval 表数据迁移 + 下线 | Phase 7 |
+
+---
+
+## 十二、关键设计决策
 
 | 决策 | 原因 |
 |------|------|
 | 使用 wfe-core 而非自己造轮子 | wfe-core 已实现完整的 DAG 工作流引擎，含条件/并行/Saga/补偿 |
-| 实现 PersistenceProvider 用 PostgreSQL | wfe-sqlite 不适合多租户场景，PostgreSQL 是现有基础设施 |
+| 使用 wfe-postgres 现成 PersistenceProvider | 避免重复实现 wf_instance/wf_execution_pointer 的 CRUD |
 | LocalLockProvider | 单机部署足够，后续可替换 Redis |
 | SyncQueueProvider（同步执行） | MVP 简化，审批流程无长时间等待步骤 |
 | 业务表增加 workflow_id 字段 | 保持松耦合，业务表和工作流实例双向可查 |
@@ -1115,10 +885,11 @@ once_cell = "1.21"
 | 将审批事件建模为 wfe Event | 利用 wfe-core 的事件订阅机制实现异步审批 |
 | 审批步骤用 step_config 传参 | 无需为每个步骤创建单独的 struct |
 | 前端被动拉取审批状态 | MVP 用轮询，后续可加 WebSocket 推送 |
+| 整合为 WfEngine 工具类 | 对外提供统一 API，隐藏 wfe-core/wfe-postgres/wfe-yaml 实现细节 |
 
 ---
 
-## 十二、与旧 AssetApproval 的对比
+## 十三、与旧 AssetApproval 的对比
 
 | 能力 | 旧系统 (AssetApproval) | 新系统 (wfe-core) |
 |------|----------------------|------------------|
@@ -1132,3 +903,4 @@ once_cell = "1.21"
 | 子流程 | ❌ | ✅ (SubWorkflowStep) |
 | 补偿/回退 | ❌ | ✅ (SagaContainer + compensation_step) |
 | 状态机可视化 | ❌ | ✅ (to_dot() 输出 Graphviz) |
+| 统一工具类 API | ❌ | ✅ (WfEngine 封装) |
