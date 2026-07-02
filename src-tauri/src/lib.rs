@@ -229,6 +229,25 @@ pub fn run() {
             commands::knowledge_commands::insert_knowledge,
             commands::knowledge_commands::update_knowledge,
             commands::knowledge_commands::delete_knowledge,
+            // 知识库模块 - RAG
+            commands::rag_commands::chunk_and_vectorize,
+            commands::rag_commands::test_rag_retrieval,
+            // 知识库模块 - 对话
+            commands::conversation_commands::create_conversation,
+            commands::conversation_commands::send_message,
+            commands::conversation_commands::get_conversations,
+            commands::conversation_commands::get_conversation_messages,
+            commands::conversation_commands::update_conversation_title,
+            commands::conversation_commands::delete_conversation,
+            // 知识库模块 - LLM厂商
+            commands::llm_provider_commands::get_llm_providers,
+            commands::llm_provider_commands::get_llm_provider,
+            commands::llm_provider_commands::create_llm_provider,
+            commands::llm_provider_commands::update_llm_provider,
+            commands::llm_provider_commands::delete_llm_provider,
+            commands::llm_provider_commands::get_llm_models,
+            commands::llm_provider_commands::get_user_llm_setting,
+            commands::llm_provider_commands::save_user_llm_setting,
             // Zen Engine - Skill 管理
             commands::skill_commands::list_skills,
             commands::skill_commands::get_skill,

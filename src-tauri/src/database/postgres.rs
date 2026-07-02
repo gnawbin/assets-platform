@@ -661,6 +661,64 @@ pub async fn init_tenant_default_data(pool: &PgPool, schema: &str) -> Result<()>
     execute_sql_content_with_schema(pool, sql, schema, "tenant_initial_data").await
 }
 
+/// 初始化知识库模块 public 表
+#[allow(dead_code)]
+pub async fn init_knowledge_module_public(pool: &PgPool) -> Result<()> {
+    let sql = include_str!("sql/knowledge_module_migration.sql");
+    // 只执行 public 部分（一、三、四）
+    // 按分号分割后，识别不含 {schema} 的语句执行
+    let mut buffer = String::new();
+    let mut in_tenant_section = false;
+
+    for line in sql.lines() {
+        let trimmed = line.trim();
+
+        // 检测进入租户级表部分（二、{schema} 租户级表）
+        if trimmed.contains("二、{schema} 租户级表") {
+            in_tenant_section = true;
+        }
+
+        if in_tenant_section {
+            continue; // 跳过租户级表
+        }
+
+        buffer.push_str(line);
+        buffer.push('\n');
+    }
+
+    execute_sql_content(pool, &buffer, "knowledge_module_public").await
+}
+
+/// 初始化知识库模块租户表
+#[allow(dead_code)]
+pub async fn init_knowledge_module_tenant(pool: &PgPool, schema: &str) -> Result<()> {
+    let sql = include_str!("sql/knowledge_module_migration.sql");
+
+    // 只提取租户级表部分
+    let mut buffer = String::new();
+    let mut in_tenant_section = false;
+
+    for line in sql.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.contains("二、{schema} 租户级表") {
+            in_tenant_section = true;
+            continue;
+        }
+
+        if trimmed.contains("三、用户注册自动初始化触发器") {
+            break; // 触发器在 public 部分已执行
+        }
+
+        if in_tenant_section {
+            buffer.push_str(line);
+            buffer.push('\n');
+        }
+    }
+
+    execute_sql_content_with_schema(pool, &buffer, schema, "knowledge_module_tenant").await
+}
+
 /// 创建默认管理员账号（密码用 argon2 加密）
 #[allow(dead_code)]
 pub async fn init_default_admin(pool: &PgPool) -> Result<()> {
@@ -767,7 +825,22 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     tracing::info!("正在初始化租户 '{}' 默认数据...", schema);
     init_tenant_default_data(&pool, &schema).await?;
 
-    // 11. 预加载 schema 缓存（供 middleware/ service 层使用）
+    // 11. 安装 pgvector 扩展（document_chunk 表使用 vector 类型）
+    tracing::info!("正在安装 pgvector 扩展...");
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+        .execute(&pool)
+        .await
+        .map_err(|e| anyhow!("安装 pgvector 扩展失败: {}", e))?;
+
+    // 12. 初始化知识库模块 public 表
+    tracing::info!("正在初始化知识库模块 public 表...");
+    init_knowledge_module_public(&pool).await?;
+
+    // 13. 初始化知识库模块租户表
+    tracing::info!("正在初始化知识库模块租户 '{}' 表...", schema);
+    init_knowledge_module_tenant(&pool, &schema).await?;
+
+    // 14. 预加载 schema 缓存（供 middleware/ service 层使用）
     preload_schema_cache(&pool).await?;
 
     tracing::info!("数据库初始化完成！");

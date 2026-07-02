@@ -5,10 +5,13 @@
 
 pub mod asset_commands;
 pub mod category_commands;
+pub mod conversation_commands;
 pub mod department_commands;
 pub mod knowledge_asset_commands;
 pub mod knowledge_commands;
+pub mod llm_provider_commands;
 pub mod process_commands;
+pub mod rag_commands;
 pub mod register_commands;
 pub mod role_commands;
 pub mod skill_commands;

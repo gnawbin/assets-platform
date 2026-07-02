@@ -1,9 +1,13 @@
 pub mod assets_categories_service;
 pub mod assets_service;
+pub mod conversation_service;
 pub mod department_service;
 pub mod knowledge_asset_service;
 pub mod knowledge_service;
+pub mod llm_gateway_service;
+pub mod llm_provider_service;
 pub mod process_service;
+pub mod rag_service;
 pub mod register_service;
 pub mod role_service;
 pub mod tenant_service;
