@@ -25,3 +25,21 @@
 
 ## ⚠️ 已知问题
 - [ ] 16. **前后端长整数精度失真**：数据库主键为 `bigint`（i64），通过 Tauri invoke 序列化为 JSON 时，JavaScript 的 Number 类型无法精确表示超过 2^53 的整数。需要统一处理：Rust 端将 i64 序列化为字符串，前端使用时再转回。涉及所有表的主键 ID 字段。
+
+## 📤 上传流程改进：两步提交（Two-Phase Commit）
+
+### 问题
+当前上传流程：选择文件 → init（创建 S3 MultipartUpload） → 直传 S3 → complete（合并）→ 回调里关联业务。文件直接上传到 S3 没有业务上下文，且没有"先占位后上传"机制。
+
+### 改进目标
+两步提交：先占位（在数据库创建 record，status=pending，关联 context）→ 再上传 → 上传完成后 commit 关联业务实体。
+
+### 改动清单
+- [ ] 17. **数据库表 `file_uploads` 扩展**（`tenant_tables.sql`）：新增 `context_type VARCHAR(50)`、`context_id BIGINT`、`commit_at TIMESTAMP` 字段；status 增加 `pending`/`committed` 状态
+- [ ] 18. **Rust `FileUploadRecord` 模型扩展**（`storage/upload.rs`）：新增 `context_type`、`context_id` 字段；状态机改为 pending → uploading → completed → committed
+- [ ] 19. **`UploadManager` 重构**（`storage/upload.rs`）：`init()` 改为只占位（status=pending，不调 S3）；新增 `start_upload()`（pending→uploading，创建 S3 MultipartUpload）；`complete()` 只改 status=completed（不自动关联）；新增 `commit()`（completed→committed，关联 context）
+- [ ] 20. **Tauri 命令新增**（`commands/upload_commands.rs`）：新增 `commit_upload` 命令
+- [ ] 21. **前端 `uploadService.ts` 改造**：`init()` 新增 `context` 参数；新增 `startUpload()`、`commit()` 方法
+- [ ] 22. **前端 `useChunkedUpload.ts` 改造**：`options` 新增 `context` 参数；`start()` 流程改为 init(占位) → startUpload(创建S3) → 并发上传 → complete → commit
+- [ ] 23. **前端 `FileUploader.tsx` 改造**：`props` 新增 `context` 属性，透传到 `useChunkedUpload`
+- [ ] 24. **知识库页面集成测试**：在上传文件时传入 `context={{ type: 'knowledge', id: selectedNodeId }}`

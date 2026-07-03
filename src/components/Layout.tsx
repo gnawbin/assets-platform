@@ -47,7 +47,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         });
         // 更新前端本地状态
         switchTenant(tenantId);
-        window.location.reload();
+        // 切换到首页，避免旧租户特定页面在新 schema 中查询不到数据报错
+        router.push('/');
       } catch (err) {
         console.error('切换租户失败:', err);
       }

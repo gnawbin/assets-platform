@@ -7,8 +7,10 @@ use crate::database;
 use crate::database::models::KnowledgeAsset;
 use tracing::{error, info};
 
-/// 根据 tree_node_id 获取关联的知识资产
-pub async fn get_knowledge_asset_by_tree_node(tree_node_id: i64) -> Result<KnowledgeAsset, String> {
+/// 根据 tree_node_id 获取关联的知识资产（未关联时返回 None）
+pub async fn get_knowledge_asset_by_tree_node(
+    tree_node_id: i64,
+) -> Result<Option<KnowledgeAsset>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
 
@@ -18,7 +20,7 @@ pub async fn get_knowledge_asset_by_tree_node(tree_node_id: i64) -> Result<Knowl
     );
     let item = sqlx::query_as::<_, KnowledgeAsset>(&sql)
         .bind(tree_node_id)
-        .fetch_one(&pool)
+        .fetch_optional(&pool)
         .await
         .map_err(|e| {
             error!(

@@ -5,11 +5,11 @@
 use crate::database::models::KnowledgeAsset;
 use crate::service;
 
-/// 根据 tree_node_id 获取关联的知识资产
+/// 根据 tree_node_id 获取关联的知识资产（未关联时返回 null）
 #[tauri::command]
 pub async fn get_knowledge_asset_by_tree_node(
     treeNodeId: String,
-) -> Result<KnowledgeAsset, String> {
+) -> Result<Option<KnowledgeAsset>, String> {
     let id: i64 = treeNodeId
         .parse()
         .map_err(|e| format!("无效的节点ID: {}", e))?;

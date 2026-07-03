@@ -238,32 +238,38 @@ export default function KnowledgePage() {
         resetUploadState();
         try {
             const asset = await getKnowledgeAssetByTreeNode(id);
-            setEditorTitle(asset.title);
-            setEditorContent(asset.content || '');
-            setEditorOkfType(asset.okf_type);
-            setEditorSummary(asset.summary || '');
-            setEditorSource(asset.source || '');
-            setEditorStatus(asset.status as 'draft' | 'valid' | 'outdated');
-            setEditorTags(asset.tags || []);
-            setEditorFileUrl(asset.file_url || undefined);
-            setEditorFileName(asset.file_name || undefined);
-            setEditorFileSize(asset.file_size || undefined);
-            setOkfAsset(asset);
-            setShowEditor(true);
-        } catch {
-            // 无关联资产
-            setOkfAsset(null);
-            setEditorTitle('');
-            setEditorContent('');
-            setEditorOkfType('raw_source');
-            setEditorSummary('');
-            setEditorSource('');
-            setEditorStatus('draft');
-            setEditorTags([]);
-            setEditorFileUrl(undefined);
-            setEditorFileName(undefined);
-            setEditorFileSize(undefined);
-            setShowEditor(false);
+            if (asset) {
+                // 有关联资产
+                setEditorTitle(asset.title);
+                setEditorContent(asset.content || '');
+                setEditorOkfType(asset.okf_type);
+                setEditorSummary(asset.summary || '');
+                setEditorSource(asset.source || '');
+                setEditorStatus(asset.status as 'draft' | 'valid' | 'outdated');
+                setEditorTags(asset.tags || []);
+                setEditorFileUrl(asset.file_url || undefined);
+                setEditorFileName(asset.file_name || undefined);
+                setEditorFileSize(asset.file_size || undefined);
+                setOkfAsset(asset);
+                setShowEditor(true);
+            } else {
+                // 无关联资产
+                setOkfAsset(null);
+                setEditorTitle('');
+                setEditorContent('');
+                setEditorOkfType('raw_source');
+                setEditorSummary('');
+                setEditorSource('');
+                setEditorStatus('draft');
+                setEditorTags([]);
+                setEditorFileUrl(undefined);
+                setEditorFileName(undefined);
+                setEditorFileSize(undefined);
+                setShowEditor(false);
+            }
+        } catch (err) {
+            // 真正的异常（网络错误等）
+            console.error('获取知识资产失败:', err);
         }
     };
 
