@@ -68,6 +68,14 @@ export interface FileUploaderProps {
   }) => void;
   /** 上传错误回调 */
   onUploadError?: (error: string) => void;
+  /** 业务上下文类型（commit 时使用），如 'knowledge' */
+  contextType?: string;
+  /** 业务实体 ID（commit 时使用） */
+  contextId?: string;
+  /** 已有 fileGroupId（替换文件时传入，自动 version+1） */
+  fileGroupId?: string;
+  /** 变更原因 */
+  changeReason?: string;
 }
 
 interface UploadTask {

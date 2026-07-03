@@ -16,4 +16,5 @@ pub mod register_commands;
 pub mod role_commands;
 pub mod skill_commands;
 pub mod tenant_commands;
+pub mod upload_commands;
 pub mod user_commands;

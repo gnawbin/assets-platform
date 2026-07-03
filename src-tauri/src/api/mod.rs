@@ -70,6 +70,11 @@ pub async fn start_http_server(pool: sqlx::PgPool) {
         let state = std::sync::Arc::new(upload_routes::UploadRouterState { upload_mgr });
         Router::new()
             .route("/api/upload/init", post(upload_routes::init_upload))
+            .route("/api/upload/{id}/start", post(upload_routes::start_upload))
+            .route(
+                "/api/upload/{id}/commit",
+                post(upload_routes::commit_upload),
+            )
             .route("/api/upload/{id}/chunk", post(upload_routes::report_chunk))
             .route(
                 "/api/upload/{id}/progress",

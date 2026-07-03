@@ -255,6 +255,11 @@ pub fn run() {
             commands::skill_commands::register_custom_skill,
             commands::skill_commands::unregister_skill,
             commands::skill_commands::get_skill_count,
+            // 大文件上传（两步提交）
+            commands::upload_commands::upload_init,
+            commands::upload_commands::upload_start,
+            commands::upload_commands::upload_commit,
+            commands::upload_commands::upload_get_version_history,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

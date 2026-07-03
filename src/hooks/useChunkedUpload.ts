@@ -2,13 +2,15 @@
  * 大文件分片上传 Hook
  *
  * 纯逻辑 Hook，不依赖任何 UI 框架。
- * 管理上传状态机，支持：
- * - 并发上传（可配置并发数）
- * - 暂停/继续
- * - 断点续传（localStorage 持久化 upload_id）
- * - 取消上传
- * - 重试
- * - 上传速度计算
+ * 管理上传状态机，支持两步提交（Two-Phase Commit）：
+ * 1. init（占位，status=pending）
+ * 2. startUpload（创建 S3 MultipartUpload，返回 presigned URLs）
+ * 3. 并发上传分片到 S3
+ * 4. reportChunk 上报 + complete 合并
+ * 5. commit（关联业务实体）
+ *
+ * 并发上传（可配置并发数）
+ * 暂停/继续 / 断点续传 / 取消上传 / 重试 / 上传速度计算
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -31,6 +33,14 @@ export interface UseChunkedUploadOptions {
   onComplete?: (result: UploadCompleteResponse) => void;
   /** 错误回调 */
   onError?: (err: string) => void;
+  /** 业务上下文类型（commit 时使用），如 'knowledge' */
+  contextType?: string;
+  /** 业务实体 ID（commit 时使用） */
+  contextId?: string;
+  /** 已有 fileGroupId（替换文件时传入，自动 version+1） */
+  fileGroupId?: string;
+  /** 变更原因 */
+  changeReason?: string;
 }
 
 export interface UseChunkedUploadReturn {
@@ -81,6 +91,10 @@ export function useChunkedUpload(
     onProgress,
     onComplete,
     onError,
+    contextType,
+    contextId,
+    fileGroupId,
+    changeReason,
   } = options || {};
 
   const [progress, setProgress] = useState(0);
@@ -153,8 +167,8 @@ export function useChunkedUpload(
     chunksRef.current = [];
   }, [clearStorageId]);
 
-  // 核心上传逻辑
-  const startUpload = useCallback(async (file: File, existingUploadId?: string) => {
+  // 核心上传逻辑（两步提交）
+  const startUpload = useCallback(async (file: File) => {
     const uploadService = uploadServiceRef.current;
     pausedRef.current = false;
     abortControllerRef.current = new AbortController();
@@ -165,168 +179,92 @@ export function useChunkedUpload(
     setError(null);
 
     try {
-      let uploadId: string;
-      let presignedUrls: string[];
-      let chunkSize: number;
-      let totalChunks: number;
-
-      if (existingUploadId) {
-        // 断点续传：查询进度，只传缺失分片
-        const progressData = await uploadService.getProgress(existingUploadId);
-
-        if (progressData.status === 'completed') {
-          // 已经上传完成
-          setProgress(100);
-          setUploadedBytes(file.size);
-          setStatus('completed');
-          onComplete?.({
-            fileUrl: '',
-            etag: '',
-          });
-          clearStorageId();
-          return;
+      // ======== Phase 1: 初始化占位（status=pending） ========
+      const initResp = await uploadService.init(
+        file.name,
+        file.size,
+        file.type,
+        {
+          fileGroupId,
+          changeReason,
         }
+      );
+      const uploadId = initResp.uploadId;
+      uploadIdRef.current = uploadId;
+      saveStorageId(uploadId);
 
-        // 重新初始化获取 presigned URLs
-        const initResp = await uploadService.init(file.name, file.size, file.type);
-        uploadId = initResp.uploadId;
-        chunkSize = initResp.chunkSize;
-        totalChunks = initResp.totalChunks;
-        presignedUrls = initResp.presignedUrls;
+      // ======== Phase 2: 开始上传（创建 S3 MultipartUpload） ========
+      const startResp = await uploadService.startUpload(uploadId);
 
-        // 只上传缺失的分片
-        const uploadedSet = new Set(progressData.receivedChunks);
-        const missingIndices: number[] = [];
-        for (let i = 1; i <= totalChunks; i++) {
-          if (!uploadedSet.has(i)) {
-            missingIndices.push(i);
-          }
-        }
+      const chunkSize = startResp.chunkSize;
+      const totalChunks = startResp.totalChunks;
+      const presignedUrls = startResp.presignedUrls;
+      chunkSizeRef.current = chunkSize;
 
-        // 分片
-        const chunks: Blob[] = [];
-        for (let start = 0; start < file.size; start += chunkSize) {
-          chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
-        }
-        chunksRef.current = chunks;
-        chunkSizeRef.current = chunkSize;
-
-        // 并发上传缺失分片
-        let uploadedCount = progressData.receivedChunks.length;
-        let lastLoaded = uploadedCount * chunkSize;
-        let lastTime = Date.now();
-
-        const uploadOneChunk = async (partNumber: number): Promise<void> => {
-          if (pausedRef.current) return;
-          const presignedUrl = presignedUrls[partNumber - 1];
-          const chunk = chunks[partNumber - 1];
-
-          const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
-          await uploadService.reportChunk(uploadId, partNumber, etag);
-
-          uploadedCount++;
-          const pct = Math.round((uploadedCount / totalChunks) * 100);
-          setProgress(pct);
-          setUploadedBytes(uploadedCount * chunkSize);
-          onProgress?.(pct);
-
-          // 计算速度
-          const now = Date.now();
-          const elapsed = (now - lastTime) / 1000;
-          if (elapsed > 0.5) {
-            const currentLoaded = uploadedCount * chunkSize;
-            const bytesPerSec = (currentLoaded - lastLoaded) / elapsed;
-            setSpeed(bytesPerSec);
-            speedBytesRef.current = bytesPerSec;
-            lastLoaded = currentLoaded;
-            lastTime = now;
-          }
-        };
-
-        // 并发控制
-        const workers = [];
-        for (let i = 0; i < concurrency; i++) {
-          workers.push((async () => {
-            for (let j = i; j < missingIndices.length; j += concurrency) {
-              if (pausedRef.current) break;
-              await uploadOneChunk(missingIndices[j]);
-            }
-          })());
-        }
-        await Promise.all(workers);
-
-      } else {
-        // 新上传
-        const initResp = await uploadService.init(file.name, file.size, file.type);
-        uploadId = initResp.uploadId;
-        chunkSize = initResp.chunkSize;
-        totalChunks = initResp.totalChunks;
-        presignedUrls = initResp.presignedUrls;
-
-        // 保存 upload_id 用于断点续传
-        uploadIdRef.current = uploadId;
-        saveStorageId(uploadId);
-
-        // 分片
-        const chunks: Blob[] = [];
-        for (let start = 0; start < file.size; start += chunkSize) {
-          chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
-        }
-        chunksRef.current = chunks;
-        chunkSizeRef.current = chunkSize;
-
-        // 并发上传
-        let uploadedCount = 0;
-        let lastLoaded = 0;
-        let lastTime = Date.now();
-
-        const uploadOneChunk = async (partNumber: number): Promise<void> => {
-          if (pausedRef.current) return;
-          const presignedUrl = presignedUrls[partNumber - 1];
-          const chunk = chunks[partNumber - 1];
-
-          const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
-          await uploadService.reportChunk(uploadId, partNumber, etag);
-
-          uploadedCount++;
-          const pct = Math.round((uploadedCount / totalChunks) * 100);
-          setProgress(pct);
-          setUploadedBytes(uploadedCount * chunkSize);
-          onProgress?.(pct);
-
-          // 计算速度
-          const now = Date.now();
-          const elapsed = (now - lastTime) / 1000;
-          if (elapsed > 0.5) {
-            const currentLoaded = uploadedCount * chunkSize;
-            const bytesPerSec = (currentLoaded - lastLoaded) / elapsed;
-            setSpeed(bytesPerSec);
-            speedBytesRef.current = bytesPerSec;
-            lastLoaded = currentLoaded;
-            lastTime = now;
-          }
-        };
-
-        // 并发控制
-        const workers = [];
-        for (let i = 0; i < concurrency; i++) {
-          workers.push((async () => {
-            for (let j = i; j < totalChunks; j += concurrency) {
-              if (pausedRef.current) break;
-              await uploadOneChunk(j + 1);
-            }
-          })());
-        }
-        await Promise.all(workers);
+      // 分片
+      const chunks: Blob[] = [];
+      for (let start = 0; start < file.size; start += chunkSize) {
+        chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
       }
+      chunksRef.current = chunks;
+
+      // ======== Phase 3: 并发上传分片到 S3 ========
+      let uploadedCount = 0;
+      let lastLoaded = 0;
+      let lastTime = Date.now();
+
+      const uploadOneChunk = async (partNumber: number): Promise<void> => {
+        if (pausedRef.current) return;
+        const presignedUrl = presignedUrls[partNumber - 1];
+        const chunk = chunks[partNumber - 1];
+
+        const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
+        await uploadService.reportChunk(uploadId, partNumber, etag);
+
+        uploadedCount++;
+        const pct = Math.round((uploadedCount / totalChunks) * 100);
+        setProgress(pct);
+        setUploadedBytes(uploadedCount * chunkSize);
+        onProgress?.(pct);
+
+        // 计算速度
+        const now = Date.now();
+        const elapsed = (now - lastTime) / 1000;
+        if (elapsed > 0.5) {
+          const currentLoaded = uploadedCount * chunkSize;
+          const bytesPerSec = (currentLoaded - lastLoaded) / elapsed;
+          setSpeed(bytesPerSec);
+          speedBytesRef.current = bytesPerSec;
+          lastLoaded = currentLoaded;
+          lastTime = now;
+        }
+      };
+
+      // 并发控制
+      const workers = [];
+      for (let i = 0; i < concurrency; i++) {
+        workers.push((async () => {
+          for (let j = i; j < totalChunks; j += concurrency) {
+            if (pausedRef.current) break;
+            await uploadOneChunk(j + 1);
+          }
+        })());
+      }
+      await Promise.all(workers);
 
       // 如果被暂停了，不执行 complete
       if (pausedRef.current) {
         return;
       }
 
-      // 完成合并
+      // ======== Phase 4: 完成合并（status=completed） ========
       const result = await uploadService.complete(uploadId);
+
+      // ======== Phase 5: 提交（关联业务实体） ========
+      if (contextType && contextId) {
+        await uploadService.commit(uploadId, contextType, contextId);
+      }
+
       setProgress(100);
       setUploadedBytes(file.size);
       setStatus('completed');
@@ -343,53 +281,34 @@ export function useChunkedUpload(
       setStatus('error');
       onError?.(errMsg);
     }
-  }, [concurrency, saveStorageId, clearStorageId, onProgress, onComplete, onError]);
+  }, [concurrency, saveStorageId, clearStorageId, onProgress, onComplete, onError, contextType, contextId, fileGroupId, changeReason]);
 
   // 开始上传
   const start = useCallback(async (file: File) => {
-    // 检查是否有未完成的断点续传
-    if (autoResume) {
-      const savedId = getStorageId();
-      if (savedId) {
-        try {
-          const progressData = await uploadServiceRef.current.getProgress(savedId);
-          if (progressData.status === 'completed') {
-            // 已经上传完成，直接设置完成状态
-            setProgress(100);
-            setUploadedBytes(file.size);
-            setStatus('completed');
-            clearStorageId();
-            onComplete?.({
-              fileUrl: '',
-              etag: '',
-            });
-            return;
-          }
-          if (progressData.status === 'uploading') {
-            // 有未完成的上传，继续
-            await startUpload(file, savedId);
-            return;
-          }
-        } catch {
-          // 查询失败，重新开始
-          clearStorageId();
-        }
-      }
-    }
-
     await startUpload(file);
-  }, [autoResume, getStorageId, clearStorageId, startUpload, onComplete]);
+  }, [startUpload]);
 
-  // 继续上传（断点续传）
+  // 继续上传（重新开始 — 断点续传跳过已 complete 的）
   const resume = useCallback(async () => {
     if (!fileRef.current) return;
     const savedId = getStorageId();
     if (savedId) {
-      await startUpload(fileRef.current, savedId);
-    } else {
-      await startUpload(fileRef.current);
+      // 检查进度，如果已完成则跳过
+      try {
+        const progressData = await uploadServiceRef.current.getProgress(savedId);
+        if (progressData.status === 'completed') {
+          setProgress(100);
+          setUploadedBytes(fileRef.current.size);
+          setStatus('completed');
+          clearStorageId();
+          return;
+        }
+      } catch {
+        // 忽略
+      }
     }
-  }, [getStorageId, startUpload]);
+    await startUpload(fileRef.current);
+  }, [getStorageId, clearStorageId, startUpload]);
 
   // 重试
   const retry = useCallback(async () => {
