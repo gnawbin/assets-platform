@@ -40,10 +40,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     if (!isNaN(tenantId)) {
       try {
         // 调用后端 API 切换租户（更新服务端 USER_TENANT_CACHE）
-        // Tauri 命令需要 user_id + tenant_id，HTTP API 从 JWT 获取 user_id
+        // Tauri 命令需要 userId + tenantId
         await api.post('switch_tenant', {
-          user_id: String(user?.id ?? ''),
-          tenant_id: value,
+          userId: String(user?.id ?? ''),
+          tenantId: value,
         });
         // 更新前端本地状态
         switchTenant(tenantId);

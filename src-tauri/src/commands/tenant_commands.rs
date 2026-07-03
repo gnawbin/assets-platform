@@ -14,24 +14,24 @@ pub async fn get_tenants() -> Result<Vec<TenantResponse>, String> {
 /// 新增租户
 #[tauri::command]
 pub async fn insert_tenant(
-    tenant_name: String,
-    parent_id: Option<String>,
-    is_leaf: bool,
-    schema_name: Option<String>,
+    tenantName: String,
+    parentId: Option<String>,
+    isLeaf: bool,
+    schemaName: Option<String>,
     enable: bool,
-    created_by: Option<i64>,
+    createdBy: Option<i64>,
 ) -> Result<TenantResponse, String> {
-    let parent_id: Option<i64> = match parent_id {
+    let parent_id: Option<i64> = match parentId {
         Some(s) if !s.is_empty() => Some(s.parse().map_err(|e| format!("无效的父租户ID: {}", e))?),
         _ => None,
     };
     service::tenant_service::insert_tenant(
-        &tenant_name,
+        &tenantName,
         parent_id,
-        is_leaf,
-        schema_name.as_deref(),
+        isLeaf,
+        schemaName.as_deref(),
         enable,
-        created_by,
+        createdBy,
     )
     .await
 }
@@ -59,11 +59,9 @@ pub async fn delete_tenant(id: String) -> Result<(), String> {
 /// 前端选择租户时调用，切换到对应租户的 schema。
 /// tenant_id = 1 表示默认租户（public schema）。
 #[tauri::command]
-pub async fn switch_tenant(user_id: String, tenant_id: String) -> Result<String, String> {
-    let user_id: i64 = user_id
-        .parse()
-        .map_err(|e| format!("无效的用户ID: {}", e))?;
-    let tenant_id: i64 = tenant_id
+pub async fn switch_tenant(userId: String, tenantId: String) -> Result<String, String> {
+    let user_id: i64 = userId.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+    let tenant_id: i64 = tenantId
         .parse()
         .map_err(|e| format!("无效的租户ID: {}", e))?;
     let info = service::tenant_service::switch_tenant(user_id, tenant_id).await?;

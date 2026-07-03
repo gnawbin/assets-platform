@@ -8,9 +8,9 @@ use crate::service;
 /// 根据 tree_node_id 获取关联的知识资产
 #[tauri::command]
 pub async fn get_knowledge_asset_by_tree_node(
-    tree_node_id: String,
+    treeNodeId: String,
 ) -> Result<KnowledgeAsset, String> {
-    let id: i64 = tree_node_id
+    let id: i64 = treeNodeId
         .parse()
         .map_err(|e| format!("无效的节点ID: {}", e))?;
     service::knowledge_asset_service::get_knowledge_asset_by_tree_node(id).await

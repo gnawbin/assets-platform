@@ -123,14 +123,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   init: async () => {
-    // 开发模式下清除 localStorage，模拟新用户首次访问
-    if (process.env.NODE_ENV === 'development') {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem('available_tenants');
-      localStorage.removeItem('selected_tenant_id');
-    }
-
     set({ isInitializing: true });
 
     const storedToken = localStorage.getItem('auth_token');
@@ -162,12 +154,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const freshUser = await api.get<UserInfo>('get_current_user', { token: storedToken });
         // 更新 localStorage 中的缓存
         localStorage.setItem('auth_user', JSON.stringify(freshUser));
+
+        // 解析 localStorage 中的 available_tenants，确保 id 字段为数字类型
+        // （后端序列化 i64 为字符串，JSON.parse 后 id 为字符串，需要转回数字）
+        const parsedTenants: TenantInfo[] = storedTenants
+          ? (JSON.parse(storedTenants) as TenantInfo[]).map(t => ({ ...t, id: Number(t.id) }))
+          : [];
+
         set({
           user: freshUser,
           token: storedToken,
           isLoggedIn: true,
           isInitializing: false,
-          availableTenants: storedTenants ? JSON.parse(storedTenants) : [],
+          availableTenants: parsedTenants,
           selectedTenantId: storedSelectedTenant ? Number(storedSelectedTenant) : null,
         });
 
@@ -177,8 +176,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           if (!isNaN(tenantId)) {
             try {
               await api.post('switch_tenant', {
-                user_id: String(freshUser.id ?? ''),
-                tenant_id: storedSelectedTenant,
+                userId: String(freshUser.id ?? ''),
+                tenantId: storedSelectedTenant,
               });
             } catch {
               // 切换租户失败不影响登录状态，静默处理
