@@ -27,6 +27,7 @@ import {
     IconFileTypeZip,
     IconPhoto,
 } from '@tabler/icons-react';
+import { useChunkedUpload } from '@/hooks/useChunkedUpload';
 
 /**
  * 上传状态
@@ -43,41 +44,16 @@ export interface FileAttachPanelProps {
     fileName?: string;
     fileSize?: number;
 
-    /** 上传状态（由父组件传入以驱动进度显示） */
-    uploadStatus?: AttachUploadStatus;
-    /** 上传进度 0-100 */
-    uploadProgress?: number;
-    /** 上传速度（字节/秒） */
-    uploadSpeed?: number;
-    /** 错误信息 */
-    uploadError?: string | null;
-
-    /** 用户选择文件后的回调 */
-    onFileSelect?: (file: File) => void;
-    /** 暂停 */
-    onPause?: () => void;
-    /** 继续 */
-    onResume?: () => void;
-    /** 取消/清除 */
-    onCancel?: () => void;
-    /** 重试 */
-    onRetry?: () => void;
-    /** 正在上传（外部 loading） */
-    uploading?: boolean;
+    /** 上传完成回调（父组件可在此拿到 fileUrl 绑定到业务实体） */
+    onUploadComplete?: (result: { fileUrl: string; fileName: string; fileSize: number }) => void;
+    /** 上传错误回调 */
+    onUploadError?: (err: string) => void;
 }
 
 const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
-
-const formatSpeed = (bytesPerSec: number): string => {
-    if (bytesPerSec === 0) return '';
-    const k = 1024;
-    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-    return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
 function getFileExt(filename: string): string {
@@ -108,31 +84,59 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
     fileUrl: externalFileUrl,
     fileName: externalFileName,
     fileSize: externalFileSize,
-    uploadStatus = 'idle',
-    uploadProgress = 0,
-    uploadSpeed = 0,
-    uploadError = null,
-    onFileSelect,
-    onPause,
-    onResume,
-    onCancel,
-    onRetry,
-    uploading: externalUploading,
+    onUploadComplete,
+    onUploadError,
 }) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
-
     const hasExternalFile = !!externalFileName;
-    const isUploading = uploadStatus === 'uploading' || externalUploading;
+
+    // 使用 useChunkedUpload 管理上传逻辑
+    const upload = useChunkedUpload({
+        concurrency: 3,
+        autoResume: true,
+        storageKey: 'file_attach_upload',
+        onProgress: (pct: number) => {
+            // progress is tracked internally
+        },
+        onComplete: (result) => {
+            if (onUploadComplete) {
+                onUploadComplete({
+                    fileUrl: result.fileUrl,
+                    fileName: upload.fileName || '',
+                    fileSize: upload.totalBytes,
+                });
+            }
+        },
+        onError: (err) => {
+            onUploadError?.(err);
+        },
+    });
+
+    // 获取当前显示的文件信息
+    const displayFileName = externalFileName || upload.fileName;
+    const displayFileSize = externalFileSize || upload.totalBytes;
+    const displayFileUrl = externalFileUrl || upload.fileUrl;
+
+    const handleFileSelect = (file: File | null) => {
+        if (!file) return;
+        upload.start(file);
+    };
+
+    // 进度条颜色
     const progressColor =
-        uploadStatus === 'error'
+        upload.status === 'error'
             ? 'red'
-            : uploadStatus === 'paused'
+            : upload.status === 'paused'
                 ? 'yellow'
                 : 'blue';
 
-    const handleFileChange = (file: File | null) => {
-        if (!file || !onFileSelect) return;
-        onFileSelect(file);
+    // 格式化上传速度
+    const formatSpeed = (bytesPerSec: number): string => {
+        if (bytesPerSec === 0) return '';
+        const k = 1024;
+        const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+        const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
+        return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     };
 
     return (
@@ -140,22 +144,22 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
             <Stack gap="xs">
                 <Group justify="space-between">
                     <Group gap="xs" style={{ flex: 1, minWidth: 0 }}>
-                        {hasExternalFile ? (
+                        {displayFileName ? (
                             <>
-                                {getFileIcon(externalFileName || '')}
+                                {getFileIcon(displayFileName)}
                                 <Text size="sm" truncate style={{ maxWidth: 200 }}>
-                                    {externalFileName}
+                                    {displayFileName}
                                 </Text>
-                                {externalFileSize && externalFileSize > 0 && (
+                                {displayFileSize > 0 && (
                                     <Text size="xs" c="dimmed">
-                                        ({formatFileSize(externalFileSize)})
+                                        ({formatFileSize(displayFileSize)})
                                     </Text>
                                 )}
-                                {externalFileUrl && (
+                                {displayFileUrl && (
                                     <ActionIcon
                                         variant="subtle"
                                         component="a"
-                                        href={externalFileUrl}
+                                        href={displayFileUrl}
                                         target="_blank"
                                         size="sm"
                                     >
@@ -163,14 +167,14 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                     </ActionIcon>
                                 )}
                             </>
-                        ) : uploadStatus === 'completed' ? (
+                        ) : upload.status === 'completed' ? (
                             <Group gap="xs">
                                 <IconFile size={20} color="gray" />
                                 <Text size="sm" c="green" fw={500}>
                                     上传完成
                                 </Text>
                             </Group>
-                        ) : uploadStatus === 'idle' ? (
+                        ) : upload.status === 'idle' ? (
                             <>
                                 <IconPaperclip size={16} />
                                 <Text size="sm" c="dimmed">
@@ -178,10 +182,11 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                 </Text>
                             </>
                         ) : (
+                            // uploading / paused / error
                             <>
-                                <IconFile size={20} color="gray" />
+                                {getFileIcon(upload.fileName || '文件')}
                                 <Text size="sm" truncate style={{ maxWidth: 200 }}>
-                                    上传中...
+                                    {upload.fileName || '上传中...'}
                                 </Text>
                             </>
                         )}
@@ -189,13 +194,13 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
 
                     {/* 操作按钮 */}
                     <Group gap="xs" wrap="nowrap">
-                        {uploadStatus === 'uploading' && (
+                        {upload.status === 'uploading' && (
                             <>
                                 <Tooltip label="暂停">
                                     <ActionIcon
                                         variant="subtle"
                                         color="yellow"
-                                        onClick={onPause}
+                                        onClick={upload.pause}
                                         size="sm"
                                     >
                                         <IconPlayerPause size={14} />
@@ -205,7 +210,7 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                     <ActionIcon
                                         variant="subtle"
                                         color="red"
-                                        onClick={onCancel}
+                                        onClick={upload.cancel}
                                         size="sm"
                                     >
                                         <IconX size={14} />
@@ -213,13 +218,13 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                 </Tooltip>
                             </>
                         )}
-                        {uploadStatus === 'paused' && (
+                        {upload.status === 'paused' && (
                             <>
                                 <Tooltip label="继续">
                                     <ActionIcon
                                         variant="subtle"
                                         color="blue"
-                                        onClick={onResume}
+                                        onClick={upload.resume}
                                         size="sm"
                                     >
                                         <IconPlayerPlay size={14} />
@@ -229,7 +234,7 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                     <ActionIcon
                                         variant="subtle"
                                         color="red"
-                                        onClick={onCancel}
+                                        onClick={upload.cancel}
                                         size="sm"
                                     >
                                         <IconX size={14} />
@@ -237,13 +242,13 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                 </Tooltip>
                             </>
                         )}
-                        {uploadStatus === 'error' && (
+                        {upload.status === 'error' && (
                             <>
                                 <Tooltip label="重试">
                                     <ActionIcon
                                         variant="subtle"
                                         color="orange"
-                                        onClick={onRetry}
+                                        onClick={upload.retry}
                                         size="sm"
                                     >
                                         <IconRefresh size={14} />
@@ -253,7 +258,7 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                     <ActionIcon
                                         variant="subtle"
                                         color="red"
-                                        onClick={onCancel}
+                                        onClick={upload.cancel}
                                         size="sm"
                                     >
                                         <IconX size={14} />
@@ -261,28 +266,30 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                                 </Tooltip>
                             </>
                         )}
-                        {uploadStatus === 'idle' && !hasExternalFile && onFileSelect && (
-                            <FileButton onChange={handleFileChange} accept="*">
+                        {upload.status === 'idle' && !displayFileName && (
+                            <FileButton onChange={handleFileSelect} accept="*">
                                 {(props) => (
                                     <Button
                                         {...props}
                                         size="xs"
                                         variant="light"
                                         leftSection={<IconUpload size={14} />}
-                                        loading={isUploading}
                                     >
-                                        {isUploading ? '上传中...' : '上传文件'}
+                                        上传文件
                                     </Button>
                                 )}
                             </FileButton>
                         )}
-                        {(uploadStatus === 'completed' || hasExternalFile) && (
+                        {(upload.status === 'completed' || displayFileName) && (
                             <Button
                                 size="xs"
                                 variant="light"
                                 color="green"
                                 leftSection={<IconUpload size={14} />}
-                                onClick={onCancel}
+                                onClick={() => {
+                                    upload.cancel();
+                                    // 同时清除外部文件引用（通过重新选择文件实现）
+                                }}
                             >
                                 重新上传
                             </Button>
@@ -291,36 +298,36 @@ const FileAttachPanel: React.FC<FileAttachPanelProps> = ({
                 </Group>
 
                 {/* 进度条 */}
-                {(uploadStatus === 'uploading' || uploadStatus === 'paused') && (
+                {(upload.status === 'uploading' || upload.status === 'paused') && (
                     <Box>
                         <Group gap="xs" mb={2}>
                             <Progress
-                                value={uploadProgress}
+                                value={upload.progress}
                                 color={progressColor}
                                 size="sm"
                                 style={{ flex: 1 }}
-                                animated={uploadStatus === 'uploading'}
+                                animated={upload.status === 'uploading'}
                             />
                             <Text
                                 size="xs"
                                 c="dimmed"
                                 style={{ minWidth: 35, textAlign: 'right' }}
                             >
-                                {uploadProgress}%
+                                {upload.progress}%
                             </Text>
                         </Group>
-                        {uploadStatus === 'uploading' && uploadSpeed > 0 && (
+                        {upload.status === 'uploading' && upload.speed > 0 && (
                             <Text size="xs" c="dimmed">
-                                {formatSpeed(uploadSpeed)}
+                                {formatSpeed(upload.speed)}
                             </Text>
                         )}
                     </Box>
                 )}
 
                 {/* 错误信息 */}
-                {uploadStatus === 'error' && uploadError && (
+                {upload.status === 'error' && upload.error && (
                     <Text size="xs" c="red">
-                        {uploadError}
+                        {upload.error}
                     </Text>
                 )}
             </Stack>

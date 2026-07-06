@@ -56,6 +56,10 @@ export interface UseChunkedUploadReturn {
   totalBytes: number;
   /** 上传速度（字节/秒） */
   speed: number;
+  /** 文件名 */
+  fileName?: string;
+  /** 文件 URL（上传完成后） */
+  fileUrl?: string;
 
   /** 开始上传 */
   start: (file: File) => Promise<void>;
@@ -103,6 +107,8 @@ export function useChunkedUpload(
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState(0);
   const [speed, setSpeed] = useState(0);
+  const [fileName, setFileName] = useState<string | undefined>();
+  const [fileUrl, setFileUrl] = useState<string | undefined>();
 
   // 自动适配模式：浏览器 dev 模式使用 HTTP，Tauri 模式使用 Tauri invoke
   // S3 分片直传仍通过 HTTP PUT presigned URL，不受此影响
@@ -176,6 +182,7 @@ export function useChunkedUpload(
     abortControllerRef.current = new AbortController();
 
     fileRef.current = file;
+    setFileName(file.name);
     setTotalBytes(file.size);
     setStatus('uploading');
     setError(null);
@@ -268,6 +275,7 @@ export function useChunkedUpload(
       }
 
       setProgress(100);
+      setFileUrl(result.fileUrl);
       setUploadedBytes(file.size);
       setStatus('completed');
       clearStorageId();
@@ -337,6 +345,8 @@ export function useChunkedUpload(
     uploadedBytes,
     totalBytes,
     speed,
+    fileName,
+    fileUrl,
     start,
     pause,
     resume,
