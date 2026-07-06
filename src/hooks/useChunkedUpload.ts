@@ -104,9 +104,9 @@ export function useChunkedUpload(
   const [totalBytes, setTotalBytes] = useState(0);
   const [speed, setSpeed] = useState(0);
 
-  // 始终使用 Tauri 适配器（桌面应用通过 Tauri invoke 调用 Rust 命令）
+  // 自动适配模式：浏览器 dev 模式使用 HTTP，Tauri 模式使用 Tauri invoke
   // S3 分片直传仍通过 HTTP PUT presigned URL，不受此影响
-  const uploadServiceRef = useRef(new UploadService('tauri'));
+  const uploadServiceRef = useRef(new UploadService());
   const abortControllerRef = useRef<AbortController | null>(null);
   const fileRef = useRef<File | null>(null);
   const uploadIdRef = useRef<string | null>(null);

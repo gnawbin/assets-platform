@@ -204,7 +204,7 @@ export default function KnowledgePage() {
     const [uploadProgress, setUploadProgress] = useState(0);
     const [uploadSpeed, setUploadSpeed] = useState(0);
     const [uploadError, setUploadError] = useState<string | null>(null);
-    const uploadServiceRef = useRef(new UploadService('tauri'));
+    const uploadServiceRef = useRef(new UploadService());
     const pausedRef = useRef(false);
     const selectedFileRef = useRef<File | null>(null);
     const uploadIdRef = useRef<string | null>(null);
