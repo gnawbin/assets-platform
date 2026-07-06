@@ -27,6 +27,7 @@ import {
   IconKey,
   IconRefresh,
   IconShield,
+  IconBuildingStore,
 } from '@tabler/icons-react';
 import { notifySuccess, notifyError } from '@/utils/notify';
 import { useApi } from '@/hooks/useApi';
@@ -40,7 +41,7 @@ import {
 } from '@/services/userService';
 import { getDepartments, type Department } from '@/services/departmentService';
 import { getRoles, getUserRoleIds, assignUserRoles, type Role } from '@/services/permissionService';
-import { getTenants, type Tenant } from '@/services/tenantService';
+import { getTenants, getUserTenants, assignUserTenants, type Tenant } from '@/services/tenantService';
 import { useAuthStore } from '@/store/authStore';
 
 const UsersPage: React.FC = () => {
@@ -107,6 +108,13 @@ const UsersPage: React.FC = () => {
   const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
   const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
+
+  // 分配租户弹窗
+  const [tenantModalOpen, setTenantModalOpen] = useState(false);
+  const [tenantModalUser, setTenantModalUser] = useState<User | null>(null);
+  const [selectedTenantIds, setSelectedTenantIds] = useState<number[]>([]);
+  const [tenantModalLoading, setTenantModalLoading] = useState(false);
+  const { execute: doAssignUserTenants, loading: assigningTenants } = useApi(assignUserTenants);
 
   // 分配角色弹窗
   const [roleModalOpen, setRoleModalOpen] = useState(false);
@@ -336,26 +344,19 @@ const UsersPage: React.FC = () => {
 
   // 打开分配角色弹窗
   const openAssignRoleModal = async (user: User) => {
-    console.log('[DEBUG] openAssignRoleModal called, user:', user?.id, user?.real_name);
     setRoleModalUser(user);
     setRoleModalOpen(true);
     setRoleModalLoading(true);
 
     try {
-      console.log('[DEBUG] Calling getRoles()...');
       const roleList = await getRoles();
-      console.log('[DEBUG] roleList:', JSON.stringify(roleList));
       setRoles(roleList);
-      console.log('[DEBUG] Calling getUserRoleIds()...');
       const userRoleIds = await getUserRoleIds(String(user.id));
-      console.log('[DEBUG] userRoleIds:', JSON.stringify(userRoleIds));
-      console.log('[DEBUG] userRoleIds.map(String):', JSON.stringify(userRoleIds.map(String)));
       setSelectedRoleIds(userRoleIds.map(String));
     } catch (err) {
-      console.error('[DEBUG] 获取角色数据失败:', err);
+      console.error('获取角色数据失败:', err);
       notifyError('获取角色数据失败');
     } finally {
-      console.log('[DEBUG] openAssignRoleModal finally');
       setRoleModalLoading(false);
     }
   };
@@ -372,6 +373,45 @@ const UsersPage: React.FC = () => {
     } catch (err) {
       console.error('分配角色失败:', err);
       notifyError('分配角色失败', typeof err === 'string' ? err : undefined);
+    }
+  };
+
+  // 打开分配租户弹窗
+  const openTenantModal = async (user: User) => {
+    setTenantModalUser(user);
+    setTenantModalOpen(true);
+    setTenantModalLoading(true);
+
+    try {
+      // 获取所有启用的租户列表
+      const allTenants = await getTenants();
+      setTenants(allTenants);
+      // 获取用户当前已分配的租户（user.id 已经是后端传来的原始 bigint，直接传给服务函数会再转成字符串）
+      const userTenants = await getUserTenants(user.id);
+      setSelectedTenantIds(userTenants.map((t: Tenant) => t.id));
+    } catch (err) {
+      console.error('获取租户数据失败:', err);
+      notifyError('获取租户数据失败');
+    } finally {
+      setTenantModalLoading(false);
+    }
+  };
+
+  // 保存分配租户
+  const handleAssignTenants = async () => {
+    if (!tenantModalUser || !currentUser) return;
+    try {
+      // 使用原生的用户ID值（从后端传来的大整数可能已超出 JS number 精度，
+      // 直接作为 number 传入 tenantService 会再转成 String）
+      // 此处使用显式 String() 转换以匹配后端 i64_to_string 序列化格式
+      await doAssignUserTenants(tenantModalUser.id, selectedTenantIds, currentUser.id);
+      setTenantModalOpen(false);
+      setTenantModalUser(null);
+      setSelectedTenantIds([]);
+      notifySuccess('租户分配成功');
+    } catch (err) {
+      console.error('分配租户失败:', err);
+      notifyError('分配租户失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -474,7 +514,7 @@ const UsersPage: React.FC = () => {
                   <Table.Th>超级管理员</Table.Th>
                   <Table.Th>所属机构</Table.Th>
                   <Table.Th>状态</Table.Th>
-                  <Table.Th style={{ width: 380 }}>操作</Table.Th>
+                  <Table.Th style={{ width: 480 }}>操作</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -517,6 +557,16 @@ const UsersPage: React.FC = () => {
                       <Table.Td>{getStatusBadge(user.status)}</Table.Td>
                       <Table.Td>
                         <Group gap="xs">
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="teal"
+                            leftSection={<IconBuildingStore size={14} />}
+                            onClick={() => openTenantModal(user)}
+                            disabled={user.is_super_admin}
+                          >
+                            分配租户
+                          </Button>
                           <Button
                             size="xs"
                             variant="light"
@@ -874,6 +924,65 @@ const UsersPage: React.FC = () => {
               color="violet"
               onClick={handleAssignRoles}
               loading={assigningRoles}
+            >
+              保存
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* 分配租户弹窗 */}
+      <Modal
+        opened={tenantModalOpen}
+        onClose={() => setTenantModalOpen(false)}
+        title={`分配租户 - ${tenantModalUser?.real_name || ''}`}
+        size="md"
+      >
+        <Stack gap="md">
+          {tenantModalLoading ? (
+            <Group justify="center" py="xl">
+              <Loader />
+            </Group>
+          ) : (
+            <>
+              <Text size="sm" c="dimmed">
+                请选择该用户可以访问的租户：
+              </Text>
+              {tenants.length === 0 ? (
+                <Text ta="center" c="dimmed" py="md">
+                  暂无可用租户
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {tenants.map((tenant) => (
+                    <Checkbox
+                      key={tenant.id}
+                      label={tenant.tenant_name}
+                      description={tenant.schema_name || ''}
+                      checked={selectedTenantIds.includes(tenant.id)}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        if (e.currentTarget.checked) {
+                          setSelectedTenantIds([...selectedTenantIds, tenant.id]);
+                        } else {
+                          setSelectedTenantIds(
+                            selectedTenantIds.filter((id) => id !== tenant.id)
+                          );
+                        }
+                      }}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </>
+          )}
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setTenantModalOpen(false)}>
+              取消
+            </Button>
+            <Button
+              color="teal"
+              onClick={handleAssignTenants}
+              loading={assigningTenants}
             >
               保存
             </Button>

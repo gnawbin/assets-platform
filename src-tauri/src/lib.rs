@@ -160,6 +160,8 @@ pub fn run() {
             commands::tenant_commands::update_tenant,
             commands::tenant_commands::delete_tenant,
             commands::tenant_commands::switch_tenant,
+            commands::tenant_commands::assign_user_tenants,
+            commands::tenant_commands::get_user_tenants,
             // 注册申请
             commands::register_commands::register,
             commands::register_commands::get_registrations,

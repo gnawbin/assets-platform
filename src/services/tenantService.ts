@@ -51,3 +51,17 @@ export function updateTenant(params: {
 export function deleteTenant(id: number) {
     return api.delete<Tenant>('delete_tenant', { id });
 }
+
+/** 获取用户可访问的租户列表 */
+export function getUserTenants(userId: number | string) {
+    return api.get<Tenant[]>('get_user_tenants', { userId: String(userId) });
+}
+
+/** 为用户分配租户（覆盖式） */
+export function assignUserTenants(userId: number | string, tenantIds: number[] | string[], currentUserId: number | string) {
+    return api.post<void>('assign_user_tenants', {
+        userId: String(userId),
+        tenantIds: tenantIds.map(String),
+        currentUserId: String(currentUserId),
+    });
+}

@@ -67,3 +67,44 @@ pub async fn switch_tenant(userId: String, tenantId: String) -> Result<String, S
     let info = service::tenant_service::switch_tenant(user_id, tenant_id).await?;
     Ok(info.schema_name.unwrap_or_default())
 }
+
+/// 为用户分配租户（覆盖式）
+#[tauri::command]
+pub async fn assign_user_tenants(
+    userId: String,
+    tenantIds: Vec<String>,
+    currentUserId: String,
+) -> Result<(), String> {
+    let user_id: i64 = userId.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+    let current_user_id: i64 = currentUserId
+        .parse()
+        .map_err(|e| format!("无效的当前用户ID: {}", e))?;
+    let tenant_ids: Vec<i64> = tenantIds
+        .into_iter()
+        .map(|s| s.parse().map_err(|e| format!("无效的租户ID: {}", e)))
+        .collect::<Result<Vec<_>, _>>()?;
+    service::tenant_service::assign_user_tenants(user_id, &tenant_ids, current_user_id).await
+}
+
+/// 获取用户可访问的租户列表
+#[tauri::command]
+pub async fn get_user_tenants(
+    userId: String,
+) -> Result<Vec<service::tenant_service::TenantResponse>, String> {
+    let user_id: i64 = userId.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+    let tenants = service::tenant_service::get_user_tenants(user_id).await?;
+    // 将 TenantInfo 转换为 TenantResponse（复用现有 struct）
+    Ok(tenants
+        .into_iter()
+        .map(|t| service::tenant_service::TenantResponse {
+            id: t.id,
+            tenant_name: t.tenant_name,
+            parent_id: None,
+            is_leaf: true,
+            schema_name: t.schema_name,
+            enable: true,
+            create_at: None,
+            updated_at: None,
+        })
+        .collect())
+}
