@@ -73,6 +73,18 @@ interface UploadAdapter {
   commit(uploadId: string, contextType: string, contextId: string): Promise<void>;
 
   getVersionHistory(fileGroupId: string): Promise<UploadVersionInfo[]>;
+
+  /** 上报分片上传完成 */
+  reportChunk(uploadId: string, partNumber: number, etag: string): Promise<void>;
+
+  /** 完成上传合并分片 */
+  complete(uploadId: string): Promise<UploadCompleteResponse>;
+
+  /** 获取上传进度 */
+  getProgress(uploadId: string): Promise<UploadProgress>;
+
+  /** 取消上传 */
+  abort(uploadId: string): Promise<void>;
 }
 
 // ======================== Tauri 适配器 ========================
@@ -115,6 +127,44 @@ class TauriUploadAdapter implements UploadAdapter {
       fileGroupId,
     });
   }
+
+  /** 上报分片上传完成（通过 Tauri IPC） */
+  async reportChunk(uploadId: string, partNumber: number, etag: string): Promise<void> {
+    await invoke('upload_report_chunk', {
+      uploadId,
+      partNumber,
+      etag,
+    });
+  }
+
+  /** 完成上传合并分片（通过 Tauri IPC） */
+  async complete(uploadId: string): Promise<UploadCompleteResponse> {
+    const result = await invoke<{ fileUrl: string; etag: string }>('upload_complete', {
+      uploadId,
+    });
+    return { fileUrl: result.fileUrl, etag: result.etag };
+  }
+
+  /** 获取上传进度（通过 Tauri IPC） */
+  async getProgress(uploadId: string): Promise<UploadProgress> {
+    const result = await invoke<{
+      status: string;
+      receivedChunks: number[];
+      totalChunks: number;
+      progressPct: number;
+    }>('upload_get_progress', { uploadId });
+    return {
+      status: result.status,
+      receivedChunks: result.receivedChunks,
+      totalChunks: result.totalChunks,
+      progressPct: result.progressPct,
+    };
+  }
+
+  /** 取消上传（通过 Tauri IPC） */
+  async abort(uploadId: string): Promise<void> {
+    await invoke('upload_abort', { uploadId });
+  }
 }
 
 // ======================== HTTP 适配器 ========================
@@ -140,16 +190,21 @@ class HttpUploadAdapter implements UploadAdapter {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         filename,
-        fileSize,
-        mimeType,
-        fileGroupId: options?.fileGroupId,
-        changeReason: options?.changeReason,
-        fileMd5: options?.fileMd5,
+        file_size: fileSize,
+        mime_type: mimeType,
+        file_group_id: options?.fileGroupId,
+        change_reason: options?.changeReason,
+        file_md5: options?.fileMd5,
       }),
     });
     if (!res.ok) throw new Error(`初始化上传失败: ${res.statusText}`);
     const json = await res.json();
-    return json.data || json; // HTTP 适配器返回 { code, message, data }
+    const data = json.data || json;
+    // HTTP 适配器返回 snake_case，转换为 camelCase
+    return {
+      uploadId: data.upload_id ?? data.uploadId,
+      needStart: data.need_start ?? data.needStart ?? true,
+    };
   }
 
   async startUpload(uploadId: string): Promise<StartUploadResponse> {
@@ -158,14 +213,21 @@ class HttpUploadAdapter implements UploadAdapter {
     });
     if (!res.ok) throw new Error(`开始上传失败: ${res.statusText}`);
     const json = await res.json();
-    return json.data || json;
+    const data = json.data || json;
+    return {
+      uploadId: data.upload_id ?? data.uploadId,
+      s3UploadId: data.s3_upload_id ?? data.s3UploadId,
+      chunkSize: data.chunk_size ?? data.chunkSize,
+      totalChunks: data.total_chunks ?? data.totalChunks,
+      presignedUrls: data.presigned_urls ?? data.presignedUrls,
+    };
   }
 
   async commit(uploadId: string, contextType: string, contextId: string): Promise<void> {
     const res = await fetch(`${this.baseUrl}/upload/${uploadId}/commit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contextType, contextId }),
+      body: JSON.stringify({ context_type: contextType, context_id: Number(contextId) }),
     });
     if (!res.ok) throw new Error(`提交上传失败: ${res.statusText}`);
   }
@@ -176,15 +238,67 @@ class HttpUploadAdapter implements UploadAdapter {
     const json = await res.json();
     return json.data || json;
   }
+
+  async reportChunk(uploadId: string, partNumber: number, etag: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/chunk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ part_number: partNumber, etag }),
+    });
+    if (!res.ok) throw new Error(`上报分片失败: ${res.statusText}`);
+  }
+
+  async complete(uploadId: string): Promise<UploadCompleteResponse> {
+    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/complete`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`完成上传失败: ${res.statusText}`);
+    const json = await res.json();
+    const data = json.data || json;
+    return {
+      fileUrl: data.file_url ?? data.fileUrl,
+      etag: data.etag,
+    };
+  }
+
+  async getProgress(uploadId: string): Promise<UploadProgress> {
+    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/progress`);
+    if (!res.ok) throw new Error(`查询进度失败: ${res.statusText}`);
+    const json = await res.json();
+    const data = json.data || json;
+    return {
+      status: data.status,
+      receivedChunks: data.received_chunks ?? data.receivedChunks ?? [],
+      totalChunks: data.total_chunks ?? data.totalChunks,
+      progressPct: data.progress_pct ?? data.progressPct,
+    };
+  }
+
+  async abort(uploadId: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/upload/${uploadId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error(`取消上传失败: ${res.statusText}`);
+  }
 }
 
 // ======================== UploadService（统一入口）=================
 
 /**
- * 自动检测 Tauri 环境的函数
+ * 运行时检测是否应使用 Tauri 适配器
+ * 避免在模块加载时（SSR/SSG）检测导致错误
  */
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+export function shouldUseTauri(mode?: UploadAdapterMode): boolean {
+  if (mode) return mode === 'tauri';
+  // 1. 运行在 Tauri 运行时中
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) return true;
+  // 2. 环境变量（Next.js 构建时内联）
+  const envAdapter = typeof process !== 'undefined'
+    ? process.env?.NEXT_PUBLIC_API_ADAPTER
+    : undefined;
+  if (envAdapter === 'tauri') return true;
+  if (envAdapter === 'http') return false;
+  return false;
 }
 
 export class UploadService {
@@ -192,12 +306,13 @@ export class UploadService {
   private baseUrl: string;
 
   /**
-   * @param mode 可选，强制指定模式。不传则自动检测：
-   *   - Tauri 桌面环境 → 使用 invoke
-   *   - 浏览器环境 → 使用 HTTP
+   * @param mode 可选，强制指定模式。不传则按优先级自动选择：
+   *   1. 运行时检测 Tauri 环境
+   *   2. NEXT_PUBLIC_API_ADAPTER 环境变量
+   *   3. HTTP 兜底
    */
   constructor(mode?: UploadAdapterMode) {
-    const useTauri = mode ? mode === 'tauri' : isTauri();
+    const useTauri = shouldUseTauri(mode);
     this.adapter = useTauri
       ? new TauriUploadAdapter()
       : new HttpUploadAdapter();
@@ -236,9 +351,9 @@ export class UploadService {
     return this.adapter.commit(uploadId, contextType, contextId);
   }
 
-  // ======================== S3 直传 API ========================
+  // ======================== 适配器路由 API ========================
 
-  /** 上传单个分片到 S3 Presigned URL（始终使用 HTTP） */
+  /** 上传单个分片到 S3 Presigned URL（始终使用 HTTP，不经过适配器） */
   async uploadChunk(
     presignedUrl: string,
     chunk: Blob,
@@ -259,43 +374,22 @@ export class UploadService {
     partNumber: number,
     etag: string
   ): Promise<void> {
-    const res = await fetch(
-      `${this.baseUrl}/upload/${uploadId}/chunk`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partNumber, etag } satisfies ReportChunkRequest),
-      }
-    );
-    if (!res.ok) throw new Error(`上报分片失败: ${res.statusText}`);
+    return this.adapter.reportChunk(uploadId, partNumber, etag);
   }
 
   /** 查询上传进度 */
   async getProgress(uploadId: string): Promise<UploadProgress> {
-    const res = await fetch(
-      `${this.baseUrl}/upload/${uploadId}/progress`
-    );
-    if (!res.ok) throw new Error(`查询进度失败: ${res.statusText}`);
-    return res.json();
+    return this.adapter.getProgress(uploadId);
   }
 
   /** 完成分片上传 */
   async complete(uploadId: string): Promise<UploadCompleteResponse> {
-    const res = await fetch(
-      `${this.baseUrl}/upload/${uploadId}/complete`,
-      { method: 'POST' }
-    );
-    if (!res.ok) throw new Error(`完成上传失败: ${res.statusText}`);
-    return res.json();
+    return this.adapter.complete(uploadId);
   }
 
   /** 取消上传 */
   async abort(uploadId: string): Promise<void> {
-    const res = await fetch(
-      `${this.baseUrl}/upload/${uploadId}`,
-      { method: 'DELETE' }
-    );
-    if (!res.ok) throw new Error(`取消上传失败: ${res.statusText}`);
+    return this.adapter.abort(uploadId);
   }
 
   // ======================== 版本管理 API ========================

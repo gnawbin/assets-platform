@@ -9,6 +9,10 @@ version = "0.0.7"
 crate-type = ["staticlib", "cdylib", "rlib"]
 name = "assetsplatform_lib"
 
+[[bin]]
+name = "assets-platform"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = {version = "2.5.6", default-features = false, features = [] }# 关闭默认特性
 
@@ -41,11 +45,11 @@ opentelemetry_sdk = {version = "0.32.1", features = [
 tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
 
 argon2 = "0.5.3" # 最强密码哈希
-password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具                    
+password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具                           
 rand = {version = "0.10.1", features = ["std_rng"] } 
-rand_core = "0.10.0" # 提供 RngCore 等核心随机数 trait
+rand_core = "0.10.1" # 提供 RngCore 等核心随机数 trait
 # Tauri 核心（最小特性集）
-tauri = {version = "2.11.3", default-features = false, features = ["wry"] }
+tauri = {version = "2.11.5", default-features = false, features = ["wry"] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-fs = "2.5.1"
 tauri-plugin-opener = {version = "2.5.4", default-features = false}
@@ -127,15 +131,16 @@ winapi = {version = "0.3", features = [
 hex = "0.4"
 
 # Decimal type for NUMERIC database fields
-rust_decimal = "1.36"
+rust_decimal = "1.42.1"
 
 # AES encryption for API keys
-aes-gcm = "0.10"
+aes-gcm = "0.11.0"
 
 # AWS S3 SDK
 aws-config = {version = "1.5", default-features = false, features = ["rustls"] }
 aws-credential-types = "1.2"
 aws-sdk-s3 = {version = "1.60", default-features = false, features = ["rustls"] }
+aws-smithy-async = {version = "1.2", features = ["rt-tokio"] }
 
 # 工具库
 anyhow = "1.0.103"

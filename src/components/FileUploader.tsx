@@ -368,7 +368,7 @@ function UploadController({
 export function FileUploader({
   accept = '.pdf,.docx,.jpg,.png,.zip,.rar',
   maxSize = 10 * 1024 * 1024 * 1024, // 10GB
-  multiple = false,
+  multiple = true,
   concurrency = 3,
   onUploadComplete,
   onUploadError,
@@ -590,18 +590,17 @@ export function FileUploader({
               tasks.map((task) => (
                 <React.Fragment key={task.id}>
                   {/* 每个上传任务对应一个 UploadController 逻辑组件 */}
-                  {task.status === 'idle' && (
-                    <UploadController
-                      task={task}
-                      concurrency={concurrency}
-                      onProgress={handleProgress}
-                      onComplete={handleComplete}
-                      onError={handleError}
-                      onStatusChange={handleStatusChange}
-                      onSpeedChange={handleSpeedChange}
-                      onControllerReady={handleControllerReady}
-                    />
-                  )}
+                  {/* 注意：UploadController 必须在所有状态下保持渲染，否则 unmount 会中断上传 */}
+                  <UploadController
+                    task={task}
+                    concurrency={concurrency}
+                    onProgress={handleProgress}
+                    onComplete={handleComplete}
+                    onError={handleError}
+                    onStatusChange={handleStatusChange}
+                    onSpeedChange={handleSpeedChange}
+                    onControllerReady={handleControllerReady}
+                  />
                   <UploadTaskItem
                     task={task}
                     onPause={pauseUpload}

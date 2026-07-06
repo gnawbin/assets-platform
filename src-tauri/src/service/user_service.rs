@@ -106,8 +106,21 @@ impl From<SysUser> for UserResponse {
 /// 所有用户统一通过 sys_user_tenant 关联表查询，
 /// 包括超级管理员也需要在 sys_user_tenant 中有记录。
 async fn get_available_tenants(pool: &PgPool, user: &SysUser) -> Result<Vec<TenantInfo>, String> {
-    let tenants: Vec<SysTenant> = {
-        // 所有用户统一从 sys_user_tenant 关联表查询
+    let tenants: Vec<SysTenant> = if user.is_super_admin {
+        // 超级管理员直接返回所有启用租户，不依赖 sys_user_tenant 关联表
+        sqlx::query_as::<_, SysTenant>(
+            "SELECT id, tenant_name, parent_id, is_leaf, schema_name, enable, create_at, updated_at
+             FROM public.sys_tenant WHERE enable = true
+             ORDER BY id ASC",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            error!("查询租户列表失败: {}", e);
+            format!("查询租户列表失败: {}", e)
+        })?
+    } else {
+        // 普通用户从 sys_user_tenant 关联表查询
         sqlx::query_as::<_, SysTenant>(
             "SELECT t.id, t.tenant_name, t.parent_id, t.is_leaf, t.schema_name, t.enable, t.create_at, t.updated_at
              FROM public.sys_user_tenant ut

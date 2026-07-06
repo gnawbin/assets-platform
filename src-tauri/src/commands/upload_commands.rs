@@ -33,7 +33,7 @@ pub async fn upload_init(
     // 当前用户 ID（Tauri v2 中从 invoke 上下文获取）
     let created_by: i64 = 1;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     let record_id = upload_mgr
         .init(
@@ -69,7 +69,7 @@ pub async fn upload_start(uploadId: String) -> Result<serde_json::Value, String>
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     let result = upload_mgr.start_upload(&schema, upload_id).await?;
 
@@ -103,11 +103,105 @@ pub async fn upload_commit(
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     upload_mgr
         .commit(&schema, upload_id, &contextType, context_id)
         .await
+}
+
+/// 上报分片上传完成
+#[tauri::command]
+pub async fn upload_report_chunk(
+    uploadId: String,
+    partNumber: i32,
+    etag: String,
+) -> Result<(), String> {
+    let upload_id: i64 = uploadId
+        .parse()
+        .map_err(|_| "upload_id 格式不正确".to_string())?;
+
+    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
+    let s3_client = S3Client::new(s3_config.clone())
+        .await
+        .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
+    let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
+
+    let schema = crate::database::current_schema_name();
+
+    upload_mgr
+        .report_chunk(&schema, upload_id, partNumber, &etag)
+        .await
+}
+
+/// 查询上传进度
+#[tauri::command]
+pub async fn upload_get_progress(uploadId: String) -> Result<serde_json::Value, String> {
+    let upload_id: i64 = uploadId
+        .parse()
+        .map_err(|_| "upload_id 格式不正确".to_string())?;
+
+    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
+    let s3_client = S3Client::new(s3_config.clone())
+        .await
+        .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
+    let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
+
+    let schema = crate::database::current_schema_name();
+
+    let progress = upload_mgr.get_progress(&schema, upload_id).await?;
+
+    Ok(serde_json::json!({
+        "status": progress.status,
+        "receivedChunks": progress.received_chunks,
+        "totalChunks": progress.total_chunks,
+        "progressPct": progress.progress_pct,
+    }))
+}
+
+/// 完成上传（合并分片）
+#[tauri::command]
+pub async fn upload_complete(uploadId: String) -> Result<serde_json::Value, String> {
+    let upload_id: i64 = uploadId
+        .parse()
+        .map_err(|_| "upload_id 格式不正确".to_string())?;
+
+    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
+    let s3_client = S3Client::new(s3_config.clone())
+        .await
+        .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
+    let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
+
+    let schema = crate::database::current_schema_name();
+
+    let result = upload_mgr.complete(&schema, upload_id).await?;
+
+    Ok(serde_json::json!({
+        "fileUrl": result.file_url,
+        "etag": result.etag,
+    }))
+}
+
+/// 取消上传
+#[tauri::command]
+pub async fn upload_abort(uploadId: String) -> Result<(), String> {
+    let upload_id: i64 = uploadId
+        .parse()
+        .map_err(|_| "upload_id 格式不正确".to_string())?;
+
+    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
+    let s3_client = S3Client::new(s3_config.clone())
+        .await
+        .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
+    let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
+
+    let schema = crate::database::current_schema_name();
+
+    upload_mgr.abort(&schema, upload_id).await
 }
 
 /// 获取文件版本历史
@@ -122,7 +216,7 @@ pub async fn upload_get_version_history(
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     let records = upload_mgr
         .get_version_history(&schema, &fileGroupId)

@@ -245,6 +245,42 @@ pub async fn insert_tenant(
         })?;
     }
 
+    // 新增租户后，自动为所有超级管理员绑定该租户
+    let super_admins: Vec<(i64,)> = sqlx::query_as::<_, (i64,)>(
+        "SELECT id FROM public.sys_user WHERE is_super_admin = true AND (deleted IS NULL OR deleted = 0)"
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| {
+        error!("查询超级管理员列表失败: {}", e);
+        format!("查询超级管理员列表失败: {}", e)
+    })?;
+
+    for (sa_id,) in &super_admins {
+        sqlx::query(
+            "INSERT INTO public.sys_user_tenant (id, user_id, tenant_id, created_by)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(next_id() as i64)
+        .bind(sa_id)
+        .bind(id)
+        .bind(created_by)
+        .execute(&pool)
+        .await
+        .map_err(|e| {
+            error!("为超级管理员绑定租户失败: sa_id={}, error={}", sa_id, e);
+            format!("为超级管理员绑定租户失败: {}", e)
+        })?;
+    }
+    if !super_admins.is_empty() {
+        info!(
+            "已为 {} 个超级管理员自动绑定新租户: tenant_id={}",
+            super_admins.len(),
+            id
+        );
+    }
+
     info!("新增租户成功: id={}, tenant_name={}", id, tenant_name);
     Ok(tenant.into())
 }

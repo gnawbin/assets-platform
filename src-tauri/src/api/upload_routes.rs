@@ -99,7 +99,7 @@ pub async fn init_upload(
     }
 
     let created_by: i64 = 1;
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state
         .upload_mgr
@@ -139,7 +139,7 @@ pub async fn start_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.start_upload(&schema, upload_id).await {
         Ok(result) => {
@@ -168,7 +168,7 @@ pub async fn commit_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state
         .upload_mgr
@@ -192,7 +192,7 @@ pub async fn report_chunk(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state
         .upload_mgr
@@ -215,7 +215,7 @@ pub async fn get_progress(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.get_progress(&schema, upload_id).await {
         Ok(progress) => {
@@ -242,7 +242,7 @@ pub async fn complete_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.complete(&schema, upload_id).await {
         Ok(result) => {
@@ -267,7 +267,7 @@ pub async fn abort_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.abort(&schema, upload_id).await {
         Ok(_) => Ok(Json(ApiResponse::success(()))),

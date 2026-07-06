@@ -103,14 +103,16 @@ impl S3Client {
             "assets-platform",
         );
 
-        let aws_config = aws_config::defaults(BehaviorVersion::latest())
+        // 直接构造 S3 Config，跳过 AWS 默认凭证链（避免 ~/.aws/credentials 未找到警告）
+        // TokioSleep 由 SDK 在 Tokio 运行时下自动配置，无需显式指定
+        let s3_config = aws_sdk_s3::Config::builder()
+            .behavior_version(BehaviorVersion::latest())
             .region(Region::new(config.region.clone()))
             .endpoint_url(&config.endpoint)
             .credentials_provider(credentials)
-            .load()
-            .await;
+            .build();
 
-        let client = S3NativeClient::new(&aws_config);
+        let client = S3NativeClient::from_conf(s3_config);
 
         Ok(Self { client, config })
     }

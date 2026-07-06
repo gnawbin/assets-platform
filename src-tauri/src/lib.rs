@@ -117,16 +117,50 @@ pub fn run() {
 
             // 应用启动时自动初始化数据库
             tauri::async_runtime::block_on(async {
-                database::init_database().await.expect("数据库初始化失败");
-                tracing::info!("数据库初始化完成");
+                match database::init_database().await {
+                    Ok(()) => {
+                        tracing::info!("数据库初始化完成");
+                        // 初始化默认租户 schema（Tauri 模式下 GLOBAL_SCHEMA 的默认值）
+                        if let Ok(pool) = database::get_pool() {
+                            let schema: Option<String> = sqlx::query_scalar(
+                                "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true"
+                            )
+                            .fetch_optional(&pool)
+                            .await
+                            .ok()
+                            .flatten();
+                            if let Some(sn) = schema {
+                                database::set_global_schema(sn);
+                                tracing::info!("已设置默认租户 schema");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("数据库初始化失败: {:?}", e);
+                        // 不 panic，让 HTTP API 服务尝试启动（如果连接池可用）
+                    }
+                }
             });
 
             // 在后台启动 HTTP API 服务（与 Tauri 共用 Tokio 运行时）
-            let pool = database::get_pool().expect("获取数据库连接池失败");
-            tauri::async_runtime::spawn(async move {
-                api::start_http_server(pool).await;
-            });
+            match database::get_pool() {
+                Ok(pool) => {
+                    tracing::info!("准备启动 HTTP API 服务...");
+                    tauri::async_runtime::spawn(async move {
+                        tracing::info!("正在启动 HTTP API 服务...");
+                        if let Err(e) = api::start_http_server(pool).await {
+                            tracing::error!("HTTP API 服务异常退出: {:?}", e);
+                        } else {
+                            tracing::info!("HTTP API 服务已停止");
+                        }
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("获取数据库连接池失败，无法启动 HTTP API 服务: {}", e);
+                }
+            }
 
+            tracing::info!("Tauri setup 回调完成");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -260,6 +294,10 @@ pub fn run() {
             // 大文件上传（两步提交）
             commands::upload_commands::upload_init,
             commands::upload_commands::upload_start,
+            commands::upload_commands::upload_report_chunk,
+            commands::upload_commands::upload_complete,
+            commands::upload_commands::upload_abort,
+            commands::upload_commands::upload_get_progress,
             commands::upload_commands::upload_commit,
             commands::upload_commands::upload_get_version_history,
         ])

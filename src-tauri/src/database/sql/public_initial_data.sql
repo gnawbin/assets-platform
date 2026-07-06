@@ -3280,3 +3280,27 @@ WHERE
             user_id = 1
             AND role_id = 1
     );
+
+-- ==============================
+-- 10. 默认用户租户关联（admin 用户 → 所有启用租户）
+-- ==============================
+INSERT INTO
+    public.sys_user_tenant (
+        id,
+        user_id,
+        tenant_id,
+        created_by
+    )
+SELECT row_number() OVER (
+        ORDER BY t.id
+    ) + 2000, 1, t.id, 1
+FROM public.sys_tenant t
+WHERE
+    t.enable = true
+    AND NOT EXISTS (
+        SELECT 1
+        FROM public.sys_user_tenant ut
+        WHERE
+            ut.user_id = 1
+            AND ut.tenant_id = t.id
+    );

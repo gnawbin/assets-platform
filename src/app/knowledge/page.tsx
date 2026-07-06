@@ -204,7 +204,7 @@ export default function KnowledgePage() {
     const [uploadProgress, setUploadProgress] = useState(0);
     const [uploadSpeed, setUploadSpeed] = useState(0);
     const [uploadError, setUploadError] = useState<string | null>(null);
-    const uploadServiceRef = useRef(new UploadService());
+    const uploadServiceRef = useRef(new UploadService('tauri'));
     const pausedRef = useRef(false);
     const selectedFileRef = useRef<File | null>(null);
     const uploadIdRef = useRef<string | null>(null);
@@ -285,7 +285,12 @@ export default function KnowledgePage() {
     }, []);
 
     // ---- S3 分片上传核心逻辑 ----
-    const startChunkedUpload = useCallback(async (file: File) => {
+    const startChunkedUpload = useCallback(async (file: File | null) => {
+        if (!file) {
+            setUploadError('文件对象为空');
+            setUploadStatus('error');
+            return;
+        }
         const uploadService = uploadServiceRef.current;
         pausedRef.current = false;
         selectedFileRef.current = file;
@@ -297,16 +302,20 @@ export default function KnowledgePage() {
         try {
             // 1. 初始化分片上传
             const initResp = await uploadService.init(file.name, file.size, file.type);
-            const { uploadId, chunkSize, totalChunks, presignedUrls } = initResp;
+            const uploadId = initResp.uploadId;
             uploadIdRef.current = uploadId;
 
-            // 2. 分片
+            // 2. 开始 S3 分片上传（获取 presigned URLs）
+            const startResp = await uploadService.startUpload(uploadId);
+            const { chunkSize, totalChunks, presignedUrls } = startResp;
+
+            // 3. 分片（根据 chunkSize 切分文件）
             const chunks: Blob[] = [];
             for (let start = 0; start < file.size; start += chunkSize) {
                 chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
             }
 
-            // 3. 并发上传分片（并发数 3）
+            // 4. 并发上传分片（并发数 3）
             const concurrency = 3;
             let uploadedCount = 0;
             let lastLoaded = 0;

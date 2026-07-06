@@ -2,9 +2,8 @@
 //!
 //! 提供 AES-256-GCM 加密/解密功能，用于 API Key 等敏感信息的安全存储。
 
-use aes_gcm::aead::rand_core::RngCore;
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -37,8 +36,7 @@ pub fn encrypt_api_key(plaintext: &str) -> Result<String, String> {
         Aes256Gcm::new_from_slice(&key).map_err(|e| format!("创建 AES 密钥失败: {}", e))?;
 
     // 生成随机 nonce
-    let mut nonce_bytes = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce_bytes: [u8; NONCE_LEN] = rand::random();
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     // 加密
