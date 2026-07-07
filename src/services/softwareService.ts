@@ -10,15 +10,15 @@ import { api } from '@/utils/api';
 // ======================== 类型定义 ========================
 
 export interface IntangibleAssetView {
-    id: number;
+    id: string;
     asset_no: string;
     asset_type: string;
-    category_id: number;
+    category_id: string;
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: number | null;
-    user_id: number | null;
+    department_id: string | null;
+    user_id: string | null;
     status: number;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -26,13 +26,13 @@ export interface IntangibleAssetView {
     used_quantity: number | null;
     expire_date: string | null;
     description: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
     deleted: number | null;
     // intangible_assets 扩展字段
-    intangible_id: number | null;
+    intangible_id: string | null;
     intangible_type: string | null;
     register_no: string | null;
     register_owner: string | null;
@@ -55,12 +55,12 @@ export interface IntangibleAssetView {
 }
 
 export interface IntangibleAssetInput {
-    category_id: number;
+    category_id: string;
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: number | null;
-    user_id: number | null;
+    department_id: string | null;
+    user_id: string | null;
     status: number | null;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -96,7 +96,7 @@ export interface InsertIntangibleAssetParams {
 
 /** 更新无形资产参数 */
 export interface UpdateIntangibleAssetParams {
-    id: number;
+    id: string;
     input: IntangibleAssetInput;
 }
 
@@ -118,6 +118,6 @@ export function updateIntangibleAsset(params: UpdateIntangibleAssetParams) {
 }
 
 /** 删除无形资产（软删除） */
-export function deleteIntangibleAsset(id: number) {
+export function deleteIntangibleAsset(id: string) {
     return api.delete<string>('delete_intangible_asset', { id });
 }

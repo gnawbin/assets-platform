@@ -73,7 +73,6 @@ export function insertKnowledgeNode(params: {
     title: string;
     icon?: string;
     sortOrder?: number;
-    createdBy?: string;
 }) {
     return api.post<KnowledgeTree>('insert_knowledge_node', {
         knowledgeId: params.knowledgeId,
@@ -82,7 +81,6 @@ export function insertKnowledgeNode(params: {
         title: params.title,
         icon: params.icon,
         sortOrder: params.sortOrder,
-        createdBy: params.createdBy,
     });
 }
 
@@ -93,7 +91,6 @@ export function updateKnowledgeNode(params: {
     icon?: string;
     sortOrder?: number;
     isExpanded?: boolean;
-    updatedBy?: string;
 }) {
     return api.put<KnowledgeTree>('update_knowledge_node', params);
 }
@@ -135,7 +132,6 @@ export function insertKnowledge(params: {
     title: string;
     content: string;
     permissionLevel?: string;
-    createdBy?: string;
 }) {
     return api.post<AssetKnowledge>('insert_knowledge', params);
 }
@@ -147,7 +143,6 @@ export function updateKnowledge(params: {
     content?: string;
     knowledgeType?: string;
     permissionLevel?: string;
-    updatedBy?: string;
 }) {
     return api.put<AssetKnowledge>('update_knowledge', params);
 }

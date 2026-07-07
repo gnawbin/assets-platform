@@ -79,7 +79,7 @@ const UsersPage: React.FC = () => {
     real_name: '',
     email: '',
     phone: '',
-    department_id: null as number | null,
+    department_id: null as string | null,
     tenant_id: null as string | null,
     status: 1,
     nickname: '',
@@ -94,7 +94,7 @@ const UsersPage: React.FC = () => {
     real_name: '',
     email: '',
     phone: '',
-    department_id: null as number | null,
+    department_id: null as string | null,
     status: 1,
     nickname: '',
     person_code: '',
@@ -200,14 +200,13 @@ const UsersPage: React.FC = () => {
         realName: newUser.real_name.trim(),
         email: newUser.email.trim() || null,
         phone: newUser.phone.trim() || null,
-        departmentId: newUser.department_id,
+        departmentId: newUser.department_id ? Number(newUser.department_id) : null,
         status: newUser.status,
         nickname: newUser.nickname.trim() || null,
         personId: null,
         personCode: newUser.person_code.trim() || null,
         superUserId: null,
         tenantId: newUser.tenant_id,
-        createdBy: null,
       });
       setAddModalOpen(false);
       setNewUser({
@@ -265,13 +264,12 @@ const UsersPage: React.FC = () => {
         realName: editForm.real_name.trim(),
         email: editForm.email.trim() || null,
         phone: editForm.phone.trim() || null,
-        departmentId: editForm.department_id,
+        departmentId: editForm.department_id ? Number(editForm.department_id) : null,
         status: editForm.status,
         nickname: editForm.nickname.trim() || null,
         personId: null,
         personCode: editForm.person_code.trim() || null,
         superUserId: null,
-        updatedBy: null,
       });
       setEditModalOpen(false);
       setEditingUser(null);
@@ -688,13 +686,13 @@ const UsersPage: React.FC = () => {
             data={departmentOptions}
             value={
               newUser.department_id !== null
-                ? String(newUser.department_id)
+                ? newUser.department_id
                 : null
             }
             onChange={(value) =>
               setNewUser({
                 ...newUser,
-                department_id: value ? Number(value) : null,
+                department_id: value ?? null,
               })
             }
           />
@@ -807,13 +805,13 @@ const UsersPage: React.FC = () => {
             data={departmentOptions}
             value={
               editForm.department_id !== null
-                ? String(editForm.department_id)
+                ? editForm.department_id
                 : null
             }
             onChange={(value) =>
               setEditForm({
                 ...editForm,
-                department_id: value ? Number(value) : null,
+                department_id: value ?? null,
               })
             }
           />

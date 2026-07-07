@@ -33,14 +33,13 @@ export function insertTenant(params: {
     isLeaf: boolean;
     schemaName: string | null;
     enable: boolean;
-    createdBy: number | null;
 }) {
     return api.post<Tenant>('insert_tenant', params);
 }
 
 /** 更新租户 */
 export function updateTenant(params: {
-    id: number;
+    id: string;
     tenantName: string;
     enable: boolean;
 }) {
@@ -48,7 +47,7 @@ export function updateTenant(params: {
 }
 
 /** 删除租户（禁用租户） */
-export function deleteTenant(id: number) {
+export function deleteTenant(id: string) {
     return api.delete<Tenant>('delete_tenant', { id });
 }
 

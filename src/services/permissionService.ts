@@ -16,9 +16,9 @@ export interface Role {
     description: string | null;
     is_super_admin: boolean;
     tenant_id: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
     deleted: number | null;
 }

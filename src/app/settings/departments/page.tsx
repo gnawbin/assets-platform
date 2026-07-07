@@ -47,9 +47,9 @@ import { useAuthStore } from '@/store/authStore';
 
 // 树节点接口
 interface TreeNode {
-  id: number;
+  id: string;
   department_name: string;
-  parent_id: number | null;
+  parent_id: string | null;
   description: string | null;
   children: TreeNode[];
   expanded: boolean;
@@ -81,7 +81,7 @@ const DepartmentsPage: React.FC = () => {
   // 新增/编辑弹窗
   const [formModalOpen, setFormModalOpen] = useState(false);
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
-  const [formParentId, setFormParentId] = useState<number | null>(null);
+  const [formParentId, setFormParentId] = useState<string | null>(null);
   const [formName, setFormName] = useState('');
   const [formDesc, setFormDesc] = useState('');
 
@@ -129,7 +129,7 @@ const DepartmentsPage: React.FC = () => {
 
   // 构建树结构
   const buildTree = (depts: Department[]) => {
-    const map = new Map<number, TreeNode>();
+    const map = new Map<string, TreeNode>();
     const roots: TreeNode[] = [];
 
     // 先创建所有节点
@@ -161,7 +161,7 @@ const DepartmentsPage: React.FC = () => {
   const getDepartmentPath = (dept: Department): string => {
     const parts: string[] = [dept.department_name];
     let current = dept;
-    const visited = new Set<number>();
+    const visited = new Set<string>();
     visited.add(current.id);
 
     while (current.parent_id) {
@@ -175,14 +175,14 @@ const DepartmentsPage: React.FC = () => {
   };
 
   // 获取父部门名称
-  const getParentName = (parentId: number | null): string => {
+  const getParentName = (parentId: string | null): string => {
     if (!parentId) return '（顶级部门）';
     const parent = departments.find((d) => d.id === parentId);
     return parent ? parent.department_name : '（未知）';
   };
 
   // 打开新增弹窗
-  const openAddModal = (parentId: number | null = null) => {
+  const openAddModal = (parentId: string | null = null) => {
     setFormMode('add');
     setFormParentId(parentId);
     setFormName('');
@@ -218,7 +218,6 @@ const DepartmentsPage: React.FC = () => {
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
-          createdBy: null,
           tenantId: selectedTenantId,
         });
         notifySuccess('部门添加成功');
@@ -229,7 +228,6 @@ const DepartmentsPage: React.FC = () => {
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
           description: formDesc.trim() || null,
-          updatedBy: null,
         });
         notifySuccess('部门更新成功');
       }

@@ -59,10 +59,6 @@ export function insertCategory(params: InsertCategoryParams) {
             parent_id: params.parentId,
             sort: params.sort,
             description: params.description,
-            created_by: null,
-            created_at: null,
-            updated_by: null,
-            updated_at: null,
             deleted: null,
         },
     });
@@ -78,10 +74,6 @@ export function updateCategory(params: UpdateCategoryParams) {
             parent_id: params.parentId,
             sort: params.sort,
             description: params.description,
-            created_by: null,
-            created_at: null,
-            updated_by: null,
-            updated_at: null,
             deleted: null,
         },
     });

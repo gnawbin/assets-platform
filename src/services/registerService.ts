@@ -13,7 +13,7 @@ export interface RegisterRequest {
 }
 
 export interface RegisterResponse {
-    id: number;
+    id: string;
     username: string;
     real_name: string;
     email?: string;
@@ -22,7 +22,7 @@ export interface RegisterResponse {
     company_name?: string;
     reason?: string;
     status: number; // 0=待审核, 1=已通过, 2=已驳回
-    approve_by?: number;
+    approve_by?: string;
     approve_time?: string;
     approve_remark?: string;
     created_at?: string;
@@ -39,11 +39,11 @@ export function getRegistrations(status?: number) {
 }
 
 // 审核通过注册申请
-export function approveRegistration(id: number, approve_by: number, tenant_id: string, approve_remark?: string) {
-    return api.post<RegisterResponse>('approve_registration', { id: String(id), approveBy: approve_by, tenantId: tenant_id, approveRemark: approve_remark });
+export function approveRegistration(id: string, approve_by: string, tenant_id: string, approve_remark?: string) {
+    return api.post<RegisterResponse>('approve_registration', { id, approveBy: approve_by, tenantId: tenant_id, approveRemark: approve_remark });
 }
 
 // 驳回注册申请
-export function rejectRegistration(id: number, approve_by: number, approve_remark?: string) {
-    return api.post<RegisterResponse>('reject_registration', { id: String(id), approveBy: approve_by, approveRemark: approve_remark });
+export function rejectRegistration(id: string, approve_by: string, approve_remark?: string) {
+    return api.post<RegisterResponse>('reject_registration', { id, approveBy: approve_by, approveRemark: approve_remark });
 }

@@ -72,7 +72,6 @@ export function createKnowledgeAsset(params: {
     summary?: string;
     source?: string;
     tags?: string[];
-    createdBy?: string;
 }) {
     return api.post<KnowledgeAsset>('create_knowledge_asset', params);
 }
@@ -87,7 +86,6 @@ export function updateKnowledgeAsset(params: {
     source?: string;
     status?: KnowledgeStatus;
     tags?: string[];
-    updatedBy?: string;
 }) {
     return api.put<KnowledgeAsset>('update_knowledge_asset', params);
 }

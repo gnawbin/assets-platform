@@ -11,12 +11,12 @@ export interface TenantInfo {
 }
 
 export interface UserInfo {
-  id: number;
+  id: string;
   username: string;
   real_name: string;
   email: string | null;
   phone: string | null;
-  department_id: number | null;
+  department_id: string | null;
   is_super_admin: boolean;
   status: number;
   nickname: string | null;
