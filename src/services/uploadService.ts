@@ -364,7 +364,17 @@ export class UploadService {
       body: chunk,
       headers: { 'Content-Length': chunk.size.toString() },
     });
-    if (!res.ok) throw new Error(`分片 ${partNumber} 上传失败: ${res.statusText}`);
+    if (!res.ok) {
+      // 尝试读取 S3 返回的错误 XML/文本，帮助调试
+      let errorBody = '';
+      try {
+        errorBody = (await res.text()).slice(0, 1000);
+      } catch {
+        // 读取 body 失败时忽略
+      }
+      const detail = errorBody ? ` - ${errorBody}` : '';
+      throw new Error(`分片 ${partNumber} 上传失败: HTTP ${res.status} ${res.statusText}${detail}`);
+    }
     return res.headers.get('ETag') || '';
   }
 

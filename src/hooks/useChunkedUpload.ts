@@ -15,6 +15,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { UploadService, type UploadCompleteResponse } from '@/services/uploadService';
+import { logger } from '@/utils/logger';
 
 // ======================== 类型定义 ========================
 
@@ -148,6 +149,12 @@ export function useChunkedUpload(
     pausedRef.current = true;
     abortControllerRef.current?.abort();
     setStatus('paused');
+    logger.warn(`[Upload] 上传已暂停`, {
+      module: 'upload',
+      action: 'pause',
+      uploadId: uploadIdRef.current ?? undefined,
+      fileName: fileRef.current?.name,
+    });
   }, []);
 
   // 取消上传
@@ -155,10 +162,13 @@ export function useChunkedUpload(
     pausedRef.current = true;
     abortControllerRef.current?.abort();
 
+    const canceledUploadId = uploadIdRef.current;
+    const canceledFileName = fileRef.current?.name;
+
     // 通知后端取消上传
-    if (uploadIdRef.current) {
+    if (canceledUploadId) {
       try {
-        await uploadServiceRef.current.abort(uploadIdRef.current);
+        await uploadServiceRef.current.abort(canceledUploadId);
       } catch {
         // 忽略取消失败
       }
@@ -173,6 +183,13 @@ export function useChunkedUpload(
     fileRef.current = null;
     uploadIdRef.current = null;
     chunksRef.current = [];
+
+    logger.warn(`[Upload] 上传已取消`, {
+      module: 'upload',
+      action: 'cancel',
+      uploadId: canceledUploadId ?? undefined,
+      fileName: canceledFileName,
+    });
   }, [clearStorageId]);
 
   // 核心上传逻辑（两步提交）
@@ -189,6 +206,13 @@ export function useChunkedUpload(
 
     try {
       // ======== Phase 1: 初始化占位（status=pending） ========
+      logger.info(`[Upload] Phase 1: 初始化上传`, {
+        module: 'upload',
+        action: 'init',
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+      });
       const initResp = await uploadService.init(
         file.name,
         file.size,
@@ -203,12 +227,25 @@ export function useChunkedUpload(
       saveStorageId(uploadId);
 
       // ======== Phase 2: 开始上传（创建 S3 MultipartUpload） ========
+      logger.info(`[Upload] Phase 2: 创建 S3 MultipartUpload`, {
+        module: 'upload',
+        action: 'startUpload',
+        uploadId,
+      });
       const startResp = await uploadService.startUpload(uploadId);
 
       const chunkSize = startResp.chunkSize;
       const totalChunks = startResp.totalChunks;
       const presignedUrls = startResp.presignedUrls;
       chunkSizeRef.current = chunkSize;
+
+      logger.info(`[Upload] Phase 2 完成: 共 ${totalChunks} 个分片, 每片 ${chunkSize} 字节`, {
+        module: 'upload',
+        action: 'startUpload',
+        uploadId,
+        totalChunks,
+        chunkSize,
+      });
 
       // 分片
       const chunks: Blob[] = [];
@@ -222,19 +259,48 @@ export function useChunkedUpload(
       let lastLoaded = 0;
       let lastTime = Date.now();
 
+      // 记录失败的分片，容错处理
+      const failedChunks: number[] = [];
+
       const uploadOneChunk = async (partNumber: number): Promise<void> => {
         if (pausedRef.current) return;
         const presignedUrl = presignedUrls[partNumber - 1];
         const chunk = chunks[partNumber - 1];
 
-        const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
-        await uploadService.reportChunk(uploadId, partNumber, etag);
+        try {
+          const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
+          await uploadService.reportChunk(uploadId, partNumber, etag);
+        } catch (chunkErr: any) {
+          // 记录失败的分片，不让单个分片失败拖垮整个上传
+          failedChunks.push(partNumber);
+          logger.warn(`[Upload] 分片 ${partNumber} 上传失败，继续其他分片: ${chunkErr.message}`, {
+            module: 'upload',
+            action: 'uploadChunkError',
+            uploadId,
+            partNumber,
+            error: chunkErr.message,
+          });
+          return;
+        }
 
         uploadedCount++;
         const pct = Math.round((uploadedCount / totalChunks) * 100);
         setProgress(pct);
         setUploadedBytes(uploadedCount * chunkSize);
         onProgress?.(pct);
+
+        // 每 10 个分片或最后一个分片时打日志
+        if (uploadedCount % 10 === 0 || uploadedCount === totalChunks) {
+          logger.info(`[Upload] Phase 3: 分片 ${uploadedCount}/${totalChunks} 完成 (${pct}%)`, {
+            module: 'upload',
+            action: 'uploadChunk',
+            uploadId,
+            partNumber,
+            uploadedCount,
+            totalChunks,
+            progress: pct,
+          });
+        }
 
         // 计算速度
         const now = Date.now();
@@ -261,17 +327,59 @@ export function useChunkedUpload(
       }
       await Promise.all(workers);
 
+      // 如果有失败的分片，在 complete 之前打印汇总警告
+      if (failedChunks.length > 0) {
+        logger.warn(`[Upload] Phase 3 完成，但 ${failedChunks.length}/${totalChunks} 个分片失败: [${failedChunks.join(',')}]`, {
+          module: 'upload',
+          action: 'uploadChunkSummary',
+          uploadId,
+          failedCount: failedChunks.length,
+          totalChunks,
+          failedChunks,
+        });
+      }
+
       // 如果被暂停了，不执行 complete
       if (pausedRef.current) {
+        logger.warn(`[Upload] 上传被暂停，跳过完成合并`, {
+          module: 'upload',
+          action: 'paused',
+          uploadId,
+        });
         return;
       }
 
       // ======== Phase 4: 完成合并（status=completed） ========
+      logger.info(`[Upload] Phase 4: 合并分片中...`, {
+        module: 'upload',
+        action: 'complete',
+        uploadId,
+      });
       const result = await uploadService.complete(uploadId);
+      logger.info(`[Upload] Phase 4 完成: fileUrl=${result.fileUrl}`, {
+        module: 'upload',
+        action: 'complete',
+        uploadId,
+        fileUrl: result.fileUrl,
+      });
 
       // ======== Phase 5: 提交（关联业务实体） ========
       if (contextType && contextId) {
+        logger.info(`[Upload] Phase 5: 关联业务实体`, {
+          module: 'upload',
+          action: 'commit',
+          uploadId,
+          contextType,
+          contextId,
+        });
         await uploadService.commit(uploadId, contextType, contextId);
+        logger.info(`[Upload] Phase 5 完成: 已关联 ${contextType}/${contextId}`, {
+          module: 'upload',
+          action: 'commit',
+          uploadId,
+          contextType,
+          contextId,
+        });
       }
 
       setProgress(100);
@@ -281,15 +389,52 @@ export function useChunkedUpload(
       clearStorageId();
       onComplete?.(result);
 
+      logger.info(`[Upload] 上传成功: ${file.name} -> ${result.fileUrl}`, {
+        module: 'upload',
+        action: 'success',
+        fileName: file.name,
+        fileSize: file.size,
+        fileUrl: result.fileUrl,
+      });
+
     } catch (err: any) {
       if (pausedRef.current) {
         // 暂停导致的错误，不处理
         return;
       }
-      const errMsg = err.message || '上传失败';
-      setError(errMsg);
+      // 收集完整错误详情
+      // Tauri invoke() 抛出的 Error 中，message 可能为空/通用，真正信息在 toString() 中
+      const errMsg = err.message || (err.toString ? err.toString() : '') || '上传失败';
+      const errStack = err.stack || '';
+      const errToString = err.toString ? err.toString() : '';
+
+      // 格式化 UI 显示：如果 toString 包含有用信息但 message 为空，优先用 toString
+      const displayErr = errMsg && errMsg !== '上传失败'
+        ? errMsg
+        : errToString || '上传失败';
+
+      logger.error(`[Upload] 上传失败: ${displayErr}`, err instanceof Error ? err : new Error(displayErr), {
+        module: 'upload',
+        action: 'error',
+        fileName: file.name,
+        fileSize: file.size,
+        uploadId: uploadIdRef.current ?? undefined,
+        errorStack: errStack,
+        errorToString: errToString,
+      });
+
+      // 在控制台额外打印详细错误，方便开发调试
+      console.error(`[Upload] 上传失败详情:`);
+      console.error(`  fileName: ${file.name}`);
+      console.error(`  uploadId: ${uploadIdRef.current}`);
+      console.error(`  message: ${errMsg}`);
+      console.error(`  toString: ${errToString}`);
+      console.error(`  stack: ${errStack}`);
+
+      // UI 显示具体的错误原因（而非笼统的"上传失败"）
+      setError(displayErr);
       setStatus('error');
-      onError?.(errMsg);
+      onError?.(displayErr);
     }
   }, [concurrency, saveStorageId, clearStorageId, onProgress, onComplete, onError, contextType, contextId, fileGroupId, changeReason]);
 

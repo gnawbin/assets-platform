@@ -321,59 +321,131 @@ impl UploadManager {
 
     /// 上报分片上传完成
     ///
-    /// 前端上传分片到 S3 后，调用此接口告知后端
+    /// 使用原子 SQL 操作追加分片到 received_chunks，避免并发覆盖。
+    /// PostgreSQL 数组追加 + 幂等性检查在单条 SQL 中完成。
+    ///
+    /// 性能说明：PostgreSQL 的数组操作是 O(n)，n 最大 10000 分片，性能可接受。
+    /// 如需更高性能可改用 jsonb 或关联表，但当前方案已足够。
     pub async fn report_chunk(
         &self,
         schema: &str,
         upload_id: i64,
         part_number: i32,
-        etag: &str,
+        _etag: &str,
     ) -> Result<(), String> {
-        // 检查上传记录是否存在且状态为 uploading
-        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
-            "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0 FOR UPDATE",
+        // 参数校验（不依赖数据库查询）
+        if part_number < 1 {
+            tracing::error!(
+                "[report_chunk] 参数错误: upload_id={}, part_number={} < 1",
+                upload_id,
+                part_number
+            );
+            return Err(format!("分片序号 {} 不合法，必须大于等于 1", part_number));
+        }
+
+        tracing::info!(
+            "[report_chunk] 开始: upload_id={}, part_number={}",
+            upload_id,
+            part_number
+        );
+
+        // 原子操作：UPDATE + 数组追加，单条 SQL 完成
+        // - received_chunks || ARRAY[$1]：追加分片号到数组末尾
+        // - NOT ($1 = ANY(received_chunks))：幂等性，已存在则跳过
+        // - status = 'uploading'：状态校验
+        // 全部在 PostgreSQL 事务中原子完成，无需 FOR UPDATE 行锁
+        let result = sqlx::query(sqlx::AssertSqlSafe(format!(
+            r#"
+            UPDATE {}.file_uploads
+            SET received_chunks = received_chunks || $1::int[],
+                updated_at = NOW()
+            WHERE id = $2
+              AND deleted = 0
+              AND status = 'uploading'
+              AND $1 <@ ARRAY(SELECT generate_series(1, total_chunks)) -- 分片号合法
+              AND NOT ($1 = ANY(received_chunks)) -- 幂等性，已存在则跳过
+            "#,
             schema
         )))
-        .bind(upload_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| format!("查询上传记录失败: {}", e))?
-        .ok_or_else(|| "上传记录不存在".to_string())?;
-
-        if record.status != "uploading" {
-            return Err(format!(
-                "上传状态不是 uploading，当前状态: {}",
-                record.status
-            ));
-        }
-
-        // 检查分片序号是否合法
-        if part_number < 1 || part_number > record.total_chunks {
-            return Err(format!(
-                "分片序号 {} 不合法，有效范围: 1~{}",
-                part_number, record.total_chunks
-            ));
-        }
-
-        // 检查分片是否已上报（幂等性）
-        if record.received_chunks.contains(&part_number) {
-            return Ok(());
-        }
-
-        // 追加分片到 received_chunks
-        let mut chunks = record.received_chunks.clone();
-        chunks.push(part_number);
-        chunks.sort();
-
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE {}.file_uploads SET received_chunks = $1, updated_at = NOW() WHERE id = $2",
-            schema
-        )))
-        .bind(&chunks)
+        .bind(&vec![part_number])
         .bind(upload_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| format!("更新分片记录失败: {}", e))?;
+        .map_err(|e| {
+            tracing::error!(
+                "[report_chunk] SQL 执行失败: upload_id={}, part_number={}, error={}",
+                upload_id,
+                part_number,
+                e
+            );
+            format!("更新分片记录失败: {}", e)
+        })?;
+
+        // 检查是否有行被更新
+        if result.rows_affected() == 0 {
+            tracing::warn!(
+                "[report_chunk] 0 rows affected: upload_id={}, part_number={}",
+                upload_id,
+                part_number
+            );
+            // 0 行影响可能是：记录不存在、状态不对、分片已存在、分片号不合法
+            // 查一次数据库确定具体原因（仅在异常时查询，不影响正常路径性能）
+            let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
+                "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0",
+                schema
+            )))
+            .bind(upload_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| format!("查询上传记录失败: {}", e))?
+            .ok_or_else(|| "上传记录不存在".to_string())?;
+
+            tracing::warn!(
+                "[report_chunk] 状态检查: upload_id={}, status={}, total_chunks={}, received={:?}",
+                upload_id,
+                record.status,
+                record.total_chunks,
+                record.received_chunks
+            );
+
+            // 根据记录状态判断错误
+            if record.status != "uploading" {
+                return Err(format!(
+                    "上传状态不是 uploading，当前状态: {}",
+                    record.status
+                ));
+            }
+
+            if part_number > record.total_chunks {
+                return Err(format!(
+                    "分片序号 {} 不合法，有效范围: 1~{}",
+                    part_number, record.total_chunks
+                ));
+            }
+
+            // 分片已上报，幂等返回成功
+            if record.received_chunks.contains(&part_number) {
+                tracing::info!(
+                    "[report_chunk] 幂等跳过: upload_id={}, part_number={}",
+                    upload_id,
+                    part_number
+                );
+                return Ok(());
+            }
+
+            tracing::error!(
+                "[report_chunk] 未知原因导致 0 rows affected: upload_id={}, part_number={}",
+                upload_id,
+                part_number
+            );
+        } else {
+            tracing::info!(
+                "[report_chunk] 成功: upload_id={}, part_number={}, rows_affected={}",
+                upload_id,
+                part_number,
+                result.rows_affected()
+            );
+        }
 
         Ok(())
     }
