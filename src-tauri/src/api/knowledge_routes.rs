@@ -92,7 +92,7 @@ pub async fn insert_node(
         &req.title,
         req.icon.as_deref(),
         req.sort_order.unwrap_or(0),
-        cb,
+        Some(cb.unwrap_or(1)),
     )
     .await
     {
@@ -208,7 +208,7 @@ pub async fn insert_knowledge(
         &req.title,
         &req.content,
         req.permission_level.as_deref().unwrap_or("internal"),
-        cb,
+        Some(cb.unwrap_or(1)),
     )
     .await
     {

@@ -100,7 +100,7 @@ pub async fn get_roles(
 
     sql.push_str(" ORDER BY id ASC");
 
-    let roles = sqlx::query_as::<_, Role>(&sql)
+    let roles = sqlx::query_as::<_, Role>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -460,7 +460,7 @@ pub async fn get_user_menus(user_id: i64) -> Result<Vec<SidebarMenuItem>, String
         placeholders.join(", ")
     );
 
-    let mut query = sqlx::query_as::<_, (i64,)>(&menu_ids_sql);
+    let mut query = sqlx::query_as::<_, (i64,)>(sqlx::AssertSqlSafe(menu_ids_sql));
     for rid in &role_ids {
         query = query.bind(rid);
     }
@@ -487,7 +487,7 @@ pub async fn get_user_menus(user_id: i64) -> Result<Vec<SidebarMenuItem>, String
         placeholders2.join(", ")
     );
 
-    let mut query2 = sqlx::query_as::<_, SysMenu>(&menus_sql);
+    let mut query2 = sqlx::query_as::<_, SysMenu>(sqlx::AssertSqlSafe(menus_sql));
     for mid in &allowed_menu_ids {
         query2 = query2.bind(mid);
     }

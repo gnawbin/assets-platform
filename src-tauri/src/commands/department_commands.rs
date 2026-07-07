@@ -23,7 +23,7 @@ pub async fn insert_department(
     department_name: String,
     parent_id: Option<String>,
     description: Option<String>,
-    created_by: Option<i64>,
+    currentUserId: Option<String>,
     tenant_id: Option<String>,
 ) -> Result<Department, String> {
     let parent_id: Option<i64> = parent_id
@@ -40,7 +40,7 @@ pub async fn insert_department(
         &department_name,
         parent_id,
         description.as_deref(),
-        created_by,
+        currentUserId.and_then(|id| id.parse().ok()),
         tenant_id,
     )
     .await
@@ -53,7 +53,7 @@ pub async fn update_department(
     department_name: String,
     parent_id: Option<String>,
     description: Option<String>,
-    updated_by: Option<i64>,
+    currentUserId: Option<String>,
 ) -> Result<Department, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的部门ID: {}", e))?;
     let parent_id: Option<i64> = parent_id
@@ -67,7 +67,7 @@ pub async fn update_department(
         &department_name,
         parent_id,
         description.as_deref(),
-        updated_by,
+        currentUserId.and_then(|id| id.parse().ok()),
     )
     .await
 }

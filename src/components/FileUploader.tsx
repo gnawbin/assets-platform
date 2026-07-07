@@ -9,6 +9,9 @@
  * - 上传速度显示
  * - 文件类型/大小校验
  * - 断点续传
+ * - 批量上传
+ * - 内联模式（inline）：不弹 Modal，直接以内联面板渲染
+ * - 单文件模式（singleFile）：限制只上传一个文件
  */
 
 'use client';
@@ -26,6 +29,7 @@ import {
   Tooltip,
   Box,
   rem,
+  FileButton,
 } from '@mantine/core';
 import { Dropzone, type FileRejection } from '@mantine/dropzone';
 import { useDisclosure } from '@mantine/hooks';
@@ -45,6 +49,8 @@ import {
   IconPhoto,
   IconVideo,
   IconMusic,
+  IconPaperclip,
+  IconExternalLink,
 } from '@tabler/icons-react';
 import { useChunkedUpload } from '@/hooks/useChunkedUpload';
 import type { UploadStatus } from '@/hooks/useChunkedUpload';
@@ -60,6 +66,20 @@ export interface FileUploaderProps {
   multiple?: boolean;
   /** 并发上传数，默认 3 */
   concurrency?: number;
+
+  /** ========== 内联模式（适用于 MarkdownEditor 附件面板） ========== */
+  /** 是否为内联模式（无 Modal，直接以内联面板渲染），默认 false */
+  inline?: boolean;
+  /** 单文件模式（inline 模式下）：只允许一个文件，选新文件替换旧文件，默认 true（inline 模式下） */
+  singleFile?: boolean;
+  /** 已有文件的 URL（inline + singleFile 下显示已有文件） */
+  fileUrl?: string;
+  /** 已有文件的名称 */
+  fileName?: string;
+  /** 已有文件的大小 */
+  fileSize?: number;
+
+  /** ========== 回调 ========== */
   /** 上传完成回调 */
   onUploadComplete?: (result: {
     fileUrl: string;
@@ -68,6 +88,14 @@ export interface FileUploaderProps {
   }) => void;
   /** 上传错误回调 */
   onUploadError?: (error: string) => void;
+  /** 业务上下文类型（commit 时使用），如 'knowledge' */
+  contextType?: string;
+  /** 业务实体 ID（commit 时使用） */
+  contextId?: string;
+  /** 已有 fileGroupId（替换文件时传入，自动 version+1） */
+  fileGroupId?: string;
+  /** 变更原因 */
+  changeReason?: string;
 }
 
 interface UploadTask {
@@ -127,6 +155,26 @@ function getFileIcon(filename: string): React.ReactNode {
     wav: <IconMusic size={24} color="teal" />,
   };
   return iconMap[ext] || <IconFile size={24} color="gray" />;
+}
+
+function getSmallFileIcon(filename: string): React.ReactNode {
+  const ext = getFileExt(filename);
+  const iconMap: Record<string, React.ReactNode> = {
+    pdf: <IconFileTypePdf size={20} color="red" />,
+    doc: <IconFileTypeDoc size={20} color="blue" />,
+    docx: <IconFileTypeDoc size={20} color="blue" />,
+    xls: <IconFileTypeXls size={20} color="green" />,
+    xlsx: <IconFileTypeXls size={20} color="green" />,
+    jpg: <IconPhoto size={20} color="purple" />,
+    jpeg: <IconPhoto size={20} color="purple" />,
+    png: <IconPhoto size={20} color="purple" />,
+    gif: <IconPhoto size={20} color="purple" />,
+    webp: <IconPhoto size={20} color="purple" />,
+    zip: <IconFileTypeZip size={20} color="yellow" />,
+    rar: <IconFileTypeZip size={20} color="yellow" />,
+    '7z': <IconFileTypeZip size={20} color="yellow" />,
+  };
+  return iconMap[ext] || <IconFile size={20} color="gray" />;
 }
 
 // ======================== 上传任务项组件 ========================
@@ -355,19 +403,411 @@ function UploadController({
   return null;
 }
 
+// ======================== 内联单文件模式（替代 FileAttachPanel 功能） ========================
+
+interface InlineFileAttachProps {
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: number;
+  maxSize: number;
+  accept: string;
+  concurrency: number;
+  onUploadComplete?: (result: {
+    fileUrl: string;
+    originalName: string;
+    fileSize: number;
+  }) => void;
+  onUploadError?: (error: string) => void;
+}
+
+function InlineFileAttach({
+  fileUrl: externalFileUrl,
+  fileName: externalFileName,
+  fileSize: externalFileSize,
+  maxSize,
+  accept,
+  concurrency,
+  onUploadComplete,
+  onUploadError,
+}: InlineFileAttachProps) {
+  const [displayFileName, setDisplayFileName] = useState<string | undefined>(externalFileName);
+  const [displayFileUrl, setDisplayFileUrl] = useState<string | undefined>(externalFileUrl);
+  const [displayFileSize, setDisplayFileSize] = useState<number | undefined>(externalFileSize);
+  const [uploadState, setUploadState] = useState<UploadStatus>('idle');
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [speed, setSpeed] = useState(0);
+  const [uploadStageText, setUploadStageText] = useState<string>('');
+  const fileRef = useRef<File | null>(null);
+
+  // 已有的外部文件信息同步
+  useEffect(() => {
+    if (externalFileName && uploadState === 'idle') {
+      setDisplayFileName(externalFileName);
+      setDisplayFileUrl(externalFileUrl);
+      setDisplayFileSize(externalFileSize);
+    }
+  }, [externalFileName, externalFileUrl, externalFileSize, uploadState]);
+
+  const upload = useChunkedUpload({
+    concurrency,
+    autoResume: true,
+    storageKey: 'inline_file_attach_upload',
+    onProgress: (pct) => {
+      setProgress(pct);
+    },
+    onComplete: (result) => {
+      setUploadState('completed');
+      setProgress(100);
+      setDisplayFileName(fileRef.current?.name || result.fileUrl.split('/').pop() || '');
+      setDisplayFileUrl(result.fileUrl);
+      setDisplayFileSize(fileRef.current?.size || 0);
+      onUploadComplete?.({
+        fileUrl: result.fileUrl,
+        originalName: fileRef.current?.name || '',
+        fileSize: fileRef.current?.size || 0,
+      });
+    },
+    onError: (err) => {
+      setUploadState('error');
+      setError(err);
+      onUploadError?.(err);
+    },
+  });
+
+  // 同步 useChunkedUpload 的状态
+  useEffect(() => {
+    if (upload.status !== 'idle') {
+      setUploadState(upload.status);
+    }
+    if (upload.status === 'uploading') {
+      setProgress(upload.progress);
+      // 根据进度推断当前阶段
+      if (upload.progress === 0) {
+        setUploadStageText('初始化上传...');
+      } else if (upload.progress < 100) {
+        setUploadStageText(`上传分片中 (${upload.progress}%)...`);
+      } else if (upload.progress === 100) {
+        setUploadStageText('完成合并中...');
+      }
+    }
+    if (upload.status === 'paused') {
+      setUploadStageText('已暂停');
+    }
+    if (upload.status === 'completed') {
+      setUploadStageText('上传完成');
+    }
+    if (upload.status === 'error' && upload.error) {
+      setUploadStageText('上传失败');
+      setError(upload.error);
+    }
+    if (upload.status === 'idle') {
+      setUploadStageText('');
+    }
+  }, [upload.status, upload.progress, upload.error]);
+
+  const handleFileSelect = (file: File | null) => {
+    if (!file) return;
+
+    // 文件大小校验
+    if (file.size > maxSize) {
+      const msg = `文件 ${file.name} 超过大小限制 ${formatSize(maxSize)}`;
+      notifications.show({ title: '文件过大', message: msg, color: 'red' });
+      onUploadError?.(msg);
+      return;
+    }
+
+    // 重置状态
+    setProgress(0);
+    setError(null);
+    setUploadState('uploading');
+    fileRef.current = file;
+    setDisplayFileName(file.name);
+    setDisplayFileSize(file.size);
+    setDisplayFileUrl(undefined);
+
+    upload.start(file);
+  };
+
+  // 进度条颜色
+  const progressColor =
+    uploadState === 'error' ? 'red' : uploadState === 'paused' ? 'yellow' : 'blue';
+
+  const formatSpeedLocal = (bytesPerSec: number): string => {
+    if (bytesPerSec === 0) return '';
+    const k = 1024;
+    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
+    return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const formatFileSizeLocal = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <Paper p="sm" withBorder>
+      <Stack gap="xs">
+        <Group justify="space-between">
+          <Group gap="xs" style={{ flex: 1, minWidth: 0 }}>
+            {displayFileName && uploadState !== 'uploading' && uploadState !== 'paused' ? (
+              <>
+                {getSmallFileIcon(displayFileName)}
+                <Text size="sm" truncate style={{ maxWidth: 200 }}>
+                  {displayFileName}
+                </Text>
+                {displayFileSize && displayFileSize > 0 && (
+                  <Text size="xs" c="dimmed">
+                    ({formatFileSizeLocal(displayFileSize)})
+                  </Text>
+                )}
+                {displayFileUrl && (
+                  <ActionIcon
+                    variant="subtle"
+                    component="a"
+                    href={displayFileUrl}
+                    target="_blank"
+                    size="sm"
+                  >
+                    <IconExternalLink size={14} />
+                  </ActionIcon>
+                )}
+              </>
+            ) : uploadState === 'completed' ? (
+              <Group gap="xs">
+                <IconFile size={20} color="gray" />
+                <Text size="sm" c="green" fw={500}>
+                  上传完成
+                </Text>
+              </Group>
+            ) : uploadState === 'idle' || uploadState === 'error' ? (
+              <>
+                <IconPaperclip size={16} />
+                <Text size="sm" c="dimmed">
+                  {uploadState === 'error' ? '上传失败' : '暂无附件'}
+                </Text>
+              </>
+            ) : (
+              // uploading / paused
+              <>
+                {getSmallFileIcon(upload.fileName || '文件')}
+                <Text size="sm" truncate style={{ maxWidth: 200 }}>
+                  {upload.fileName || '上传中...'}
+                </Text>
+              </>
+            )}
+          </Group>
+
+          {/* 操作按钮 */}
+          <Group gap="xs" wrap="nowrap">
+            {uploadState === 'uploading' && (
+              <>
+                <Tooltip label="暂停">
+                  <ActionIcon
+                    variant="subtle"
+                    color="yellow"
+                    onClick={upload.pause}
+                    size="sm"
+                  >
+                    <IconPlayerPause size={14} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="取消">
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    onClick={() => {
+                      upload.cancel();
+                      setUploadState('idle');
+                      setProgress(0);
+                      setError(null);
+                    }}
+                    size="sm"
+                  >
+                    <IconX size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            )}
+            {uploadState === 'paused' && (
+              <>
+                <Tooltip label="继续">
+                  <ActionIcon
+                    variant="subtle"
+                    color="blue"
+                    onClick={upload.resume}
+                    size="sm"
+                  >
+                    <IconPlayerPlay size={14} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="取消">
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    onClick={() => {
+                      upload.cancel();
+                      setUploadState('idle');
+                      setProgress(0);
+                      setError(null);
+                    }}
+                    size="sm"
+                  >
+                    <IconX size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            )}
+            {uploadState === 'error' && (
+              <>
+                <Tooltip label="重试">
+                  <ActionIcon
+                    variant="subtle"
+                    color="orange"
+                    onClick={upload.retry}
+                    size="sm"
+                  >
+                    <IconRefresh size={14} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="清除">
+                  <ActionIcon
+                    variant="subtle"
+                    color="red"
+                    onClick={() => {
+                      upload.cancel();
+                      setUploadState('idle');
+                      setProgress(0);
+                      setError(null);
+                      setDisplayFileName(externalFileName);
+                      setDisplayFileUrl(externalFileUrl);
+                      setDisplayFileSize(externalFileSize);
+                    }}
+                    size="sm"
+                  >
+                    <IconX size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            )}
+            {(uploadState === 'idle' || (uploadState === 'completed' && !displayFileName)) && (
+              <FileButton onChange={handleFileSelect} accept={accept}>
+                {(props) => (
+                  <Button
+                    {...props}
+                    size="xs"
+                    variant="light"
+                    leftSection={<IconUpload size={14} />}
+                  >
+                    上传文件
+                  </Button>
+                )}
+              </FileButton>
+            )}
+            {(uploadState === 'completed' || (displayFileName && uploadState === 'idle')) && (
+              <Button
+                size="xs"
+                variant="light"
+                color="green"
+                leftSection={<IconUpload size={14} />}
+                onClick={() => {
+                  upload.cancel();
+                  setUploadState('idle');
+                  setProgress(0);
+                  setError(null);
+                }}
+              >
+                重新上传
+              </Button>
+            )}
+          </Group>
+        </Group>
+
+        {/* 阶段说明文字 */}
+        {uploadStageText && (uploadState === 'uploading' || uploadState === 'paused') && (
+          <Text size="xs" c="dimmed">
+            {uploadStageText}
+          </Text>
+        )}
+
+        {/* 进度条 */}
+        {(uploadState === 'uploading' || uploadState === 'paused') && (
+          <Box>
+            <Group gap="xs" mb={2}>
+              <Progress
+                value={progress}
+                color={progressColor}
+                size="sm"
+                style={{ flex: 1 }}
+                animated={uploadState === 'uploading'}
+              />
+              <Text
+                size="xs"
+                c="dimmed"
+                style={{ minWidth: 35, textAlign: 'right' }}
+              >
+                {progress}%
+              </Text>
+            </Group>
+            {uploadState === 'uploading' && speed > 0 && (
+              <Text size="xs" c="dimmed">
+                {formatSpeedLocal(speed)}
+              </Text>
+            )}
+          </Box>
+        )}
+
+        {/* 错误信息 */}
+        {uploadState === 'error' && error && (
+          <Text size="xs" c="red">
+            {error}
+          </Text>
+        )}
+      </Stack>
+    </Paper>
+  );
+}
+
 // ======================== 主组件 ========================
 
 export function FileUploader({
   accept = '.pdf,.docx,.jpg,.png,.zip,.rar',
   maxSize = 10 * 1024 * 1024 * 1024, // 10GB
-  multiple = false,
+  multiple = true,
   concurrency = 3,
+  inline = false,
+  singleFile = true,
+  fileUrl,
+  fileName,
+  fileSize,
   onUploadComplete,
   onUploadError,
+  contextType,
+  contextId,
+  fileGroupId,
+  changeReason,
 }: FileUploaderProps) {
   const [opened, { open, close }] = useDisclosure(false);
   const [tasks, setTasks] = useState<UploadTask[]>([]);
   const controllersRef = useRef<Map<string, UploadControllerHandle>>(new Map());
+
+  // ========== 内联模式：直接渲染 InlineFileAttach，不弹 Modal ==========
+  if (inline && singleFile) {
+    return (
+      <InlineFileAttach
+        fileUrl={fileUrl}
+        fileName={fileName}
+        fileSize={fileSize}
+        maxSize={maxSize}
+        accept={accept}
+        concurrency={concurrency}
+        onUploadComplete={onUploadComplete}
+        onUploadError={onUploadError}
+      />
+    );
+  }
 
   // ======================== 文件校验 ========================
 
@@ -582,18 +1022,17 @@ export function FileUploader({
               tasks.map((task) => (
                 <React.Fragment key={task.id}>
                   {/* 每个上传任务对应一个 UploadController 逻辑组件 */}
-                  {task.status === 'idle' && (
-                    <UploadController
-                      task={task}
-                      concurrency={concurrency}
-                      onProgress={handleProgress}
-                      onComplete={handleComplete}
-                      onError={handleError}
-                      onStatusChange={handleStatusChange}
-                      onSpeedChange={handleSpeedChange}
-                      onControllerReady={handleControllerReady}
-                    />
-                  )}
+                  {/* 注意：UploadController 必须在所有状态下保持渲染，否则 unmount 会中断上传 */}
+                  <UploadController
+                    task={task}
+                    concurrency={concurrency}
+                    onProgress={handleProgress}
+                    onComplete={handleComplete}
+                    onError={handleError}
+                    onStatusChange={handleStatusChange}
+                    onSpeedChange={handleSpeedChange}
+                    onControllerReady={handleControllerReady}
+                  />
                   <UploadTaskItem
                     task={task}
                     onPause={pauseUpload}

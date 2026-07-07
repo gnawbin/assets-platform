@@ -52,21 +52,25 @@ where
     CURRENT_SCHEMA.scope(schema, f).await
 }
 
+/// 获取当前 schema 名称
+///
+/// - 优先级：CURRENT_SCHEMA（HTTP 模式）> GLOBAL_SCHEMA（Tauri 模式）> "public"
+pub fn current_schema_name() -> String {
+    CURRENT_SCHEMA.try_with(|s| s.clone()).unwrap_or_else(|_| {
+        get_global_schema()
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "public".to_string())
+    })
+}
+
 /// 获取 schema 前缀（例如 "tenant_b."）
 ///
 /// - 优先级：CURRENT_SCHEMA（HTTP 模式）> GLOBAL_SCHEMA（Tauri 模式）> "public"
-/// - 如果 schema 为 "public" 或 "public"，返回空字符串
+/// - 如果 schema 为 "public" 或空字符串，返回空字符串
 /// - 否则返回 "{schema}." 格式的前缀
 pub fn schema_prefix() -> String {
-    let schema = CURRENT_SCHEMA
-        .try_with(|s| s.clone())
-        // HTTP 模式未设置时，回退到全局 schema（Tauri 模式使用）
-        .unwrap_or_else(|_| {
-            get_global_schema()
-                .read()
-                .map(|g| g.clone())
-                .unwrap_or_else(|_| "public".to_string())
-        });
+    let schema = current_schema_name();
     if schema == "public" || schema.is_empty() {
         String::new()
     } else {

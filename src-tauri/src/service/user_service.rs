@@ -102,12 +102,16 @@ impl From<SysUser> for UserResponse {
 }
 
 /// 查询用户可访问的租户列表
+///
+/// 所有用户统一通过 sys_user_tenant 关联表查询，
+/// 包括超级管理员也需要在 sys_user_tenant 中有记录。
 async fn get_available_tenants(pool: &PgPool, user: &SysUser) -> Result<Vec<TenantInfo>, String> {
     let tenants: Vec<SysTenant> = if user.is_super_admin {
-        // 超级管理员：返回所有启用的租户
+        // 超级管理员直接返回所有启用租户，不依赖 sys_user_tenant 关联表
         sqlx::query_as::<_, SysTenant>(
             "SELECT id, tenant_name, parent_id, is_leaf, schema_name, enable, create_at, updated_at
-             FROM public.sys_tenant WHERE enable = true ORDER BY id ASC",
+             FROM public.sys_tenant WHERE enable = true
+             ORDER BY id ASC",
         )
         .fetch_all(pool)
         .await
@@ -116,7 +120,7 @@ async fn get_available_tenants(pool: &PgPool, user: &SysUser) -> Result<Vec<Tena
             format!("查询租户列表失败: {}", e)
         })?
     } else {
-        // 普通用户：从 sys_user_tenant 关联表查询
+        // 普通用户从 sys_user_tenant 关联表查询
         sqlx::query_as::<_, SysTenant>(
             "SELECT t.id, t.tenant_name, t.parent_id, t.is_leaf, t.schema_name, t.enable, t.create_at, t.updated_at
              FROM public.sys_user_tenant ut
@@ -458,6 +462,35 @@ pub async fn insert_user(
         error!("新增用户数据库操作失败: username={}, error={}", username, e);
         format!("新增用户失败: {}", e)
     })?;
+
+    // 如果是超级管理员，自动分配所有启用的租户
+    if user.is_super_admin {
+        info!("超级管理员 '{}' 创建时自动分配所有租户...", user.username);
+        let all_tenants: Vec<(i64,)> = sqlx::query_as::<_, (i64,)>(
+            "SELECT id FROM public.sys_tenant WHERE enable = true ORDER BY id ASC",
+        )
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询租户列表失败: {}", e);
+            format!("查询租户列表失败: {}", e)
+        })?;
+
+        let tenant_ids: Vec<i64> = all_tenants.into_iter().map(|(id,)| id).collect();
+        if !tenant_ids.is_empty() {
+            crate::service::tenant_service::assign_user_tenants(
+                user.id,
+                &tenant_ids,
+                created_by.unwrap_or(user.id),
+            )
+            .await?;
+            info!(
+                "超级管理员 '{}' 已分配 {} 个租户",
+                user.username,
+                tenant_ids.len()
+            );
+        }
+    }
 
     info!("新增用户成功: id={}, username={}", user.id, user.username);
     Ok(user.into())

@@ -2,15 +2,14 @@
 //!
 //! 提供固定资产和无形资产的 RESTful 接口。
 
-use axum::{extract::Path, Json};
-use serde::Deserialize;
-use utoipa::ToSchema;
+use axum::{extract::Path, Extension, Json};
 
 use crate::service;
 use crate::service::assets_service::{
     HardwareAssetInput, HardwareAssetView, IntangibleAssetInput, IntangibleAssetView,
 };
 
+use super::auth::UserContext;
 use super::response::{ApiError, ApiResponse};
 
 // ======================== 固定资产 ========================
@@ -50,9 +49,10 @@ pub async fn get_hardware_assets() -> Result<Json<ApiResponse<Vec<HardwareAssetV
     )
 )]
 pub async fn insert_hardware_asset(
+    Extension(ctx): Extension<UserContext>,
     Json(input): Json<HardwareAssetInput>,
 ) -> Result<Json<ApiResponse<HardwareAssetView>>, ApiError> {
-    match service::assets_service::insert_hardware_asset(input).await {
+    match service::assets_service::insert_hardware_asset(input, ctx.user_id).await {
         Ok(asset) => Ok(Json(ApiResponse::success(asset))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
@@ -73,6 +73,7 @@ pub async fn insert_hardware_asset(
     )
 )]
 pub async fn update_hardware_asset(
+    Extension(ctx): Extension<UserContext>,
     Path(id): Path<String>,
     Json(input): Json<HardwareAssetInput>,
 ) -> Result<Json<ApiResponse<HardwareAssetView>>, ApiError> {
@@ -80,7 +81,7 @@ pub async fn update_hardware_asset(
         .parse()
         .map_err(|_| ApiError::bad_request("无效的资产ID"))?;
 
-    match service::assets_service::update_hardware_asset(id, input).await {
+    match service::assets_service::update_hardware_asset(id, input, ctx.user_id).await {
         Ok(asset) => Ok(Json(ApiResponse::success(asset))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
@@ -150,9 +151,10 @@ pub async fn get_intangible_assets() -> Result<Json<ApiResponse<Vec<IntangibleAs
     )
 )]
 pub async fn insert_intangible_asset(
+    Extension(ctx): Extension<UserContext>,
     Json(input): Json<IntangibleAssetInput>,
 ) -> Result<Json<ApiResponse<IntangibleAssetView>>, ApiError> {
-    match service::assets_service::insert_intangible_asset(input).await {
+    match service::assets_service::insert_intangible_asset(input, ctx.user_id).await {
         Ok(asset) => Ok(Json(ApiResponse::success(asset))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
@@ -173,6 +175,7 @@ pub async fn insert_intangible_asset(
     )
 )]
 pub async fn update_intangible_asset(
+    Extension(ctx): Extension<UserContext>,
     Path(id): Path<String>,
     Json(input): Json<IntangibleAssetInput>,
 ) -> Result<Json<ApiResponse<IntangibleAssetView>>, ApiError> {
@@ -180,7 +183,7 @@ pub async fn update_intangible_asset(
         .parse()
         .map_err(|_| ApiError::bad_request("无效的资产ID"))?;
 
-    match service::assets_service::update_intangible_asset(id, input).await {
+    match service::assets_service::update_intangible_asset(id, input, ctx.user_id).await {
         Ok(asset) => Ok(Json(ApiResponse::success(asset))),
         Err(e) => Err(ApiError::internal_error(e)),
     }

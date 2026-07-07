@@ -10,7 +10,7 @@ import { api } from '@/utils/api';
 // ======================== 类型定义 ========================
 
 export interface AssetReceive {
-    id: number;
+    id: string;
     receive_no: string;
     asset_id: string;
     user_id: string;
@@ -18,12 +18,12 @@ export interface AssetReceive {
     receive_date: string;
     reason: string;
     status: number;
-    approve_by: number | null;
+    approve_by: string | null;
     approve_time: string | null;
     approve_remark: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
@@ -38,73 +38,73 @@ export interface AssetReceiveInput {
 }
 
 export interface AssetReturn {
-    id: number;
+    id: string;
     return_no: string;
-    receive_id: number;
-    asset_id: number;
-    user_id: number;
+    receive_id: string;
+    asset_id: string;
+    user_id: string;
     return_date: string;
     asset_status: number;
     remark: string | null;
-    confirm_by: number;
+    confirm_by: string;
     confirm_time: string;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
 export interface AssetReturnInput {
     [key: string]: unknown;
-    receive_id: number;
-    asset_id: number;
-    user_id: number;
+    receive_id: string;
+    asset_id: string;
+    user_id: string;
     return_date: string;
     asset_status?: number;
     remark?: string;
-    confirm_by: number;
+    confirm_by: string;
     confirm_time: string;
 }
 
 export interface AssetTransfer {
-    id: number;
+    id: string;
     transfer_no: string;
-    asset_id: number;
-    out_dept_id: number;
-    in_dept_id: number;
-    out_user_id: number;
-    in_user_id: number;
+    asset_id: string;
+    out_dept_id: string;
+    in_dept_id: string;
+    out_user_id: string;
+    in_user_id: string;
     transfer_date: string;
     reason: string;
     status: number;
-    approve_by: number | null;
+    approve_by: string | null;
     approve_time: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
 export interface AssetTransferInput {
     [key: string]: unknown;
-    asset_id: number;
-    out_dept_id: number;
-    in_dept_id: number;
-    out_user_id: number;
-    in_user_id: number;
+    asset_id: string;
+    out_dept_id: string;
+    in_dept_id: string;
+    out_user_id: string;
+    in_user_id: string;
     transfer_date: string;
     reason: string;
     status?: number;
 }
 
 export interface AssetRepair {
-    id: number;
+    id: string;
     repair_no: string;
-    asset_id: number;
+    asset_id: string;
     fault_desc: string;
     repair_desc: string | null;
-    repair_user_id: number | null;
-    repair_dept_id: number | null;
+    repair_user_id: string | null;
+    repair_dept_id: string | null;
     repair_file_url: string | null;
     repair_type: number;
     vendor: string | null;
@@ -113,19 +113,19 @@ export interface AssetRepair {
     repair_date: string | null;
     finish_date: string | null;
     status: number;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
 export interface AssetRepairInput {
     [key: string]: unknown;
-    asset_id: number;
+    asset_id: string;
     fault_desc: string;
     repair_desc?: string;
-    repair_user_id?: number;
-    repair_dept_id?: number;
+    repair_user_id?: string;
+    repair_dept_id?: string;
     repair_file_url?: string;
     repair_type?: number;
     vendor?: string;
@@ -137,64 +137,64 @@ export interface AssetRepairInput {
 }
 
 export interface AssetScrap {
-    id: number;
+    id: string;
     scrap_no: string;
-    asset_id: number;
+    asset_id: string;
     reason: string;
     scrap_date: string;
     status: number;
-    approve_by: number | null;
+    approve_by: string | null;
     approve_time: string | null;
-    handle_user: number | null;
-    created_by: number | null;
+    handle_user: string | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
 export interface AssetScrapInput {
     [key: string]: unknown;
-    asset_id: number;
+    asset_id: string;
     reason: string;
     scrap_date: string;
     status?: number;
-    handle_user?: number;
+    handle_user?: string;
 }
 
 export interface AssetPurchase {
-    id: number;
+    id: string;
     purchase_no: string;
     asset_name: string;
-    category_id: number;
+    category_id: string;
     model: string | null;
     manufacturer: string | null;
     quantity: number;
     unit_price: number | null;
     total_price: number | null;
-    apply_user: number;
-    dept_id: number;
+    apply_user: string;
+    dept_id: string;
     reason: string;
     status: number;
     supplier: string | null;
     purchase_date: string | null;
     arrive_date: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
 export interface AssetPurchaseInput {
     [key: string]: unknown;
     asset_name: string;
-    category_id: number;
+    category_id: string;
     model?: string;
     manufacturer?: string;
     quantity: number;
     unit_price?: number;
     total_price?: number;
-    apply_user: number;
-    dept_id: number;
+    apply_user: string;
+    dept_id: string;
     reason: string;
     status?: number;
     supplier?: string;
@@ -215,12 +215,12 @@ export function insertReceive(params: AssetReceiveInput) {
 }
 
 /** 更新领用记录 */
-export function updateReceive(id: number, params: AssetReceiveInput) {
+export function updateReceive(id: string, params: AssetReceiveInput) {
     return api.put<AssetReceive>('update_receive', { id, input: params });
 }
 
 /** 删除领用记录 */
-export function deleteReceive(id: number) {
+export function deleteReceive(id: string) {
     return api.delete<null>('delete_receive', { id });
 }
 
@@ -237,12 +237,12 @@ export function insertReturn(params: AssetReturnInput) {
 }
 
 /** 更新归还记录 */
-export function updateReturn(id: number, params: AssetReturnInput) {
+export function updateReturn(id: string, params: AssetReturnInput) {
     return api.put<AssetReturn>('update_return', { id, input: params });
 }
 
 /** 删除归还记录 */
-export function deleteReturn(id: number) {
+export function deleteReturn(id: string) {
     return api.delete<null>('delete_return', { id });
 }
 
@@ -259,12 +259,12 @@ export function insertTransfer(params: AssetTransferInput) {
 }
 
 /** 更新调拨记录 */
-export function updateTransfer(id: number, params: AssetTransferInput) {
+export function updateTransfer(id: string, params: AssetTransferInput) {
     return api.put<AssetTransfer>('update_transfer', { id, input: params });
 }
 
 /** 删除调拨记录 */
-export function deleteTransfer(id: number) {
+export function deleteTransfer(id: string) {
     return api.delete<null>('delete_transfer', { id });
 }
 
@@ -281,12 +281,12 @@ export function insertRepair(params: AssetRepairInput) {
 }
 
 /** 更新维修记录 */
-export function updateRepair(id: number, params: AssetRepairInput) {
+export function updateRepair(id: string, params: AssetRepairInput) {
     return api.put<AssetRepair>('update_repair', { id, input: params });
 }
 
 /** 删除维修记录 */
-export function deleteRepair(id: number) {
+export function deleteRepair(id: string) {
     return api.delete<null>('delete_repair', { id });
 }
 
@@ -303,12 +303,12 @@ export function insertScrap(params: AssetScrapInput) {
 }
 
 /** 更新报废记录 */
-export function updateScrap(id: number, params: AssetScrapInput) {
+export function updateScrap(id: string, params: AssetScrapInput) {
     return api.put<AssetScrap>('update_scrap', { id, input: params });
 }
 
 /** 删除报废记录 */
-export function deleteScrap(id: number) {
+export function deleteScrap(id: string) {
     return api.delete<null>('delete_scrap', { id });
 }
 
@@ -325,11 +325,11 @@ export function insertPurchase(params: AssetPurchaseInput) {
 }
 
 /** 更新采购记录 */
-export function updatePurchase(id: number, params: AssetPurchaseInput) {
+export function updatePurchase(id: string, params: AssetPurchaseInput) {
     return api.put<AssetPurchase>('update_purchase', { id, input: params });
 }
 
 /** 删除采购记录 */
-export function deletePurchase(id: number) {
+export function deletePurchase(id: string) {
     return api.delete<null>('delete_purchase', { id });
 }

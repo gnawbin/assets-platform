@@ -39,7 +39,8 @@ use crate::engine::skill_registry::SkillRegistry;
 /// 启动 HTTP API 服务
 ///
 /// 在 Tauri 的 setup 回调中调用此函数，通过 spawn 在后台运行。
-pub async fn start_http_server(pool: sqlx::PgPool) {
+/// 返回 Result，方便调用方记录错误日志。
+pub async fn start_http_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
@@ -64,12 +65,17 @@ pub async fn start_http_server(pool: sqlx::PgPool) {
         let s3_config = crate::storage::s3::S3Config::from_env().unwrap_or_default();
         let s3_client = crate::storage::s3::S3Client::new(s3_config.clone())
             .await
-            .expect("S3 客户端初始化失败");
+            .map_err(|e| anyhow::anyhow!("S3 客户端初始化失败: {:?}", e))?;
         let upload_mgr =
             crate::storage::upload::UploadManager::new(pool.clone(), s3_client, s3_config);
         let state = std::sync::Arc::new(upload_routes::UploadRouterState { upload_mgr });
         Router::new()
             .route("/api/upload/init", post(upload_routes::init_upload))
+            .route("/api/upload/{id}/start", post(upload_routes::start_upload))
+            .route(
+                "/api/upload/{id}/commit",
+                post(upload_routes::commit_upload),
+            )
             .route("/api/upload/{id}/chunk", post(upload_routes::report_chunk))
             .route(
                 "/api/upload/{id}/progress",
@@ -93,11 +99,15 @@ pub async fn start_http_server(pool: sqlx::PgPool) {
     info!("Swagger UI: http://localhost:{}/api/swagger-ui/", port);
 
     // 启动 HTTP 服务
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("绑定 TCP 监听地址 {} 失败: {}", addr, e))?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
+
+    Ok(())
 }
 
 /// 创建路由

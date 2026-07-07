@@ -10,31 +10,31 @@ import { api } from '@/utils/api';
 // ======================== 类型定义 ========================
 
 export interface User {
-    id: number;
+    id: string;
     username: string;
     real_name: string;
     email: string | null;
     phone: string | null;
-    department_id: number | null;
+    department_id: string | null;
     is_super_admin: boolean;
     status: number;
     nickname: string | null;
     avatar: string | null;
     person_id: string | null;
     person_code: string | null;
-    super_user_id: number | null;
-    tenant_id: number | null;
+    super_user_id: string | null;
+    tenant_id: string | null;
     tenant_name: string | null;
-    created_by: number | null;
+    created_by: string | null;
     created_at: string | null;
-    updated_by: number | null;
+    updated_by: string | null;
     updated_at: string | null;
 }
 
 // ======================== 服务方法 ========================
 
 /** 获取用户列表 */
-export function getUsers(tenantId?: number | null, keyword?: string) {
+export function getUsers(tenantId?: string | null, keyword?: string) {
     const args: Record<string, unknown> = {};
     if (tenantId !== undefined && tenantId !== null) {
         args.tenantId = tenantId;
@@ -59,15 +59,14 @@ export function insertUser(params: {
     personId: null;
     personCode: string | null;
     superUserId: null;
-    tenantId: number | null;
-    createdBy: null;
+    tenantId: string | null;
 }) {
     return api.post<string>('insert_user', params);
 }
 
 /** 更新用户 */
 export function updateUser(params: {
-    id: number;
+    id: string;
     username: string;
     realName: string;
     email: string | null;
@@ -78,17 +77,16 @@ export function updateUser(params: {
     personId: null;
     personCode: string | null;
     superUserId: null;
-    updatedBy: null;
 }) {
     return api.put<string>('update_user', params);
 }
 
 /** 删除用户（软删除） */
-export function deleteUser(id: number, currentUserId: number, isSuperAdmin: boolean) {
+export function deleteUser(id: string, currentUserId: string, isSuperAdmin: boolean) {
     return api.delete<string>('delete_user', { id, currentUserId, isSuperAdmin });
 }
 
 /** 重置密码 */
-export function resetPassword(id: number, newPassword: string) {
+export function resetPassword(id: string, newPassword: string) {
     return api.post<string>('reset_password', { id, newPassword });
 }

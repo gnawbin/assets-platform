@@ -52,11 +52,8 @@ import {
     type KnowledgeAsset,
     type OkfType,
 } from '@/services/knowledgeAssetService';
-import { UploadService } from '@/services/uploadService';
-import { notifications } from '@mantine/notifications';
 import MarkdownEditor from '@/components/MarkdownEditor';
 import { OKF_TYPE_OPTIONS } from '@/components/MarkdownEditor/types';
-import type { AttachUploadStatus } from '@/components/MarkdownEditor/FileAttachPanel';
 
 // ======================== 节点图标映射 ========================
 
@@ -199,15 +196,7 @@ export default function KnowledgePage() {
     const [showEditor, setShowEditor] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    // ---- 文件上传状态 ----
-    const [uploadStatus, setUploadStatus] = useState<AttachUploadStatus>('idle');
-    const [uploadProgress, setUploadProgress] = useState(0);
-    const [uploadSpeed, setUploadSpeed] = useState(0);
-    const [uploadError, setUploadError] = useState<string | null>(null);
-    const uploadServiceRef = useRef(new UploadService());
-    const pausedRef = useRef(false);
-    const selectedFileRef = useRef<File | null>(null);
-    const uploadIdRef = useRef<string | null>(null);
+    // ---- 文件上传状态（FileAttachPanel 自管理，只需接收完成回调） ----
 
     // ---- 节点对话框 ----
     const [showNodeDialog, setShowNodeDialog] = useState(false);
@@ -234,189 +223,49 @@ export default function KnowledgePage() {
     // ---- 选择节点 → 加载关联资产 ----
     const handleSelectNode = async (id: string) => {
         setSelectedNodeId(id);
-        // 重置上传状态
-        resetUploadState();
         try {
             const asset = await getKnowledgeAssetByTreeNode(id);
-            setEditorTitle(asset.title);
-            setEditorContent(asset.content || '');
-            setEditorOkfType(asset.okf_type);
-            setEditorSummary(asset.summary || '');
-            setEditorSource(asset.source || '');
-            setEditorStatus(asset.status as 'draft' | 'valid' | 'outdated');
-            setEditorTags(asset.tags || []);
-            setEditorFileUrl(asset.file_url || undefined);
-            setEditorFileName(asset.file_name || undefined);
-            setEditorFileSize(asset.file_size || undefined);
-            setOkfAsset(asset);
-            setShowEditor(true);
-        } catch {
-            // 无关联资产
-            setOkfAsset(null);
-            setEditorTitle('');
-            setEditorContent('');
-            setEditorOkfType('raw_source');
-            setEditorSummary('');
-            setEditorSource('');
-            setEditorStatus('draft');
-            setEditorTags([]);
-            setEditorFileUrl(undefined);
-            setEditorFileName(undefined);
-            setEditorFileSize(undefined);
-            setShowEditor(false);
+            if (asset) {
+                // 有关联资产
+                setEditorTitle(asset.title);
+                setEditorContent(asset.content || '');
+                setEditorOkfType(asset.okf_type);
+                setEditorSummary(asset.summary || '');
+                setEditorSource(asset.source || '');
+                setEditorStatus(asset.status as 'draft' | 'valid' | 'outdated');
+                setEditorTags(asset.tags || []);
+                setEditorFileUrl(asset.file_url || undefined);
+                setEditorFileName(asset.file_name || undefined);
+                setEditorFileSize(asset.file_size || undefined);
+                setOkfAsset(asset);
+                setShowEditor(true);
+            } else {
+                // 无关联资产
+                setOkfAsset(null);
+                setEditorTitle('');
+                setEditorContent('');
+                setEditorOkfType('raw_source');
+                setEditorSummary('');
+                setEditorSource('');
+                setEditorStatus('draft');
+                setEditorTags([]);
+                setEditorFileUrl(undefined);
+                setEditorFileName(undefined);
+                setEditorFileSize(undefined);
+                setShowEditor(false);
+            }
+        } catch (err) {
+            // 真正的异常（网络错误等）
+            console.error('获取知识资产失败:', err);
         }
     };
 
-    // ---- 重置上传状态 ----
-    const resetUploadState = useCallback(() => {
-        setUploadStatus('idle');
-        setUploadProgress(0);
-        setUploadSpeed(0);
-        setUploadError(null);
-        pausedRef.current = false;
-        selectedFileRef.current = null;
-        uploadIdRef.current = null;
+    // ---- 文件上传完成回调 ----
+    const handleUploadComplete = useCallback((result: { fileUrl: string; fileName: string; fileSize: number }) => {
+        setEditorFileName(result.fileName);
+        setEditorFileSize(result.fileSize);
+        setEditorFileUrl(result.fileUrl);
     }, []);
-
-    // ---- S3 分片上传核心逻辑 ----
-    const startChunkedUpload = useCallback(async (file: File) => {
-        const uploadService = uploadServiceRef.current;
-        pausedRef.current = false;
-        selectedFileRef.current = file;
-
-        setUploadStatus('uploading');
-        setUploadProgress(0);
-        setUploadError(null);
-
-        try {
-            // 1. 初始化分片上传
-            const initResp = await uploadService.init(file.name, file.size, file.type);
-            const { uploadId, chunkSize, totalChunks, presignedUrls } = initResp;
-            uploadIdRef.current = uploadId;
-
-            // 2. 分片
-            const chunks: Blob[] = [];
-            for (let start = 0; start < file.size; start += chunkSize) {
-                chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
-            }
-
-            // 3. 并发上传分片（并发数 3）
-            const concurrency = 3;
-            let uploadedCount = 0;
-            let lastLoaded = 0;
-            let lastTime = Date.now();
-
-            const uploadOneChunk = async (partNumber: number): Promise<void> => {
-                if (pausedRef.current) return;
-                const presignedUrl = presignedUrls[partNumber - 1];
-                const chunk = chunks[partNumber - 1];
-
-                const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
-                await uploadService.reportChunk(uploadId, partNumber, etag);
-
-                uploadedCount++;
-                const pct = Math.round((uploadedCount / totalChunks) * 100);
-                setUploadProgress(pct);
-
-                // 计算速度
-                const now = Date.now();
-                const elapsed = (now - lastTime) / 1000;
-                if (elapsed > 0.5) {
-                    const currentLoaded = uploadedCount * chunkSize;
-                    const bytesPerSec = (currentLoaded - lastLoaded) / elapsed;
-                    setUploadSpeed(bytesPerSec);
-                    lastLoaded = currentLoaded;
-                    lastTime = now;
-                }
-            };
-
-            const workers = [];
-            for (let i = 0; i < concurrency; i++) {
-                workers.push(
-                    (async () => {
-                        for (let j = i; j < totalChunks; j += concurrency) {
-                            if (pausedRef.current) break;
-                            await uploadOneChunk(j + 1);
-                        }
-                    })()
-                );
-            }
-            await Promise.all(workers);
-
-            // 如果被暂停，不执行 complete
-            if (pausedRef.current) {
-                setUploadStatus('paused');
-                return;
-            }
-
-            // 4. 完成合并
-            const result = await uploadService.complete(uploadId);
-            const uploadedFileUrl = result.fileUrl;
-
-            // 5. 更新编辑器文件信息
-            setEditorFileName(file.name);
-            setEditorFileSize(file.size);
-            setEditorFileUrl(uploadedFileUrl);
-            setUploadStatus('completed');
-
-            notifications.show({
-                title: '上传成功',
-                message: `${file.name} 已上传至对象存储`,
-                color: 'green',
-            });
-        } catch (err: any) {
-            if (pausedRef.current) return;
-            const errMsg = err.message || '上传失败';
-            setUploadError(errMsg);
-            setUploadStatus('error');
-            notifications.show({
-                title: '上传失败',
-                message: errMsg,
-                color: 'red',
-            });
-        }
-    }, []);
-
-    // ---- 文件选择回调（FileAttachPanel -> onFileSelect） ----
-    const handleFileSelect = useCallback((file: File) => {
-        // 用户选择了文件，开始 S3 分片上传
-        startChunkedUpload(file);
-    }, [startChunkedUpload]);
-
-    // ---- 上传控制 ----
-    const handlePause = useCallback(() => {
-        pausedRef.current = true;
-        setUploadStatus('paused');
-    }, []);
-
-    const handleResume = useCallback(() => {
-        if (selectedFileRef.current) {
-            startChunkedUpload(selectedFileRef.current);
-        }
-    }, [startChunkedUpload]);
-
-    const handleCancel = useCallback(async () => {
-        pausedRef.current = true;
-        if (uploadIdRef.current) {
-            try {
-                await uploadServiceRef.current.abort(uploadIdRef.current);
-            } catch {
-                // ignore
-            }
-        }
-        resetUploadState();
-        // 清除编辑器中的文件信息
-        setEditorFileUrl(undefined);
-        setEditorFileName(undefined);
-        setEditorFileSize(undefined);
-    }, [resetUploadState]);
-
-    const handleRetry = useCallback(() => {
-        if (selectedFileRef.current) {
-            resetUploadState();
-            startChunkedUpload(selectedFileRef.current);
-        }
-    }, [resetUploadState, startChunkedUpload]);
 
     // ---- 保存 ----
     const handleSave = async () => {
@@ -616,16 +465,8 @@ export default function KnowledgePage() {
                                     fileSize={editorFileSize}
                                     onSave={handleSave}
                                     saving={saving}
-                                    // 文件上传状态
-                                    uploadStatus={uploadStatus}
-                                    uploadProgress={uploadProgress}
-                                    uploadSpeed={uploadSpeed}
-                                    uploadError={uploadError}
-                                    onFileSelect={handleFileSelect}
-                                    onPause={handlePause}
-                                    onResume={handleResume}
-                                    onCancel={handleCancel}
-                                    onRetry={handleRetry}
+                                    // 文件上传（FileAttachPanel 自管理）
+                                    onUploadComplete={handleUploadComplete}
                                 />
                             </Stack>
                         ) : (

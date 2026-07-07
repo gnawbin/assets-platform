@@ -7,8 +7,10 @@ use crate::database;
 use crate::database::models::KnowledgeAsset;
 use tracing::{error, info};
 
-/// 根据 tree_node_id 获取关联的知识资产
-pub async fn get_knowledge_asset_by_tree_node(tree_node_id: i64) -> Result<KnowledgeAsset, String> {
+/// 根据 tree_node_id 获取关联的知识资产（未关联时返回 None）
+pub async fn get_knowledge_asset_by_tree_node(
+    tree_node_id: i64,
+) -> Result<Option<KnowledgeAsset>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
 
@@ -16,9 +18,9 @@ pub async fn get_knowledge_asset_by_tree_node(tree_node_id: i64) -> Result<Knowl
         "SELECT id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_asset WHERE tree_node_id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
     );
-    let item = sqlx::query_as::<_, KnowledgeAsset>(&sql)
+    let item = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(sql))
         .bind(tree_node_id)
-        .fetch_one(&pool)
+        .fetch_optional(&pool)
         .await
         .map_err(|e| {
             error!(
@@ -40,7 +42,7 @@ pub async fn get_knowledge_asset(id: i64) -> Result<KnowledgeAsset, String> {
         "SELECT id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_asset WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
     );
-    let item = sqlx::query_as::<_, KnowledgeAsset>(&sql)
+    let item = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_one(&pool)
         .await
@@ -71,7 +73,7 @@ pub async fn list_knowledge_assets(
 
     sql.push_str(" ORDER BY created_at DESC");
 
-    let list = sqlx::query_as::<_, KnowledgeAsset>(&sql)
+    let list = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -93,7 +95,7 @@ pub async fn create_knowledge_asset(asset: &KnowledgeAsset) -> Result<KnowledgeA
         "INSERT INTO {}knowledge_asset (tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW()) RETURNING id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let inserted = sqlx::query_as::<_, KnowledgeAsset>(&sql)
+    let inserted = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(sql))
         .bind(asset.tree_node_id)
         .bind(&asset.title)
         .bind(&asset.content)
@@ -146,7 +148,7 @@ pub async fn update_knowledge_asset(
         "SELECT id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_asset WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
     );
-    let existing = sqlx::query_as::<_, KnowledgeAsset>(&query_sql)
+    let existing = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(query_sql))
         .bind(id)
         .fetch_one(&pool)
         .await
@@ -166,7 +168,7 @@ pub async fn update_knowledge_asset(
         "UPDATE {}knowledge_asset SET title = $1, content = $2, okf_type = $3, summary = $4, status = $5, tags = $6, updated_by = $7, updated_at = NOW() WHERE id = $8 RETURNING id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let updated = sqlx::query_as::<_, KnowledgeAsset>(&update_sql)
+    let updated = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(update_sql))
         .bind(new_title)
         .bind(new_content)
         .bind(new_okf_type)
@@ -197,7 +199,7 @@ pub async fn delete_knowledge_asset(id: i64) -> Result<(), String> {
         "UPDATE {}knowledge_asset SET deleted = 1 WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -231,7 +233,7 @@ pub async fn attach_file_to_asset(
         "UPDATE {}knowledge_asset SET file_url = $1, file_name = $2, file_size = $3, file_mime = $4, file_md5 = $5, updated_at = NOW() WHERE id = $6 AND (deleted IS NULL OR deleted = 0) RETURNING id, tree_node_id, title, content, content_html, okf_type, summary, source, confidence, status, effective_at, expire_at, relation_ids, tags, file_url, file_name, file_size, file_mime, file_md5, editor_mode, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let updated = sqlx::query_as::<_, KnowledgeAsset>(&sql)
+    let updated = sqlx::query_as::<_, KnowledgeAsset>(sqlx::AssertSqlSafe(sql))
         .bind(file_url)
         .bind(file_name)
         .bind(file_size)

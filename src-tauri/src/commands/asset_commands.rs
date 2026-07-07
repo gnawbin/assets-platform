@@ -17,8 +17,12 @@ pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
 
 /// 新增固定资产
 #[tauri::command]
-pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<HardwareAssetView, String> {
-    service::assets_service::insert_hardware_asset(input).await
+pub async fn insert_hardware_asset(
+    input: HardwareAssetInput,
+    currentUserId: Option<String>,
+) -> Result<HardwareAssetView, String> {
+    let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1);
+    service::assets_service::insert_hardware_asset(input, user_id).await
 }
 
 /// 修改固定资产
@@ -26,9 +30,11 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
 pub async fn update_hardware_asset(
     id: String,
     input: HardwareAssetInput,
+    currentUserId: Option<String>,
 ) -> Result<HardwareAssetView, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::assets_service::update_hardware_asset(id, input).await
+    let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1);
+    service::assets_service::update_hardware_asset(id, input, user_id).await
 }
 
 /// 删除固定资产（软删除）
@@ -50,8 +56,10 @@ pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String>
 #[tauri::command]
 pub async fn insert_intangible_asset(
     input: IntangibleAssetInput,
+    currentUserId: Option<String>,
 ) -> Result<IntangibleAssetView, String> {
-    service::assets_service::insert_intangible_asset(input).await
+    let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1);
+    service::assets_service::insert_intangible_asset(input, user_id).await
 }
 
 /// 修改无形资产
@@ -59,9 +67,11 @@ pub async fn insert_intangible_asset(
 pub async fn update_intangible_asset(
     id: String,
     input: IntangibleAssetInput,
+    currentUserId: Option<String>,
 ) -> Result<IntangibleAssetView, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::assets_service::update_intangible_asset(id, input).await
+    let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1);
+    service::assets_service::update_intangible_asset(id, input, user_id).await
 }
 
 /// 删除无形资产（软删除）

@@ -543,30 +543,60 @@ CREATE TABLE IF NOT EXISTS {schema}.asset_purchase (
 
 COMMENT ON TABLE {schema}.asset_purchase IS '资产采购申请表';
 
--- 17. 文件上传记录表（大文件分片上传）
+-- 17. 文件上传记录表（大文件分片上传，支持附件版本管理）
 CREATE TABLE IF NOT EXISTS {schema}.file_uploads (
     id BIGINT PRIMARY KEY,
-    upload_id VARCHAR(255) NOT NULL,
-    bucket VARCHAR(255) NOT NULL,
-    object_key VARCHAR(1024) NOT NULL,
+
+-- 版本管理字段
+file_group_id VARCHAR(36) NOT NULL, -- UUID，同一文件的不同版本共用
+version INTEGER NOT NULL DEFAULT 1, -- 版本号，从 1 开始递增
+is_latest BOOLEAN NOT NULL DEFAULT true, -- 是否为当前最新版本
+change_reason VARCHAR(500), -- 变更原因，如"更新合同条款"
+file_md5 VARCHAR(64), -- 文件 MD5，用于判断是否真的变更
+
+-- S3 分片上传字段
+upload_id VARCHAR(255),                            -- S3 Multipart Upload ID（pending 状态时可为空）
+    bucket VARCHAR(255),                               -- S3 存储桶
+    object_key VARCHAR(1024),                          -- S3 对象键
     original_filename VARCHAR(512) NOT NULL,
     file_size BIGINT NOT NULL,
     mime_type VARCHAR(255),
     chunk_size INTEGER NOT NULL DEFAULT 5242880,
     total_chunks INTEGER NOT NULL,
     received_chunks INTEGER[] NOT NULL DEFAULT '{}',
-    status VARCHAR(20) NOT NULL DEFAULT 'uploading',
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',     -- pending/uploading/completed/committed/cancelled/failed
     file_url VARCHAR(2048),
     etag VARCHAR(255),
+
+-- 业务上下文（关联业务实体）
+
+
+context_type VARCHAR(50),                          -- 业务类型：knowledge/asset/document
+    context_id BIGINT,                                 -- 业务实体 ID
+    commit_at TIMESTAMP WITH TIME ZONE,                -- 正式提交时间
+
     created_by BIGINT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_by BIGINT,
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    deleted SMALLINT NOT NULL DEFAULT 0
+    deleted SMALLINT NOT NULL DEFAULT 0,
+
+    CONSTRAINT uk_file_group_version UNIQUE (file_group_id, version)
 );
 
-COMMENT ON TABLE {schema}.file_uploads IS '大文件分片上传记录表';
+COMMENT ON TABLE {schema}.file_uploads IS '大文件分片上传记录表（支持附件版本管理）';
 
-COMMENT ON COLUMN {schema}.file_uploads.upload_id IS 'S3 Multipart Upload ID';
+COMMENT ON COLUMN {schema}.file_uploads.file_group_id IS '版本分组UUID，同一文件的不同版本共用此ID';
+
+COMMENT ON COLUMN {schema}.file_uploads.version IS '版本号，从1开始递增';
+
+COMMENT ON COLUMN {schema}.file_uploads.is_latest IS '是否为当前最新版本';
+
+COMMENT ON COLUMN {schema}.file_uploads.change_reason IS '变更原因说明';
+
+COMMENT ON COLUMN {schema}.file_uploads.file_md5 IS '文件 MD5 哈希，用于判断是否真的发生变更';
+
+COMMENT ON COLUMN {schema}.file_uploads.upload_id IS 'S3 Multipart Upload ID（pending 状态时可为空）';
 
 COMMENT ON COLUMN {schema}.file_uploads.bucket IS 'S3 存储桶';
 
@@ -578,11 +608,21 @@ COMMENT ON COLUMN {schema}.file_uploads.total_chunks IS '总分片数';
 
 COMMENT ON COLUMN {schema}.file_uploads.received_chunks IS '已接收的分片序号数组';
 
-COMMENT ON COLUMN {schema}.file_uploads.status IS '状态：uploading/completed/failed/cancelled';
+COMMENT ON COLUMN {schema}.file_uploads.status IS '状态：pending=待上传(占位) / uploading=上传中 / completed=已合并(待提交) / committed=已提交(已关联业务) / cancelled=已取消 / failed=失败';
+
+COMMENT ON COLUMN {schema}.file_uploads.context_type IS '业务上下文类型：knowledge/asset/document';
+
+COMMENT ON COLUMN {schema}.file_uploads.context_id IS '业务实体 ID';
+
+COMMENT ON COLUMN {schema}.file_uploads.commit_at IS '正式提交到业务实体的时间';
 
 CREATE INDEX IF NOT EXISTS idx_file_uploads_status ON {schema}.file_uploads (status);
 
 CREATE INDEX IF NOT EXISTS idx_file_uploads_created_by ON {schema}.file_uploads (created_by);
+
+CREATE INDEX IF NOT EXISTS idx_file_uploads_context ON {schema}.file_uploads (context_type, context_id);
+
+CREATE INDEX IF NOT EXISTS idx_file_uploads_file_group ON {schema}.file_uploads (file_group_id);
 
 -- 18. OKF 知识资产表（不与现有 asset_knowledge 冲突）
 CREATE TABLE IF NOT EXISTS {schema}.knowledge_asset (

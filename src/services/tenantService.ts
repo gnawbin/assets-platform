@@ -9,9 +9,9 @@ import { api } from '@/utils/api';
 // ======================== 类型定义 ========================
 
 export interface Tenant {
-    id: number;
+    id: string;
     tenant_name: string;
-    parent_id: number | null;
+    parent_id: string | null;
     is_leaf: boolean;
     schema_name: string | null;
     enable: boolean;
@@ -33,14 +33,13 @@ export function insertTenant(params: {
     isLeaf: boolean;
     schemaName: string | null;
     enable: boolean;
-    createdBy: number | null;
 }) {
     return api.post<Tenant>('insert_tenant', params);
 }
 
 /** 更新租户 */
 export function updateTenant(params: {
-    id: number;
+    id: string;
     tenantName: string;
     enable: boolean;
 }) {
@@ -48,6 +47,20 @@ export function updateTenant(params: {
 }
 
 /** 删除租户（禁用租户） */
-export function deleteTenant(id: number) {
+export function deleteTenant(id: string) {
     return api.delete<Tenant>('delete_tenant', { id });
+}
+
+/** 获取用户可访问的租户列表 */
+export function getUserTenants(userId: number | string) {
+    return api.get<Tenant[]>('get_user_tenants', { userId: String(userId) });
+}
+
+/** 为用户分配租户（覆盖式） */
+export function assignUserTenants(userId: number | string, tenantIds: string[], currentUserId: number | string) {
+    return api.post<void>('assign_user_tenants', {
+        userId: String(userId),
+        tenantIds: tenantIds.map(String),
+        currentUserId: String(currentUserId),
+    });
 }

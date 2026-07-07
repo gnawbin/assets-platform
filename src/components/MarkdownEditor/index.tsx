@@ -56,16 +56,9 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     onTagsChange,
     onSave,
     saving,
-    // 文件上传状态（由父组件管理）
-    uploadStatus,
-    uploadProgress,
-    uploadSpeed,
-    uploadError,
-    onFileSelect,
-    onPause,
-    onResume,
-    onCancel,
-    onRetry,
+    // 文件上传完成/错误回调
+    onUploadComplete,
+    onUploadError,
 }) => {
     const router = useRouter();
     const [activeTab, setActiveTab] = useState<string | null>('edit');
@@ -141,20 +134,13 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                 )}
             </Paper>
 
-            {/* 文件附件面板 */}
+            {/* 文件附件面板（自管理上传逻辑） */}
             <FileAttachPanel
                 fileUrl={fileUrl}
                 fileName={fileName}
                 fileSize={fileSize}
-                uploadStatus={uploadStatus}
-                uploadProgress={uploadProgress}
-                uploadSpeed={uploadSpeed}
-                uploadError={uploadError}
-                onFileSelect={onFileSelect}
-                onPause={onPause}
-                onResume={onResume}
-                onCancel={onCancel}
-                onRetry={onRetry}
+                onUploadComplete={onUploadComplete}
+                onUploadError={onUploadError}
             />
         </Stack>
     );

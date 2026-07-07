@@ -28,8 +28,8 @@ export interface SkillMeta {
 export interface SkillContext {
     input_text: string;
     config: Record<string, unknown>;
-    user_id: number;
-    tenant_id: number;
+    user_id: string;
+    tenant_id: string;
     document_id?: string;
     cursor_position?: number;
 }
@@ -59,8 +59,8 @@ export function executeSkill(params: {
     skill_id: string;
     input_text: string;
     config?: Record<string, unknown>;
-    user_id: number;
-    tenant_id: number;
+    user_id: string;
+    tenant_id: string;
 }) {
     return api.post<SkillResult>('execute_skill', {
         skillId: params.skill_id,

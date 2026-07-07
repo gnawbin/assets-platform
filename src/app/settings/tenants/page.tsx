@@ -45,9 +45,9 @@ import {
 
 // 树节点接口
 interface TreeNode {
-    id: number;
+    id: string;
     tenant_name: string;
-    parent_id: number | null;
+    parent_id: string | null;
     is_leaf: boolean;
     schema_name: string | null;
     enable: boolean;
@@ -75,7 +75,7 @@ const TenantsPage: React.FC = () => {
     // 新增/编辑弹窗
     const [formModalOpen, setFormModalOpen] = useState(false);
     const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
-    const [formParentId, setFormParentId] = useState<number | null>(null);
+    const [formParentId, setFormParentId] = useState<string | null>(null);
     const [formName, setFormName] = useState('');
     const [formSchemaName, setFormSchemaName] = useState('');
     const [formIsLeaf, setFormIsLeaf] = useState(true);
@@ -103,7 +103,7 @@ const TenantsPage: React.FC = () => {
 
     // 构建树结构
     const buildTree = (items: Tenant[]) => {
-        const map = new Map<number, TreeNode>();
+        const map = new Map<string, TreeNode>();
         const roots: TreeNode[] = [];
 
         // 先创建所有节点
@@ -136,14 +136,14 @@ const TenantsPage: React.FC = () => {
     };
 
     // 获取父租户名称
-    const getParentName = (parentId: number | null): string => {
+    const getParentName = (parentId: string | null): string => {
         if (!parentId) return '（顶级租户）';
         const parent = tenants.find((t) => t.id === parentId);
         return parent ? parent.tenant_name : '（未知）';
     };
 
     // 打开新增弹窗
-    const openAddModal = (parentId: number | null = null) => {
+    const openAddModal = (parentId: string | null = null) => {
         setFormMode('add');
         setFormParentId(parentId);
         setFormName('');
@@ -194,7 +194,6 @@ const TenantsPage: React.FC = () => {
                     isLeaf: formIsLeaf,
                     schemaName: formIsLeaf ? formSchemaName.trim() : null,
                     enable: formEnable,
-                    createdBy: null,
                 });
                 notifySuccess('租户添加成功');
             } else {
@@ -222,7 +221,7 @@ const TenantsPage: React.FC = () => {
     // 确认删除
     const handleDelete = async () => {
         if (!selectedTenant) return;
-        if (selectedTenant.id === 1) {
+        if (selectedTenant.id === '1') {
             notifyError('操作失败', '不能删除默认租户');
             return;
         }
@@ -423,7 +422,7 @@ const TenantsPage: React.FC = () => {
                                                 variant="light"
                                                 color="red"
                                                 onClick={openDeleteModal}
-                                                disabled={selectedTenant.id === 1}
+                                                disabled={selectedTenant.id === '1'}
                                             >
                                                 <IconTrash size={16} />
                                             </ActionIcon>

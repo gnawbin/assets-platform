@@ -346,10 +346,13 @@ pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
         "{} ORDER BY a.created_at DESC",
         hardware_select_sql(&prefix)
     );
-    let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
-        error!("查询固定资产列表失败: {}", e);
-        format!("查询固定资产失败: {}", e)
-    })?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询固定资产列表失败: {}", e);
+            format!("查询固定资产失败: {}", e)
+        })?;
 
     let result: Vec<HardwareAssetView> = rows.iter().map(|r| row_to_hardware_view(r)).collect();
     let count = result.len();
@@ -358,7 +361,7 @@ pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
 }
 
 /// 新增固定资产
-pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<HardwareAssetView, String> {
+pub async fn insert_hardware_asset(input: HardwareAssetInput, current_user_id: i64) -> Result<HardwareAssetView, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let asset_id = next_id() as i64;
     let hard_id = next_id() as i64;
@@ -382,7 +385,7 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
         "#,
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(asset_id)
         .bind(&asset_no)
         .bind(input.category_id)
@@ -398,7 +401,7 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
         .bind(input.used_quantity)
         .bind(&input.expire_date)
         .bind(&input.description)
-        .bind(1i64) // created_by 暂时写1
+        .bind(current_user_id) // updated_by
         .execute(&pool)
         .await
         .map_err(|e| format!("插入资产主表失败: {}", e))?;
@@ -414,7 +417,7 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
         "#,
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(hard_id)
         .bind(asset_id)
         .bind(&input.sn)
@@ -427,7 +430,7 @@ pub async fn insert_hardware_asset(input: HardwareAssetInput) -> Result<Hardware
         .bind(&input.maintenance_type)
         .bind(&input.maintenance_expire_date)
         .bind(&input.fault_desc)
-        .bind(1i64)
+        .bind(current_user_id)
         .execute(&pool)
         .await
         .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
@@ -449,7 +452,7 @@ async fn get_hardware_asset_by_id(asset_id: i64) -> Result<HardwareAssetView, St
     let prefix = database::schema_prefix();
 
     let sql = format!("{} AND a.id = $1", hardware_select_sql(&prefix));
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(asset_id)
         .fetch_optional(&pool)
         .await
@@ -469,6 +472,7 @@ async fn get_hardware_asset_by_id(asset_id: i64) -> Result<HardwareAssetView, St
 pub async fn update_hardware_asset(
     id: i64,
     input: HardwareAssetInput,
+    current_user_id: i64,
 ) -> Result<HardwareAssetView, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
@@ -489,7 +493,7 @@ pub async fn update_hardware_asset(
         "#,
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.category_id)
         .bind(&input.asset_name)
@@ -504,16 +508,16 @@ pub async fn update_hardware_asset(
         .bind(input.used_quantity)
         .bind(&input.expire_date)
         .bind(&input.description)
-        .bind(1i64)
+        .bind(current_user_id)
         .execute(&pool)
         .await
         .map_err(|e| format!("更新资产主表失败: {}", e))?;
 
     // 检查 hard_assets 是否存在，存在则更新，不存在则插入
-    let existing = sqlx::query_scalar::<_, i64>(&format!(
+    let existing = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
         "SELECT id FROM {}hard_assets WHERE asset_id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
-    ))
+    )))
     .bind(id)
     .fetch_optional(&pool)
     .await
@@ -532,7 +536,7 @@ pub async fn update_hardware_asset(
             "#,
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(hard_id)
             .bind(&input.sn)
             .bind(&input.mac_address)
@@ -544,7 +548,7 @@ pub async fn update_hardware_asset(
             .bind(&input.maintenance_type)
             .bind(&input.maintenance_expire_date)
             .bind(&input.fault_desc)
-            .bind(1i64)
+            .bind(current_user_id)
             .execute(&pool)
             .await
             .map_err(|e| format!("更新硬件扩展表失败: {}", e))?;
@@ -560,7 +564,7 @@ pub async fn update_hardware_asset(
             "#,
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(new_hard_id)
             .bind(id)
             .bind(&input.sn)
@@ -573,7 +577,7 @@ pub async fn update_hardware_asset(
             .bind(&input.maintenance_type)
             .bind(&input.maintenance_expire_date)
             .bind(&input.fault_desc)
-            .bind(1i64)
+            .bind(current_user_id)
             .execute(&pool)
             .await
             .map_err(|e| format!("插入硬件扩展表失败: {}", e))?;
@@ -597,7 +601,7 @@ pub async fn delete_hardware_asset(id: i64) -> Result<(), String> {
         "UPDATE {}assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'fixed'",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -644,10 +648,13 @@ pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String>
         "{} ORDER BY a.created_at DESC",
         intangible_select_sql(&prefix)
     );
-    let rows = sqlx::query(&sql).fetch_all(&pool).await.map_err(|e| {
-        error!("查询无形资产列表失败: {}", e);
-        format!("查询无形资产失败: {}", e)
-    })?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| {
+            error!("查询无形资产列表失败: {}", e);
+            format!("查询无形资产失败: {}", e)
+        })?;
 
     let result: Vec<IntangibleAssetView> = rows.iter().map(|r| row_to_intangible_view(r)).collect();
     let count = result.len();
@@ -658,6 +665,7 @@ pub async fn get_intangible_assets() -> Result<Vec<IntangibleAssetView>, String>
 /// 新增无形资产
 pub async fn insert_intangible_asset(
     input: IntangibleAssetInput,
+    current_user_id: i64,
 ) -> Result<IntangibleAssetView, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let asset_id = next_id() as i64;
@@ -682,7 +690,7 @@ pub async fn insert_intangible_asset(
         "#,
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(asset_id)
         .bind(&asset_no)
         .bind(input.category_id)
@@ -698,7 +706,7 @@ pub async fn insert_intangible_asset(
         .bind(input.used_quantity)
         .bind(&input.expire_date)
         .bind(&input.description)
-        .bind(1i64)
+        .bind(current_user_id)
         .execute(&pool)
         .await
         .map_err(|e| format!("插入资产主表失败: {}", e))?;
@@ -722,7 +730,7 @@ pub async fn insert_intangible_asset(
         "#,
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(intangible_id)
         .bind(asset_id)
         .bind(&input.intangible_type)
@@ -744,7 +752,7 @@ pub async fn insert_intangible_asset(
         .bind(input.useful_life)
         .bind(input.amortization_amount)
         .bind(input.residual_rate)
-        .bind(1i64)
+        .bind(current_user_id)
         .execute(&pool)
         .await
         .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
@@ -765,7 +773,7 @@ async fn get_intangible_asset_by_id(asset_id: i64) -> Result<IntangibleAssetView
     let prefix = database::schema_prefix();
 
     let sql = format!("{} AND a.id = $1", intangible_select_sql(&prefix));
-    let row = sqlx::query(&sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(asset_id)
         .fetch_optional(&pool)
         .await
@@ -785,6 +793,7 @@ async fn get_intangible_asset_by_id(asset_id: i64) -> Result<IntangibleAssetView
 pub async fn update_intangible_asset(
     id: i64,
     input: IntangibleAssetInput,
+    current_user_id: i64,
 ) -> Result<IntangibleAssetView, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
@@ -805,7 +814,7 @@ pub async fn update_intangible_asset(
         "#,
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.category_id)
         .bind(&input.asset_name)
@@ -820,18 +829,16 @@ pub async fn update_intangible_asset(
         .bind(input.used_quantity)
         .bind(&input.expire_date)
         .bind(&input.description)
-        .bind(1i64)
+        .bind(current_user_id)
         .execute(&pool)
         .await
         .map_err(|e| format!("更新资产主表失败: {}", e))?;
 
     // 检查 intangible_assets 是否存在
-    let existing = sqlx::query_scalar::<_, i64>(
-        &format!(
-            "SELECT id FROM {}intangible_assets WHERE asset_id = $1 AND (deleted IS NULL OR deleted = 0)",
-            prefix
-        ),
-    )
+    let existing = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+        "SELECT id FROM {}intangible_assets WHERE asset_id = $1 AND deleted = 0",
+        prefix
+    )))
     .bind(id)
     .fetch_optional(&pool)
     .await
@@ -854,7 +861,7 @@ pub async fn update_intangible_asset(
             "#,
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(intangible_id)
             .bind(&input.intangible_type)
             .bind(&input.register_no)
@@ -875,7 +882,7 @@ pub async fn update_intangible_asset(
             .bind(input.useful_life)
             .bind(input.amortization_amount)
             .bind(input.residual_rate)
-            .bind(1i64)
+            .bind(current_user_id)
             .execute(&pool)
             .await
             .map_err(|e| format!("更新无形资产扩展表失败: {}", e))?;
@@ -899,7 +906,7 @@ pub async fn update_intangible_asset(
             "#,
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(new_intangible_id)
             .bind(id)
             .bind(&input.intangible_type)
@@ -921,7 +928,7 @@ pub async fn update_intangible_asset(
             .bind(input.useful_life)
             .bind(input.amortization_amount)
             .bind(input.residual_rate)
-            .bind(1i64)
+            .bind(current_user_id)
             .execute(&pool)
             .await
             .map_err(|e| format!("插入无形资产扩展表失败: {}", e))?;
@@ -945,7 +952,7 @@ pub async fn delete_intangible_asset(id: i64) -> Result<(), String> {
         "UPDATE {}assets SET deleted = 1, updated_at = NOW() WHERE id = $1 AND asset_type = 'intangible'",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await

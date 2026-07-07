@@ -11,7 +11,7 @@ pub async fn get_categories() -> Result<Vec<AssetCategory>, String> {
         "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM {}asset_category where deleted=0 ORDER BY sort ASC",
         prefix
     );
-    let categories = sqlx::query_as::<_, AssetCategory>(&sql)
+    let categories = sqlx::query_as::<_, AssetCategory>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -32,7 +32,7 @@ pub async fn get_super_categories() -> Result<Vec<AssetCategory>, String> {
         "SELECT id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted FROM {}asset_category WHERE parent_id IS NULL AND deleted=0 ORDER BY sort ASC",
         prefix
     );
-    let categories = sqlx::query_as::<_, AssetCategory>(&sql)
+    let categories = sqlx::query_as::<_, AssetCategory>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -60,7 +60,7 @@ pub async fn insert_category(category: &AssetCategory) -> Result<AssetCategory, 
         RETURNING id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at, deleted"#,
         prefix
     );
-    let category = sqlx::query_as::<_, AssetCategory>(&sql)
+    let category = sqlx::query_as::<_, AssetCategory>(sqlx::AssertSqlSafe(sql))
         .bind((next_id()) as i64)
         .bind(&category.category_name)
         .bind(&category.asset_type)
@@ -101,7 +101,7 @@ pub async fn update_category(category: &AssetCategory) -> Result<AssetCategory, 
         RETURNING id, category_name, asset_type, parent_id, sort, description, created_by, created_at, updated_by, updated_at,deleted"#,
         prefix
     );
-    let category = sqlx::query_as::<_, AssetCategory>(&sql)
+    let category = sqlx::query_as::<_, AssetCategory>(sqlx::AssertSqlSafe(sql))
         .bind(category.id)
         .bind(&category.category_name)
         .bind(&category.asset_type)
@@ -132,7 +132,7 @@ pub async fn delete_category(id: i64) -> Result<(), String> {
         "UPDATE {}asset_category SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await

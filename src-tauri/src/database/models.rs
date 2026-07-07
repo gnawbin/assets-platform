@@ -840,3 +840,283 @@ pub struct KnowledgeAsset {
     pub updated_at: Option<DateTime<Utc>>,
     pub deleted: i16,
 }
+
+// ======================== 知识库模块新增 Model ========================
+
+/// 文档向量分片（RAG 核心表）
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DocumentChunk {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub asset_id: i64,
+    pub chunk_index: i32,
+    pub chunk_text: String,
+    pub token_count: Option<i32>,
+    pub embedding: Option<Vec<f32>>,
+    pub title: Option<String>,
+    pub okf_type: Option<String>,
+    pub tags: Option<Vec<String>>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub tree_node_id: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 对话会话
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Conversation {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub user_id: i64,
+    pub title: Option<String>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub bind_knowledge_tree_id: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 会话消息
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Message {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub conv_id: i64,
+    pub role: String,
+    pub content: String,
+    pub audio_url: Option<String>,
+    pub reference_asset_ids: Option<Vec<i64>>,
+    pub reference_text: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub input_tokens: Option<i32>,
+    pub output_tokens: Option<i32>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 用户长期记忆
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Memory {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub user_id: i64,
+    pub content: String,
+    pub category: Option<String>,
+    pub importance: Option<f64>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub source_conv_id: Option<i64>,
+    pub next_review_at: Option<DateTime<Utc>>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 技能执行日志
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SkillExecution {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub asset_id: Option<i64>,
+    pub trigger_type: Option<String>,
+    pub input_params: Option<serde_json::Value>,
+    pub output_result: Option<serde_json::Value>,
+    pub status: String,
+    pub error_msg: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+/// LLM 厂商配置
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct LlmProvider {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    pub provider_code: String,
+    pub provider_name: String,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub secret_key: Option<String>,
+    pub extra_config: Option<serde_json::Value>,
+    pub weight: Option<i32>,
+    pub is_local: bool,
+    pub enable: bool,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// LLM 模型明细
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct LlmModel {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub provider_id: i64,
+    pub model_code: String,
+    pub model_name: String,
+    pub model_type: String,
+    pub context_window: Option<i32>,
+    pub temperature_default: Option<f64>,
+    pub max_tokens_default: Option<i32>,
+    pub price_input: Option<rust_decimal::Decimal>,
+    pub price_output: Option<rust_decimal::Decimal>,
+    pub enable: bool,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 用户模型偏好配置
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct UserLLmSetting {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub user_id: i64,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub default_provider_id: Option<i64>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub default_chat_model_id: Option<i64>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub default_embed_model_id: Option<i64>,
+    pub custom_temp: Option<f64>,
+    pub custom_max_token: Option<i32>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// LLM 调用记录
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct LLmCallRecord {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub user_id: Option<i64>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub conv_id: Option<i64>,
+    #[serde(serialize_with = "i64_to_string")]
+    pub provider_id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub model_id: i64,
+    pub call_type: String,
+    pub input_tokens: i32,
+    pub output_tokens: i32,
+    pub total_cost: Option<rust_decimal::Decimal>,
+    pub duration_ms: Option<i32>,
+    pub status: String,
+    pub error_msg: Option<String>,
+    pub request_id: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+// ======================== 请求/响应结构体 ========================
+
+/// Token 用量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: i32,
+    pub output_tokens: i32,
+    pub total_tokens: i32,
+    pub cost: f64,
+}
+
+/// LLM Chat 请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// LLM Chat 请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LLMChatRequest {
+    pub messages: Vec<ChatMessage>,
+    pub model: Option<String>,
+    pub temperature: Option<f32>,
+    pub max_tokens: Option<i32>,
+    pub stream: Option<bool>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub user_id: Option<i64>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub conv_id: Option<i64>,
+}
+
+/// LLM Chat 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LLMChatResponse {
+    pub content: String,
+    pub model: String,
+    pub usage: TokenUsage,
+    #[serde(serialize_with = "i64_to_string")]
+    pub provider_id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub model_id: i64,
+    pub request_id: String,
+}
+
+/// LLM Embedding 请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LLMEmbeddingRequest {
+    pub input: Vec<String>,
+    pub model: Option<String>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub user_id: Option<i64>,
+}
+
+/// LLM Embedding 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LLMEmbeddingResponse {
+    pub embeddings: Vec<Vec<f32>>,
+    pub model: String,
+    pub usage: TokenUsage,
+    #[serde(serialize_with = "i64_to_string")]
+    pub provider_id: i64,
+    #[serde(serialize_with = "i64_to_string")]
+    pub model_id: i64,
+}
+
+/// RAG 检索结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkResult {
+    #[serde(serialize_with = "i64_to_string")]
+    pub chunk_id: i64,
+    pub chunk_text: String,
+    pub chunk_index: i32,
+    pub title: String,
+    pub okf_type: String,
+    #[serde(serialize_with = "i64_to_string")]
+    pub asset_id: i64,
+    pub similarity: f64,
+    pub token_count: i32,
+}
+
+/// RAG 检索参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrieveParams {
+    pub question: String,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub bind_tree_node_id: Option<i64>,
+    pub top_k: i32,
+    pub max_tokens: i32,
+    pub okf_type_filter: Option<String>,
+    pub min_similarity: f64,
+}
+
+/// 记忆条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryItem {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    pub content: String,
+    pub category: Option<String>,
+    pub importance: Option<f64>,
+}

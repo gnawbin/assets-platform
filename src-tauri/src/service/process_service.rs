@@ -49,7 +49,7 @@ pub async fn get_receives() -> Result<Vec<AssetReceive>, String> {
         "SELECT id, receive_no, asset_id, user_id, department_id, receive_date, reason, status, approve_by, approve_time, approve_remark, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_receive WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
     );
-    let rows = sqlx::query_as::<_, AssetReceive>(&sql)
+    let rows = sqlx::query_as::<_, AssetReceive>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -82,7 +82,7 @@ pub async fn insert_receive(input: AssetReceiveInput) -> Result<AssetReceive, St
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetReceive>(&sql)
+    let row = sqlx::query_as::<_, AssetReceive>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&receive_no)
         .bind(input.asset_id)
@@ -127,7 +127,7 @@ pub async fn update_receive(
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetReceive>(&sql)
+    let row = sqlx::query_as::<_, AssetReceive>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.asset_id)
         .bind(input.user_id)
@@ -158,7 +158,7 @@ pub async fn delete_receive(id: i64) -> Result<(), String> {
         "UPDATE {}asset_receive SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -214,7 +214,7 @@ pub async fn get_returns() -> Result<Vec<AssetReturn>, String> {
         "SELECT id, return_no, receive_id, asset_id, user_id, return_date, asset_status, remark, confirm_by, confirm_time, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_return WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
     );
-    let rows = sqlx::query_as::<_, AssetReturn>(&sql)
+    let rows = sqlx::query_as::<_, AssetReturn>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -247,7 +247,7 @@ pub async fn insert_return(input: AssetReturnInput) -> Result<AssetReturn, Strin
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetReturn>(&sql)
+    let row = sqlx::query_as::<_, AssetReturn>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&return_no)
         .bind(input.receive_id)
@@ -292,7 +292,7 @@ pub async fn update_return(id: i64, input: AssetReturnUpdateInput) -> Result<Ass
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetReturn>(&sql)
+    let row = sqlx::query_as::<_, AssetReturn>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.receive_id)
         .bind(input.asset_id)
@@ -325,7 +325,7 @@ pub async fn delete_return(id: i64) -> Result<(), String> {
         "UPDATE {}asset_return SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -383,7 +383,7 @@ pub async fn get_transfers() -> Result<Vec<AssetTransfer>, String> {
         "SELECT id, transfer_no, asset_id, out_dept_id, in_dept_id, out_user_id, in_user_id, transfer_date, reason, status, approve_by, approve_time, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_transfer WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
     );
-    let rows = sqlx::query_as::<_, AssetTransfer>(&sql)
+    let rows = sqlx::query_as::<_, AssetTransfer>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -413,7 +413,7 @@ pub async fn insert_transfer(input: AssetTransferInput) -> Result<AssetTransfer,
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetTransfer>(&sql)
+    let row = sqlx::query_as::<_, AssetTransfer>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&transfer_no)
         .bind(input.asset_id)
@@ -461,7 +461,7 @@ pub async fn update_transfer(
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetTransfer>(&sql)
+    let row = sqlx::query_as::<_, AssetTransfer>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.asset_id)
         .bind(input.out_dept_id)
@@ -494,7 +494,7 @@ pub async fn delete_transfer(id: i64) -> Result<(), String> {
         "UPDATE {}asset_transfer SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -558,7 +558,7 @@ pub async fn get_repairs() -> Result<Vec<AssetRepair>, String> {
         "SELECT id, repair_no, asset_id, fault_desc, repair_desc, repair_user_id, repair_dept_id, repair_file_url, repair_type, vendor, cost, apply_date, repair_date, finish_date, status, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_repair WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
     );
-    let rows = sqlx::query_as::<_, AssetRepair>(&sql)
+    let rows = sqlx::query_as::<_, AssetRepair>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -588,7 +588,7 @@ pub async fn insert_repair(input: AssetRepairInput) -> Result<AssetRepair, Strin
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetRepair>(&sql)
+    let row = sqlx::query_as::<_, AssetRepair>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&repair_no)
         .bind(input.asset_id)
@@ -640,7 +640,7 @@ pub async fn update_repair(id: i64, input: AssetRepairUpdateInput) -> Result<Ass
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetRepair>(&sql)
+    let row = sqlx::query_as::<_, AssetRepair>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.asset_id)
         .bind(&input.fault_desc)
@@ -678,7 +678,7 @@ pub async fn delete_repair(id: i64) -> Result<(), String> {
         "UPDATE {}asset_repair SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -724,7 +724,7 @@ pub async fn get_scraps() -> Result<Vec<AssetScrap>, String> {
         "SELECT id, scrap_no, asset_id, reason, scrap_date, status, approve_by, approve_time, handle_user, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_scrap WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
     );
-    let rows = sqlx::query_as::<_, AssetScrap>(&sql)
+    let rows = sqlx::query_as::<_, AssetScrap>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -754,7 +754,7 @@ pub async fn insert_scrap(input: AssetScrapInput) -> Result<AssetScrap, String> 
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetScrap>(&sql)
+    let row = sqlx::query_as::<_, AssetScrap>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&scrap_no)
         .bind(input.asset_id)
@@ -792,7 +792,7 @@ pub async fn update_scrap(id: i64, input: AssetScrapUpdateInput) -> Result<Asset
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetScrap>(&sql)
+    let row = sqlx::query_as::<_, AssetScrap>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(input.asset_id)
         .bind(&input.reason)
@@ -822,7 +822,7 @@ pub async fn delete_scrap(id: i64) -> Result<(), String> {
         "UPDATE {}asset_scrap SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -888,7 +888,7 @@ pub async fn get_purchases() -> Result<Vec<AssetPurchase>, String> {
         "SELECT id, purchase_no, asset_name, category_id, model, manufacturer, quantity, unit_price, total_price, apply_user, dept_id, reason, status, supplier, purchase_date, arrive_date, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_purchase WHERE deleted = 0 ORDER BY created_at DESC",
         prefix
     );
-    let rows = sqlx::query_as::<_, AssetPurchase>(&sql)
+    let rows = sqlx::query_as::<_, AssetPurchase>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -918,7 +918,7 @@ pub async fn insert_purchase(input: AssetPurchaseInput) -> Result<AssetPurchase,
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetPurchase>(&sql)
+    let row = sqlx::query_as::<_, AssetPurchase>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&purchase_no)
         .bind(&input.asset_name)
@@ -974,7 +974,7 @@ pub async fn update_purchase(
         "#,
         prefix
     );
-    let row = sqlx::query_as::<_, AssetPurchase>(&sql)
+    let row = sqlx::query_as::<_, AssetPurchase>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .bind(&input.asset_name)
         .bind(input.category_id)
@@ -1013,7 +1013,7 @@ pub async fn delete_purchase(id: i64) -> Result<(), String> {
         "UPDATE {}asset_purchase SET deleted = 1, updated_at = NOW() WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await

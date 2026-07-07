@@ -20,12 +20,22 @@ use crate::storage::upload::UploadManager;
 
 // ======================== 请求/响应类型 ========================
 
-/// 初始化上传请求
+/// 初始化上传请求（占位）
 #[derive(Debug, Deserialize)]
 pub struct InitUploadRequest {
     pub filename: String,
     pub file_size: i64,
     pub mime_type: String,
+    pub file_group_id: Option<String>,
+    pub change_reason: Option<String>,
+    pub file_md5: Option<String>,
+}
+
+/// 提交上传请求
+#[derive(Debug, Deserialize)]
+pub struct CommitUploadRequest {
+    pub context_type: String,
+    pub context_id: i64,
 }
 
 /// 上报分片请求
@@ -35,9 +45,9 @@ pub struct ReportChunkRequest {
     pub etag: String,
 }
 
-/// 初始化上传响应
+/// 开始上传响应
 #[derive(Debug, Serialize)]
-pub struct InitUploadResponse {
+pub struct StartUploadResponse {
     pub upload_id: String,
     pub s3_upload_id: String,
     pub chunk_size: i64,
@@ -70,14 +80,14 @@ pub struct UploadRouterState {
 
 // ======================== 路由处理函数 ========================
 
-/// 初始化分片上传
+/// 初始化分片上传（占位）
 ///
-/// 前端上传文件前先调用此接口，获取 S3 UploadId 和所有分片的 Presigned URL。
+/// 只创建数据库记录（status=pending），不调用 S3。
+/// 后续需调用 start_upload 才开始真正的 S3 分片上传。
 pub async fn init_upload(
     State(state): State<Arc<UploadRouterState>>,
     Json(req): Json<InitUploadRequest>,
-) -> Result<Json<ApiResponse<InitUploadResponse>>, ApiError> {
-    // 验证参数
+) -> Result<Json<ApiResponse<serde_json::Value>>, ApiError> {
     if req.filename.is_empty() {
         return Err(ApiError::bad_request("文件名不能为空"));
     }
@@ -85,13 +95,11 @@ pub async fn init_upload(
         return Err(ApiError::bad_request("文件大小必须大于 0"));
     }
     if req.file_size > 5 * 1024 * 1024 * 1024 * 1024 {
-        // 5TB（S3 限制）
         return Err(ApiError::bad_request("文件大小超过 5TB 限制"));
     }
 
     let created_by: i64 = 1;
-
-    let schema = "public".to_string(); // upload routes will use their own schema context
+    let schema = crate::database::current_schema_name();
 
     match state
         .upload_mgr
@@ -101,11 +109,41 @@ pub async fn init_upload(
             req.file_size,
             &req.mime_type,
             created_by,
+            req.file_group_id.as_deref(),
+            None, // context_type
+            None, // context_id
+            req.change_reason.as_deref(),
+            req.file_md5.as_deref(),
         )
         .await
     {
+        Ok(record_id) => {
+            let resp = serde_json::json!({
+                "upload_id": record_id.to_string(),
+                "need_start": true,
+            });
+            Ok(Json(ApiResponse::success(resp)))
+        }
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 开始上传（从 pending 转 uploading）
+///
+/// 创建 S3 MultipartUpload，返回 presigned URLs 供前端直传。
+pub async fn start_upload(
+    State(state): State<Arc<UploadRouterState>>,
+    Path(upload_id): Path<String>,
+) -> Result<Json<ApiResponse<StartUploadResponse>>, ApiError> {
+    let upload_id: i64 = upload_id
+        .parse()
+        .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
+
+    let schema = crate::database::current_schema_name();
+
+    match state.upload_mgr.start_upload(&schema, upload_id).await {
         Ok(result) => {
-            let resp = InitUploadResponse {
+            let resp = StartUploadResponse {
                 upload_id: result.upload_id,
                 s3_upload_id: result.s3_upload_id,
                 chunk_size: result.chunk_size,
@@ -114,6 +152,30 @@ pub async fn init_upload(
             };
             Ok(Json(ApiResponse::success(resp)))
         }
+        Err(e) => Err(ApiError::internal_error(e)),
+    }
+}
+
+/// 提交上传（from completed to committed）
+///
+/// 关联业务实体，标记上传为已提交。
+pub async fn commit_upload(
+    State(state): State<Arc<UploadRouterState>>,
+    Path(upload_id): Path<String>,
+    Json(req): Json<CommitUploadRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let upload_id: i64 = upload_id
+        .parse()
+        .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
+
+    let schema = crate::database::current_schema_name();
+
+    match state
+        .upload_mgr
+        .commit(&schema, upload_id, &req.context_type, req.context_id)
+        .await
+    {
+        Ok(_) => Ok(Json(ApiResponse::success(()))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -130,7 +192,7 @@ pub async fn report_chunk(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state
         .upload_mgr
@@ -153,7 +215,7 @@ pub async fn get_progress(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.get_progress(&schema, upload_id).await {
         Ok(progress) => {
@@ -180,7 +242,7 @@ pub async fn complete_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.complete(&schema, upload_id).await {
         Ok(result) => {
@@ -205,7 +267,7 @@ pub async fn abort_upload(
         .parse()
         .map_err(|_| ApiError::bad_request("upload_id 格式不正确"))?;
 
-    let schema = "public".to_string();
+    let schema = crate::database::current_schema_name();
 
     match state.upload_mgr.abort(&schema, upload_id).await {
         Ok(_) => Ok(Json(ApiResponse::success(()))),

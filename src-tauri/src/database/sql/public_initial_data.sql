@@ -510,8 +510,8 @@ SELECT
     20,
     '领用审批',
     3,
-    '/process/approval',
-    '/process/approval/page',
+    '/process/receive',
+    '/process/receive/page',
     NULL,
     1,
     true,
@@ -1141,8 +1141,9 @@ WHERE
     );
 
 -- =====================
--- 6. Zen Engine - Skill 管理 子菜单
+-- 6. 知识库 子菜单（续）
 -- =====================
+
 INSERT INTO
     public.sys_menu (
         id,
@@ -1166,16 +1167,16 @@ INSERT INTO
         deleted
     )
 SELECT
-    7,
-    'AI 工作流',
+    52,
+    '智能问答',
+    6,
+    '/chat',
+    '/chat/page',
     NULL,
-    NULL,
-    NULL,
-    'IconBrain',
-    7,
+    2,
     true,
-    NULL,
-    1,
+    'knowledge:chat',
+    2,
     false,
     NULL,
     NULL,
@@ -1190,9 +1191,110 @@ WHERE
         SELECT 1
         FROM public.sys_menu
         WHERE
-            id = 7
+            id = 52
     );
 
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    54,
+    'LLM厂商管理',
+    6,
+    '/settings/llm',
+    '/settings/llm/page',
+    NULL,
+    4,
+    true,
+    'knowledge:llm:list',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 54
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    55,
+    '模型偏好',
+    6,
+    '/settings/llm/preference',
+    '/settings/llm/preference/page',
+    NULL,
+    5,
+    true,
+    'knowledge:llm:preference',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 55
+    );
+
+-- Skill 管理移到知识库下（原父级 AI 工作流已删除）
 INSERT INTO
     public.sys_menu (
         id,
@@ -1218,11 +1320,11 @@ INSERT INTO
 SELECT
     60,
     'Skill 管理',
-    7,
+    6,
     '/skills',
     '/skills/page',
     NULL,
-    1,
+    3,
     true,
     'skill:list',
     2,
@@ -1246,56 +1348,6 @@ WHERE
 -- =====================
 -- 7. 系统配置 子菜单
 -- =====================
-
-INSERT INTO
-    public.sys_menu (
-        id,
-        menu_name,
-        parent_id,
-        path,
-        component,
-        icon,
-        order_num,
-        visible,
-        perms,
-        menu_type,
-        hidden_button,
-        command_name,
-        http_method,
-        http_path,
-        created_by,
-        created_at,
-        updated_by,
-        updated_at,
-        deleted
-    )
-SELECT
-    40,
-    '数据库配置',
-    5,
-    '/settings/database',
-    '/settings/database/page',
-    NULL,
-    1,
-    true,
-    'system:database:config',
-    2,
-    false,
-    NULL,
-    NULL,
-    NULL,
-    1,
-    NOW(),
-    NULL,
-    NULL,
-    0
-WHERE
-    NOT EXISTS (
-        SELECT 1
-        FROM public.sys_menu
-        WHERE
-            id = 40
-    );
 
 INSERT INTO
     public.sys_menu (
@@ -1376,7 +1428,7 @@ SELECT
     '/settings/departments',
     '/settings/departments/page',
     NULL,
-    3,
+    2,
     true,
     'system:department:list',
     2,
@@ -1426,7 +1478,7 @@ SELECT
     '/settings/users',
     '/settings/users/page',
     NULL,
-    4,
+    3,
     true,
     'system:user:list',
     2,
@@ -1470,63 +1522,13 @@ INSERT INTO
         deleted
     )
 SELECT
-    44,
-    '流程设计',
-    5,
-    '/settings/process-design',
-    '/settings/process-design/page',
-    NULL,
-    5,
-    true,
-    'system:process:design',
-    2,
-    false,
-    NULL,
-    NULL,
-    NULL,
-    1,
-    NOW(),
-    NULL,
-    NULL,
-    0
-WHERE
-    NOT EXISTS (
-        SELECT 1
-        FROM public.sys_menu
-        WHERE
-            id = 44
-    );
-
-INSERT INTO
-    public.sys_menu (
-        id,
-        menu_name,
-        parent_id,
-        path,
-        component,
-        icon,
-        order_num,
-        visible,
-        perms,
-        menu_type,
-        hidden_button,
-        command_name,
-        http_method,
-        http_path,
-        created_by,
-        created_at,
-        updated_by,
-        updated_at,
-        deleted
-    )
-SELECT
     45,
     '系统日志',
     5,
     '/settings/logs',
     '/settings/logs/page',
     NULL,
-    6,
+    4,
     true,
     'system:log:list',
     2,
@@ -1576,7 +1578,7 @@ SELECT
     '/settings/tenants',
     '/settings/tenants/page',
     NULL,
-    7,
+    5,
     true,
     'system:tenant:list',
     2,
@@ -3277,4 +3279,28 @@ WHERE
         WHERE
             user_id = 1
             AND role_id = 1
+    );
+
+-- ==============================
+-- 10. 默认用户租户关联（admin 用户 → 所有启用租户）
+-- ==============================
+INSERT INTO
+    public.sys_user_tenant (
+        id,
+        user_id,
+        tenant_id,
+        created_by
+    )
+SELECT row_number() OVER (
+        ORDER BY t.id
+    ) + 2000, 1, t.id, 1
+FROM public.sys_tenant t
+WHERE
+    t.enable = true
+    AND NOT EXISTS (
+        SELECT 1
+        FROM public.sys_user_tenant ut
+        WHERE
+            ut.user_id = 1
+            AND ut.tenant_id = t.id
     );
