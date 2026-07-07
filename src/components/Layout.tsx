@@ -36,8 +36,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   const handleSwitchTenant = async (value: string) => {
-    const tenantId = Number(value);
-    if (!isNaN(tenantId)) {
+    if (value) {
       try {
         // 调用后端 API 切换租户（更新服务端 USER_TENANT_CACHE）
         // Tauri 命令需要 userId + tenantId
@@ -45,8 +44,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           userId: String(user?.id ?? ''),
           tenantId: value,
         });
-        // 更新前端本地状态
-        switchTenant(tenantId);
+        // 更新前端本地状态（直接传 string，不做 Number() 转换避免精度丢失）
+        switchTenant(value);
         // 切换到首页，避免旧租户特定页面在新 schema 中查询不到数据报错
         router.push('/');
       } catch (err) {
@@ -82,7 +81,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     size="sm"
                     leftSection={<IconBuildingStore size={16} />}
                   >
-                    {availableTenants.find(t => t.id === selectedTenantId)?.tenant_name || '切换租户'}
+                    {availableTenants.find(t => String(t.id) === String(selectedTenantId))?.tenant_name || '切换租户'}
                   </Button>
                 </Menu.Target>
                 <Menu.Dropdown>

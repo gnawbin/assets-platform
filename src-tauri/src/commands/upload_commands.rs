@@ -22,6 +22,7 @@ pub async fn upload_init(
     fileGroupId: Option<String>,
     changeReason: Option<String>,
     fileMd5: Option<String>,
+    currentUserId: Option<String>,
 ) -> Result<String, String> {
     let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
@@ -30,8 +31,7 @@ pub async fn upload_init(
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    // 当前用户 ID（Tauri v2 中从 invoke 上下文获取）
-    let created_by: i64 = 1;
+    let created_by: i64 = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1);
 
     let schema = crate::database::current_schema_name();
 

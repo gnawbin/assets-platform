@@ -169,7 +169,7 @@ export default function SkillsPage() {
                 skill_id: executingSkill.id,
                 input_text: inputText,
                 user_id: Number(user.id),
-                tenant_id: Number(user.tenant_id ?? 1),
+                tenant_id: user.tenant_id ?? '1',
             });
             setResult(res);
         } catch (err: unknown) {

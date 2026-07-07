@@ -21,7 +21,7 @@ pub async fn get_knowledge_tree() -> Result<Vec<KnowledgeTreeNode>, String> {
         "SELECT id, knowledge_id, parent_id, node_type, title, icon, sort_order, is_expanded, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_tree WHERE (deleted IS NULL OR deleted = 0) ORDER BY sort_order ASC, id ASC",
         prefix
     );
-    let all_nodes = sqlx::query_as::<_, KnowledgeTree>(&sql)
+    let all_nodes = sqlx::query_as::<_, KnowledgeTree>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -83,7 +83,7 @@ pub async fn insert_knowledge_node(
         "INSERT INTO {}knowledge_tree (id, knowledge_id, parent_id, node_type, title, icon, sort_order, is_expanded, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) RETURNING id, knowledge_id, parent_id, node_type, title, icon, sort_order, is_expanded, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let inserted = sqlx::query_as::<_, KnowledgeTree>(&sql)
+    let inserted = sqlx::query_as::<_, KnowledgeTree>(sqlx::AssertSqlSafe(sql))
         .bind(next_id() as i64)
         .bind(knowledge_id)
         .bind(parent_id)
@@ -126,7 +126,7 @@ pub async fn update_knowledge_node(
         "SELECT id, knowledge_id, parent_id, node_type, title, icon, sort_order, is_expanded, created_by, created_at, updated_by, updated_at, deleted FROM {}knowledge_tree WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
     );
-    let existing = sqlx::query_as::<_, KnowledgeTree>(&query_sql)
+    let existing = sqlx::query_as::<_, KnowledgeTree>(sqlx::AssertSqlSafe(query_sql))
         .bind(id)
         .fetch_one(&pool)
         .await
@@ -144,7 +144,7 @@ pub async fn update_knowledge_node(
         "UPDATE {}knowledge_tree SET title = $1, icon = $2, sort_order = $3, is_expanded = $4, updated_by = $5, updated_at = NOW() WHERE id = $6 RETURNING id, knowledge_id, parent_id, node_type, title, icon, sort_order, is_expanded, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let updated = sqlx::query_as::<_, KnowledgeTree>(&update_sql)
+    let updated = sqlx::query_as::<_, KnowledgeTree>(sqlx::AssertSqlSafe(update_sql))
         .bind(new_title)
         .bind(new_icon)
         .bind(new_sort_order)
@@ -174,7 +174,7 @@ pub async fn delete_knowledge_node(id: i64) -> Result<(), String> {
         "UPDATE {}knowledge_tree SET deleted = 1 WHERE id = $1 OR parent_id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
@@ -204,7 +204,7 @@ pub async fn move_knowledge_node(
         "UPDATE {}knowledge_tree SET parent_id = $1, updated_at = NOW() WHERE id = $2 AND (deleted IS NULL OR deleted = 0) RETURNING id, knowledge_id, parent_id, node_type, title, icon, sort_order, is_expanded, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let updated = sqlx::query_as::<_, KnowledgeTree>(&sql)
+    let updated = sqlx::query_as::<_, KnowledgeTree>(sqlx::AssertSqlSafe(sql))
         .bind(new_parent_id)
         .bind(id)
         .fetch_one(&pool)
@@ -251,7 +251,7 @@ pub async fn get_knowledge_list(
 
     sql.push_str(" ORDER BY created_at DESC");
 
-    let list = sqlx::query_as::<_, AssetKnowledge>(&sql)
+    let list = sqlx::query_as::<_, AssetKnowledge>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| {
@@ -272,7 +272,7 @@ pub async fn get_knowledge_by_id(id: i64) -> Result<AssetKnowledge, String> {
         "SELECT id, asset_id, doc_source, knowledge_type, title, content, chunk_index, vector_data, permission_level, owner_type, owner_id, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_knowledge WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
     );
-    let item = sqlx::query_as::<_, AssetKnowledge>(&sql)
+    let item = sqlx::query_as::<_, AssetKnowledge>(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_one(&pool)
         .await
@@ -303,7 +303,7 @@ pub async fn insert_knowledge(
         "INSERT INTO {}asset_knowledge (id, asset_id, doc_source, knowledge_type, title, content, chunk_index, permission_level, created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) RETURNING id, asset_id, doc_source, knowledge_type, title, content, chunk_index, vector_data, permission_level, owner_type, owner_id, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let inserted = sqlx::query_as::<_, AssetKnowledge>(&sql)
+    let inserted = sqlx::query_as::<_, AssetKnowledge>(sqlx::AssertSqlSafe(sql))
         .bind(next_id() as i64)
         .bind(asset_id)
         .bind(doc_source)
@@ -346,7 +346,7 @@ pub async fn update_knowledge(
         "SELECT id, asset_id, doc_source, knowledge_type, title, content, chunk_index, vector_data, permission_level, owner_type, owner_id, created_by, created_at, updated_by, updated_at, deleted FROM {}asset_knowledge WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
         prefix
     );
-    let existing = sqlx::query_as::<_, AssetKnowledge>(&query_sql)
+    let existing = sqlx::query_as::<_, AssetKnowledge>(sqlx::AssertSqlSafe(query_sql))
         .bind(id)
         .fetch_one(&pool)
         .await
@@ -364,7 +364,7 @@ pub async fn update_knowledge(
         "UPDATE {}asset_knowledge SET title = $1, content = $2, knowledge_type = $3, permission_level = $4, updated_by = $5, updated_at = NOW() WHERE id = $6 RETURNING id, asset_id, doc_source, knowledge_type, title, content, chunk_index, vector_data, permission_level, owner_type, owner_id, created_by, created_at, updated_by, updated_at, deleted",
         prefix
     );
-    let updated = sqlx::query_as::<_, AssetKnowledge>(&update_sql)
+    let updated = sqlx::query_as::<_, AssetKnowledge>(sqlx::AssertSqlSafe(update_sql))
         .bind(new_title)
         .bind(new_content)
         .bind(new_knowledge_type)
@@ -393,7 +393,7 @@ pub async fn delete_knowledge(id: i64) -> Result<(), String> {
         "UPDATE {}asset_knowledge SET deleted = 1 WHERE id = $1",
         prefix
     );
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await

@@ -8,7 +8,7 @@ use wfe_core::executor::StepRegistry;
 use wfe_core::executor::WorkflowExecutor;
 
 use super::lock::LocalLockProvider;
-use super::persistence::create_persistence_provider;
+// use super::persistence::create_persistence_provider; // 待 wfe-postgres 升级后恢复
 use super::queue::SyncQueueProvider;
 use super::steps::{ApprovalStep, AutoStep, NotifyStep};
 
@@ -22,12 +22,9 @@ pub fn create_step_registry() -> StepRegistry {
 }
 
 /// 创建工作流执行器实例
+// TODO: wfe-postgres 升级到支持 sqlx 0.9.0 后重新启用
 pub fn create_executor() -> WorkflowExecutor {
-    let persistence = Arc::new(create_persistence_provider());
-    let lock = Arc::new(LocalLockProvider::new());
-    let queue = Arc::new(SyncQueueProvider);
-
-    WorkflowExecutor::new(persistence, lock, queue)
+    panic!("create_executor 需要 wfe-postgres 支持，待 wfe-postgres 升级后重新启用");
 }
 
 #[cfg(test)]

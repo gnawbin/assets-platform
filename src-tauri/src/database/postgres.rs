@@ -440,7 +440,7 @@ pub async fn ensure_database_exists(config: &PostgresConfig) -> Result<()> {
                 .collect::<String>()
         );
 
-        sqlx::query(&create_sql)
+        sqlx::query(sqlx::AssertSqlSafe(create_sql))
             .execute(&admin_pool)
             .await
             .map_err(|e| {
@@ -598,7 +598,7 @@ async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()
             Some(_) => trimmed,
             None => continue,
         };
-        sqlx::query(sql_to_execute)
+        sqlx::query(sqlx::AssertSqlSafe(sql_to_execute.to_string()))
             .execute(pool)
             .await
             .map_err(|e| {
@@ -812,7 +812,7 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
 
     // 8. 创建租户 schema（如果不存在）
     tracing::info!("正在创建租户 schema '{}'...", schema);
-    sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {}", schema))
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA IF NOT EXISTS {}", schema)))
         .execute(&pool)
         .await
         .map_err(|e| anyhow!("创建 schema '{}' 失败: {}", schema, e))?;

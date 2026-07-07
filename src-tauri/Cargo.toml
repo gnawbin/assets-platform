@@ -45,7 +45,7 @@ opentelemetry_sdk = {version = "0.32.1", features = [
 tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
 
 argon2 = "0.5.3" # 最强密码哈希
-password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具                           
+password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具                               
 rand = {version = "0.10.1", features = ["std_rng"] } 
 rand_core = "0.10.1" # 提供 RngCore 等核心随机数 trait
 # Tauri 核心（最小特性集）
@@ -69,7 +69,7 @@ jsonwebtoken = {version = "10.3.0", default-features = false, features = [
 ] }
 
 # 数据库（仅 PostgreSQL）
-sqlx = {version = "0.8.6", default-features = false, features = [
+sqlx = {version = "0.9.0", default-features = false, features = [
   "postgres",
   "runtime-tokio",
   "tls-rustls",
@@ -106,7 +106,6 @@ reqwest = {version = "0.13.2", features = [
 async-trait = "0.1"
 futures = "0.3"
 wfe-core = {version = "1.10.0", features = ["test-support"] }
-wfe-postgres = "1.10.0"
 wfe-yaml = "1.10.0"
 # URL 解析
 url = "2.0"

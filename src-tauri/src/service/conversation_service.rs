@@ -143,7 +143,7 @@ impl ConversationService {
                 "SELECT id, title, okf_type FROM {}knowledge_asset WHERE id = $1 AND deleted = 0",
                 prefix
             );
-            let row = sqlx::query_as::<_, (i64, String, String)>(&sql)
+            let row = sqlx::query_as::<_, (i64, String, String)>(sqlx::AssertSqlSafe(sql))
                 .bind(id)
                 .fetch_optional(&pool)
                 .await
@@ -240,7 +240,7 @@ impl ConversationService {
             "SELECT COUNT(*) FROM {}conversation WHERE user_id = $1 AND deleted = 0",
             prefix
         );
-        let total: (i64,) = sqlx::query_as(&count_sql)
+        let total: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(count_sql))
             .bind(user_id)
             .fetch_one(&pool)
             .await
@@ -253,7 +253,7 @@ impl ConversationService {
              ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
             prefix
         );
-        let list = sqlx::query_as::<_, Conversation>(&sql)
+        let list = sqlx::query_as::<_, Conversation>(sqlx::AssertSqlSafe(sql))
             .bind(user_id)
             .bind(page_size)
             .bind(offset)
@@ -281,7 +281,7 @@ impl ConversationService {
              ORDER BY created_at ASC LIMIT $2 OFFSET $3",
             prefix
         );
-        let messages = sqlx::query_as::<_, Message>(&sql)
+        let messages = sqlx::query_as::<_, Message>(sqlx::AssertSqlSafe(sql))
             .bind(conv_id)
             .bind(page_size)
             .bind(offset)
@@ -307,7 +307,7 @@ impl ConversationService {
              RETURNING id, user_id, title, bind_knowledge_tree_id, created_at, updated_at, deleted",
             prefix
         );
-        let conv = sqlx::query_as::<_, Conversation>(&sql)
+        let conv = sqlx::query_as::<_, Conversation>(sqlx::AssertSqlSafe(sql))
             .bind(user_id)
             .bind(title)
             .bind(bind_tree_node_id)
@@ -348,7 +348,7 @@ impl ConversationService {
              RETURNING id",
             prefix
         );
-        let row: (i64,) = sqlx::query_as(&sql)
+        let row: (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(sql))
             .bind(conv_id)
             .bind(role)
             .bind(content)
@@ -373,7 +373,7 @@ impl ConversationService {
              FROM {}conversation WHERE id = $1 AND deleted = 0",
             prefix
         );
-        let conv = sqlx::query_as::<_, Conversation>(&sql)
+        let conv = sqlx::query_as::<_, Conversation>(sqlx::AssertSqlSafe(sql))
             .bind(conv_id)
             .fetch_one(&pool)
             .await
@@ -402,7 +402,7 @@ impl ConversationService {
             "UPDATE {}conversation SET deleted = 1, updated_at = NOW() WHERE id = $1",
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(conv_id)
             .execute(&pool)
             .await
@@ -420,7 +420,7 @@ impl ConversationService {
             "UPDATE {}conversation SET title = $1, updated_at = NOW() WHERE id = $2",
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(title)
             .bind(conv_id)
             .execute(&pool)
@@ -442,7 +442,7 @@ impl ConversationService {
             "UPDATE {}conversation SET bind_knowledge_tree_id = $1, updated_at = NOW() WHERE id = $2",
             prefix
         );
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(bind_tree_node_id)
             .bind(conv_id)
             .execute(&pool)

@@ -132,7 +132,7 @@ impl RAGRetriever {
             similarity: Option<f64>,
         }
 
-        let rows = sqlx::query_as::<_, DbChunk>(&sql)
+        let rows = sqlx::query_as::<_, DbChunk>(sqlx::AssertSqlSafe(sql))
             .bind(params.bind_tree_node_id)
             .bind(&params.okf_type_filter)
             .bind(params.top_k)
@@ -180,7 +180,7 @@ impl RAGRetriever {
                 prefix
             );
 
-            let inserted = sqlx::query_as::<_, DocumentChunk>(&sql)
+            let inserted = sqlx::query_as::<_, DocumentChunk>(sqlx::AssertSqlSafe(sql))
                 .bind(asset_id)
                 .bind(i as i32)
                 .bind(text)

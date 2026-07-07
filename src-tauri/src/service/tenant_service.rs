@@ -160,7 +160,7 @@ pub async fn insert_tenant(
         // 创建租户 schema
         info!("正在创建租户 schema '{}'...", sn);
         let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS {}", sn);
-        sqlx::query(&create_schema_sql)
+        sqlx::query(sqlx::AssertSqlSafe(create_schema_sql))
             .execute(&pool)
             .await
             .map_err(|e| {

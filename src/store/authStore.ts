@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { api } from '@/utils/api';
 
 export interface TenantInfo {
-  id: number;
+  id: string;
   tenant_name: string;
   schema_name: string | null;
   is_current: boolean;
@@ -21,7 +21,7 @@ export interface UserInfo {
   status: number;
   nickname: string | null;
   avatar: string | null;
-  tenant_id: number | null;
+  tenant_id: string | null;
   available_tenants?: TenantInfo[];
 }
 
@@ -36,10 +36,10 @@ interface AuthState {
   isLoggedIn: boolean;
   isInitializing: boolean;
   availableTenants: TenantInfo[];
-  selectedTenantId: number | null;
+  selectedTenantId: string | null;
   login: (result: LoginResult) => void;
   logout: () => void;
-  switchTenant: (tenantId: number) => void;
+  switchTenant: (tenantId: string) => void;
   init: () => Promise<void>;
 }
 
@@ -76,9 +76,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem('available_tenants', JSON.stringify(available_tenants || []));
 
     // 自动选中用户的当前租户（第一个或 tenant_id 对应的）
-    let selectedTenantId: number | null = null;
+    let selectedTenantId: string | null = null;
     if (available_tenants && available_tenants.length > 0) {
-      // 优先使用用户的 tenant_id 匹配
+      // 优先使用用户的 tenant_id 匹配（两者都是 string，安全比较）
       if (user.tenant_id) {
         const match = available_tenants.find(t => t.id === user.tenant_id);
         if (match) {
@@ -91,7 +91,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
     if (selectedTenantId) {
-      localStorage.setItem('selected_tenant_id', String(selectedTenantId));
+      localStorage.setItem('selected_tenant_id', selectedTenantId);
     }
 
     set({
@@ -117,8 +117,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  switchTenant: (tenantId: number) => {
-    localStorage.setItem('selected_tenant_id', String(tenantId));
+  switchTenant: (tenantId: string) => {
+    localStorage.setItem('selected_tenant_id', tenantId);
     set({ selectedTenantId: tenantId });
   },
 
@@ -155,10 +155,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // 更新 localStorage 中的缓存
         localStorage.setItem('auth_user', JSON.stringify(freshUser));
 
-        // 解析 localStorage 中的 available_tenants，确保 id 字段为数字类型
-        // （后端序列化 i64 为字符串，JSON.parse 后 id 为字符串，需要转回数字）
+        // 解析 localStorage 中的 available_tenants，直接保留 id 为 string（不转 Number）
+        // 后端将 i64 序列化为字符串，JSON.parse 后 id 就是 string，无需转换
         const parsedTenants: TenantInfo[] = storedTenants
-          ? (JSON.parse(storedTenants) as TenantInfo[]).map(t => ({ ...t, id: Number(t.id) }))
+          ? JSON.parse(storedTenants)
           : [];
 
         set({
@@ -167,21 +167,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isLoggedIn: true,
           isInitializing: false,
           availableTenants: parsedTenants,
-          selectedTenantId: storedSelectedTenant ? Number(storedSelectedTenant) : null,
+          selectedTenantId: storedSelectedTenant ?? null,
         });
 
         // 恢复租户后，同步通知后端更新 USER_TENANT_CACHE（刷新页面后后端缓存丢失）
         if (storedSelectedTenant) {
-          const tenantId = Number(storedSelectedTenant);
-          if (!isNaN(tenantId)) {
-            try {
-              await api.post('switch_tenant', {
-                userId: String(freshUser.id ?? ''),
-                tenantId: storedSelectedTenant,
-              });
-            } catch {
-              // 切换租户失败不影响登录状态，静默处理
-            }
+          try {
+            await api.post('switch_tenant', {
+              userId: String(freshUser.id ?? ''),
+              tenantId: storedSelectedTenant,
+            });
+          } catch {
+            // 切换租户失败不影响登录状态，静默处理
           }
         }
 

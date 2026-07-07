@@ -48,14 +48,8 @@ pub struct WfEngine {
 impl WfEngine {
     /// 创建并初始化工作流引擎
     pub async fn new() -> Self {
-        let registry = Arc::new(executor::create_step_registry());
-        let persistence = Arc::new(persistence::create_persistence_provider());
-        let lock = Arc::new(lock::LocalLockProvider::new());
-        let queue = Arc::new(queue::SyncQueueProvider);
-
-        let executor = Arc::new(WorkflowExecutor::new(persistence, lock, queue));
-
-        WfEngine { executor, registry }
+        // TODO: wfe-postgres 升级到支持 sqlx 0.9.0 后重新启用持久化
+        panic!("WfEngine 需要 wfe-postgres 支持，待 wfe-postgres 升级后重新启用");
     }
 
     /// 创建并启动审批流程

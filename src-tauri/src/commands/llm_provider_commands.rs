@@ -25,7 +25,7 @@ pub async fn create_llm_provider(
     apiKey: Option<String>,
     weight: Option<i32>,
     isLocal: Option<bool>,
-    createdBy: Option<String>,
+    currentUserId: Option<String>,
 ) -> Result<LlmProvider, String> {
     // 加密 API Key
     let encrypted_key = match &apiKey {
@@ -36,13 +36,7 @@ pub async fn create_llm_provider(
         _ => apiKey.clone(),
     };
 
-    let cb = match createdBy {
-        Some(ref id) if !id.is_empty() => Some(
-            id.parse::<i64>()
-                .map_err(|e| format!("无效的用户ID: {}", e))?,
-        ),
-        _ => None,
-    };
+    let user_id = currentUserId.and_then(|id| id.parse().ok());
 
     let provider = LlmProvider {
         id: 0,
@@ -55,7 +49,7 @@ pub async fn create_llm_provider(
         weight,
         is_local: isLocal.unwrap_or(false),
         enable: true,
-        created_by: cb,
+        created_by: user_id,
         created_at: None,
         updated_at: None,
         deleted: 0,

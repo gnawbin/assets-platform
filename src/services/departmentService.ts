@@ -19,13 +19,13 @@ export interface Department {
     updated_by: number | null;
     updated_at: string | null;
     deleted: number | null;
-    tenant_id: number;
+    tenant_id: string;
 }
 
 // ======================== 服务方法 ========================
 
 /** 获取所有部门（可按租户过滤） */
-export function getDepartments(tenantId?: string) {
+export function getDepartments(tenantId?: string | null) {
     const args: Record<string, unknown> = {};
     if (tenantId) {
         args.tenantId = tenantId;
@@ -39,7 +39,7 @@ export function insertDepartment(params: {
     parentId: string | null;
     description: string | null;
     createdBy: number | null;
-    tenantId: string;
+    tenantId: string | null;
 }) {
     return api.post<string>('insert_department', {
         departmentName: params.departmentName,

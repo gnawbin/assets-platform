@@ -54,7 +54,7 @@ const UsersPage: React.FC = () => {
 
   // 搜索筛选
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [filterTenantId, setFilterTenantId] = useState<number | null>(null);
+  const [filterTenantId, setFilterTenantId] = useState<string | null>(null);
 
 
   // 使用 useApi 管理数据获取
@@ -80,7 +80,7 @@ const UsersPage: React.FC = () => {
     email: '',
     phone: '',
     department_id: null as number | null,
-    tenant_id: null as number | null,
+    tenant_id: null as string | null,
     status: 1,
     nickname: '',
     person_code: '',
@@ -112,7 +112,7 @@ const UsersPage: React.FC = () => {
   // 分配租户弹窗
   const [tenantModalOpen, setTenantModalOpen] = useState(false);
   const [tenantModalUser, setTenantModalUser] = useState<User | null>(null);
-  const [selectedTenantIds, setSelectedTenantIds] = useState<number[]>([]);
+  const [selectedTenantIds, setSelectedTenantIds] = useState<string[]>([]);
   const [tenantModalLoading, setTenantModalLoading] = useState(false);
   const { execute: doAssignUserTenants, loading: assigningTenants } = useApi(assignUserTenants);
 
@@ -472,9 +472,9 @@ const UsersPage: React.FC = () => {
                 placeholder="选择所属机构"
                 clearable
                 data={[{ value: '', label: '全部机构' }, ...tenantOptions]}
-                value={filterTenantId !== null ? String(filterTenantId) : ''}
+                value={filterTenantId !== null ? filterTenantId : ''}
                 onChange={(value) => {
-                  setFilterTenantId(value ? Number(value) : null);
+                  setFilterTenantId(value ?? null);
                 }}
                 style={{ minWidth: 200 }}
               />
@@ -709,13 +709,13 @@ const UsersPage: React.FC = () => {
             data={tenantOptions}
             value={
               newUser.tenant_id !== null
-                ? String(newUser.tenant_id)
+                ? newUser.tenant_id
                 : null
             }
             onChange={(value) =>
               setNewUser({
                 ...newUser,
-                tenant_id: value ? Number(value) : null,
+                tenant_id: value ?? null,
               })
             }
           />
@@ -959,13 +959,13 @@ const UsersPage: React.FC = () => {
                       key={tenant.id}
                       label={tenant.tenant_name}
                       description={tenant.schema_name || ''}
-                      checked={selectedTenantIds.includes(tenant.id)}
+                      checked={selectedTenantIds.includes(String(tenant.id))}
                       onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                         if (e.currentTarget.checked) {
-                          setSelectedTenantIds([...selectedTenantIds, tenant.id]);
+                          setSelectedTenantIds([...selectedTenantIds, String(tenant.id)]);
                         } else {
                           setSelectedTenantIds(
-                            selectedTenantIds.filter((id) => id !== tenant.id)
+                            selectedTenantIds.filter((id) => id !== String(tenant.id))
                           );
                         }
                       }}

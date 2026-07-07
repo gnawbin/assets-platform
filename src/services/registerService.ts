@@ -39,7 +39,7 @@ export function getRegistrations(status?: number) {
 }
 
 // 审核通过注册申请
-export function approveRegistration(id: number, approve_by: number, tenant_id: number, approve_remark?: string) {
+export function approveRegistration(id: number, approve_by: number, tenant_id: string, approve_remark?: string) {
     return api.post<RegisterResponse>('approve_registration', { id: String(id), approveBy: approve_by, tenantId: tenant_id, approveRemark: approve_remark });
 }
 

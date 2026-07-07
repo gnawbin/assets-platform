@@ -23,7 +23,7 @@ export interface User {
     person_id: string | null;
     person_code: string | null;
     super_user_id: number | null;
-    tenant_id: number | null;
+    tenant_id: string | null;
     tenant_name: string | null;
     created_by: number | null;
     created_at: string | null;
@@ -34,7 +34,7 @@ export interface User {
 // ======================== 服务方法 ========================
 
 /** 获取用户列表 */
-export function getUsers(tenantId?: number | null, keyword?: string) {
+export function getUsers(tenantId?: string | null, keyword?: string) {
     const args: Record<string, unknown> = {};
     if (tenantId !== undefined && tenantId !== null) {
         args.tenantId = tenantId;
@@ -59,7 +59,7 @@ export function insertUser(params: {
     personId: null;
     personCode: string | null;
     superUserId: null;
-    tenantId: number | null;
+    tenantId: string | null;
     createdBy: null;
 }) {
     return api.post<string>('insert_user', params);

@@ -153,10 +153,10 @@ impl UploadManager {
         // 1. 确定 file_group_id 和 version
         let (file_group_id, version) = if let Some(gid) = file_group_id {
             // 已有 group：查最大版本 +1
-            let max_ver = sqlx::query_scalar::<_, Option<i32>>(&format!(
+            let max_ver = sqlx::query_scalar::<_, Option<i32>>(sqlx::AssertSqlSafe(format!(
                 "SELECT MAX(version) FROM {}.file_uploads WHERE file_group_id = $1 AND deleted = 0",
                 schema
-            ))
+            )))
             .bind(gid)
             .fetch_one(&self.pool)
             .await
@@ -171,10 +171,10 @@ impl UploadManager {
 
         // 2. 标记旧版本为非最新（版本号 > 1 表示是替换）
         if version > 1 {
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE {}.file_uploads SET is_latest = false WHERE file_group_id = $1 AND deleted = 0",
                 schema
-            ))
+            )))
             .bind(&file_group_id)
             .execute(&self.pool)
             .await
@@ -191,7 +191,7 @@ impl UploadManager {
         let id = crate::utils::snowflake::next_id() as i64;
 
         // 5. 保存上传记录到数据库（status = pending，不调 S3）
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"
             INSERT INTO {}.file_uploads
                 (id, file_group_id, version, is_latest, change_reason, file_md5,
@@ -205,7 +205,7 @@ impl UploadManager {
                  $13, $14, $15, NOW(), NOW())
             "#,
             schema
-        ))
+        )))
         .bind(id)
         .bind(&file_group_id)
         .bind(version)
@@ -240,10 +240,10 @@ impl UploadManager {
         schema: &str,
         upload_id: i64,
     ) -> Result<UploadInitResult, String> {
-        let record = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0 FOR UPDATE",
             schema
-        ))
+        )))
         .bind(upload_id)
         .fetch_optional(&self.pool)
         .await
@@ -289,7 +289,7 @@ impl UploadManager {
             .map_err(|e| format!("生成 Presigned URL 失败: {}", e))?;
 
         // 更新数据库
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"
             UPDATE {}.file_uploads
             SET status = 'uploading',
@@ -299,7 +299,7 @@ impl UploadManager {
             WHERE id = $6
             "#,
             schema
-        ))
+        )))
         .bind(&s3_upload_id)
         .bind(&self.config.bucket)
         .bind(&object_key)
@@ -330,10 +330,10 @@ impl UploadManager {
         etag: &str,
     ) -> Result<(), String> {
         // 检查上传记录是否存在且状态为 uploading
-        let record = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0 FOR UPDATE",
             schema
-        ))
+        )))
         .bind(upload_id)
         .fetch_optional(&self.pool)
         .await
@@ -365,10 +365,10 @@ impl UploadManager {
         chunks.push(part_number);
         chunks.sort();
 
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {}.file_uploads SET received_chunks = $1, updated_at = NOW() WHERE id = $2",
             schema
-        ))
+        )))
         .bind(&chunks)
         .bind(upload_id)
         .execute(&self.pool)
@@ -386,10 +386,10 @@ impl UploadManager {
         schema: &str,
         upload_id: i64,
     ) -> Result<UploadProgress, String> {
-        let record = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0",
             schema
-        ))
+        )))
         .bind(upload_id)
         .fetch_optional(&self.pool)
         .await
@@ -423,10 +423,10 @@ impl UploadManager {
         upload_id: i64,
     ) -> Result<UploadCompleteResult, String> {
         // 1. 获取上传记录
-        let record = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0 FOR UPDATE",
             schema
-        ))
+        )))
         .bind(upload_id)
         .fetch_optional(&self.pool)
         .await
@@ -492,14 +492,14 @@ impl UploadManager {
         let file_url = format!("{}/{}", self.config.public_base_url, object_key);
 
         // 7. 更新数据库状态为 completed（待后续 commit）
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"
             UPDATE {}.file_uploads
             SET status = 'completed', file_url = $1, etag = $2, updated_at = NOW()
             WHERE id = $3
             "#,
             schema
-        ))
+        )))
         .bind(&file_url)
         .bind(&s3_etag)
         .bind(upload_id)
@@ -525,10 +525,10 @@ impl UploadManager {
         context_type: &str,
         context_id: i64,
     ) -> Result<(), String> {
-        let record = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0 FOR UPDATE",
             schema
-        ))
+        )))
         .bind(upload_id)
         .fetch_optional(&self.pool)
         .await
@@ -542,7 +542,7 @@ impl UploadManager {
             ));
         }
 
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"
             UPDATE {}.file_uploads
             SET status = 'committed',
@@ -552,7 +552,7 @@ impl UploadManager {
             WHERE id = $3
             "#,
             schema
-        ))
+        )))
         .bind(context_type)
         .bind(context_id)
         .bind(upload_id)
@@ -569,10 +569,10 @@ impl UploadManager {
     /// 2. 更新数据库状态为 cancelled
     pub async fn abort(&self, schema: &str, upload_id: i64) -> Result<(), String> {
         // 1. 获取上传记录
-        let record = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let record = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             "SELECT * FROM {}.file_uploads WHERE id = $1 AND deleted = 0",
             schema
-        ))
+        )))
         .bind(upload_id)
         .fetch_optional(&self.pool)
         .await
@@ -601,10 +601,10 @@ impl UploadManager {
         }
 
         // 3. 更新数据库状态
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {}.file_uploads SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
             schema
-        ))
+        )))
         .bind(upload_id)
         .execute(&self.pool)
         .await
@@ -619,14 +619,14 @@ impl UploadManager {
         schema: &str,
         file_group_id: &str,
     ) -> Result<Vec<FileUploadRecord>, String> {
-        let records = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let records = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             r#"
             SELECT * FROM {}.file_uploads
             WHERE file_group_id = $1 AND deleted = 0 AND status = 'committed'
             ORDER BY version DESC
             "#,
             schema
-        ))
+        )))
         .bind(file_group_id)
         .fetch_all(&self.pool)
         .await
@@ -641,7 +641,7 @@ impl UploadManager {
     /// 同时调用 S3 AbortMultipartUpload 清理 S3 上的临时分片
     pub async fn clean_expired(&self, schema: &str, expire_hours: i64) -> Result<i64, String> {
         // 1. 查询过期上传记录（包括 pending、uploading）
-        let records = sqlx::query_as::<_, FileUploadRecord>(&format!(
+        let records = sqlx::query_as::<_, FileUploadRecord>(sqlx::AssertSqlSafe(format!(
             r#"
             SELECT * FROM {}.file_uploads
             WHERE status IN ('pending', 'uploading')
@@ -649,7 +649,7 @@ impl UploadManager {
               AND deleted = 0
             "#,
             schema, expire_hours
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| format!("查询过期上传记录失败: {}", e))?;
@@ -673,10 +673,10 @@ impl UploadManager {
             }
 
             // 软删除记录
-            if let Err(e) = sqlx::query(&format!(
+            if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE {}.file_uploads SET deleted = 1, updated_at = NOW() WHERE id = $1",
                 schema
-            ))
+            )))
             .bind(record.id)
             .execute(&self.pool)
             .await

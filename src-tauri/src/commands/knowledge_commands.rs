@@ -24,7 +24,7 @@ pub async fn insert_knowledge_node(
     title: String,
     icon: Option<String>,
     sort_order: Option<i32>,
-    created_by: Option<String>,
+    currentUserId: Option<String>,
 ) -> Result<crate::database::models::KnowledgeTree, String> {
     info!("[DEBUG] insert_knowledge_node called: title={}", title);
 
@@ -42,13 +42,7 @@ pub async fn insert_knowledge_node(
         ),
         _ => None,
     };
-    let cb = match created_by {
-        Some(ref id) if !id.is_empty() => Some(
-            id.parse::<i64>()
-                .map_err(|e| format!("无效的创建人ID: {}", e))?,
-        ),
-        _ => None,
-    };
+    let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1i64);
 
     service::knowledge_service::insert_knowledge_node(
         kid,
@@ -57,7 +51,7 @@ pub async fn insert_knowledge_node(
         &title,
         icon.as_deref(),
         sort_order.unwrap_or(0),
-        cb,
+        Some(user_id),
     )
     .await
 }
@@ -70,18 +64,14 @@ pub async fn update_knowledge_node(
     icon: Option<String>,
     sort_order: Option<i32>,
     is_expanded: Option<bool>,
-    updated_by: Option<String>,
+    currentUserId: Option<String>,
 ) -> Result<crate::database::models::KnowledgeTree, String> {
     info!("[DEBUG] update_knowledge_node called: id={}", id);
 
     let node_id: i64 = id.parse().map_err(|e| format!("无效的节点ID: {}", e))?;
-    let ub = match updated_by {
-        Some(ref uid) if !uid.is_empty() => Some(
-            uid.parse::<i64>()
-                .map_err(|e| format!("无效的更新人ID: {}", e))?,
-        ),
-        _ => None,
-    };
+    let user_id = currentUserId
+        .and_then(|uid| uid.parse().ok())
+        .unwrap_or(1i64);
 
     service::knowledge_service::update_knowledge_node(
         node_id,
@@ -89,7 +79,7 @@ pub async fn update_knowledge_node(
         icon.as_deref(),
         sort_order,
         is_expanded,
-        ub,
+        Some(user_id),
     )
     .await
 }
@@ -162,7 +152,7 @@ pub async fn insert_knowledge(
     title: String,
     content: String,
     permission_level: Option<String>,
-    created_by: Option<String>,
+    currentUserId: Option<String>,
 ) -> Result<AssetKnowledge, String> {
     info!("[DEBUG] insert_knowledge called: title={}", title);
 
@@ -173,13 +163,7 @@ pub async fn insert_knowledge(
         ),
         _ => None,
     };
-    let cb = match created_by {
-        Some(ref id) if !id.is_empty() => Some(
-            id.parse::<i64>()
-                .map_err(|e| format!("无效的创建人ID: {}", e))?,
-        ),
-        _ => None,
-    };
+    let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1i64);
 
     service::knowledge_service::insert_knowledge(
         aid,
@@ -188,7 +172,7 @@ pub async fn insert_knowledge(
         &title,
         &content,
         permission_level.as_deref().unwrap_or("internal"),
-        cb,
+        Some(user_id),
     )
     .await
 }
@@ -201,18 +185,14 @@ pub async fn update_knowledge(
     content: Option<String>,
     knowledge_type: Option<String>,
     permission_level: Option<String>,
-    updated_by: Option<String>,
+    currentUserId: Option<String>,
 ) -> Result<AssetKnowledge, String> {
     info!("[DEBUG] update_knowledge called: id={}", id);
 
     let kid: i64 = id.parse().map_err(|e| format!("无效的知识条目ID: {}", e))?;
-    let ub = match updated_by {
-        Some(ref uid) if !uid.is_empty() => Some(
-            uid.parse::<i64>()
-                .map_err(|e| format!("无效的更新人ID: {}", e))?,
-        ),
-        _ => None,
-    };
+    let user_id = currentUserId
+        .and_then(|uid| uid.parse().ok())
+        .unwrap_or(1i64);
 
     service::knowledge_service::update_knowledge(
         kid,
@@ -220,7 +200,7 @@ pub async fn update_knowledge(
         content.as_deref(),
         knowledge_type.as_deref(),
         permission_level.as_deref(),
-        ub,
+        Some(user_id),
     )
     .await
 }

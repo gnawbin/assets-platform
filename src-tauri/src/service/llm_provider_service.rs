@@ -125,7 +125,7 @@ pub async fn get_models(provider_id: Option<i64>) -> Result<Vec<LlmModel>, Strin
             .to_string()
     };
 
-    let list = sqlx::query_as::<_, LlmModel>(&sql)
+    let list = sqlx::query_as::<_, LlmModel>(sqlx::AssertSqlSafe(sql))
         .fetch_all(&pool)
         .await
         .map_err(|e| format!("查询模型列表失败: {}", e))?;
