@@ -259,29 +259,13 @@ export function useChunkedUpload(
       let lastLoaded = 0;
       let lastTime = Date.now();
 
-      // 记录失败的分片，容错处理
-      const failedChunks: number[] = [];
-
       const uploadOneChunk = async (partNumber: number): Promise<void> => {
         if (pausedRef.current) return;
         const presignedUrl = presignedUrls[partNumber - 1];
         const chunk = chunks[partNumber - 1];
 
-        try {
-          const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
-          await uploadService.reportChunk(uploadId, partNumber, etag);
-        } catch (chunkErr: any) {
-          // 记录失败的分片，不让单个分片失败拖垮整个上传
-          failedChunks.push(partNumber);
-          logger.warn(`[Upload] 分片 ${partNumber} 上传失败，继续其他分片: ${chunkErr.message}`, {
-            module: 'upload',
-            action: 'uploadChunkError',
-            uploadId,
-            partNumber,
-            error: chunkErr.message,
-          });
-          return;
-        }
+        const etag = await uploadService.uploadChunk(presignedUrl, chunk, partNumber);
+        await uploadService.reportChunk(uploadId, partNumber, etag);
 
         uploadedCount++;
         const pct = Math.round((uploadedCount / totalChunks) * 100);
@@ -326,18 +310,6 @@ export function useChunkedUpload(
         })());
       }
       await Promise.all(workers);
-
-      // 如果有失败的分片，在 complete 之前打印汇总警告
-      if (failedChunks.length > 0) {
-        logger.warn(`[Upload] Phase 3 完成，但 ${failedChunks.length}/${totalChunks} 个分片失败: [${failedChunks.join(',')}]`, {
-          module: 'upload',
-          action: 'uploadChunkSummary',
-          uploadId,
-          failedCount: failedChunks.length,
-          totalChunks,
-          failedChunks,
-        });
-      }
 
       // 如果被暂停了，不执行 complete
       if (pausedRef.current) {
