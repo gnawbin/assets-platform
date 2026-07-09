@@ -4,7 +4,6 @@
 
 use axum::{extract::Path, Json};
 use serde::Deserialize;
-use utoipa::ToSchema;
 
 use crate::database::models::AssetCategory;
 use crate::service;
@@ -12,7 +11,7 @@ use crate::service;
 use super::response::{ApiError, ApiResponse};
 
 /// 创建分类请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct CreateCategoryRequest {
     pub category_name: String,
     pub asset_type: String,
@@ -23,7 +22,7 @@ pub struct CreateCategoryRequest {
 }
 
 /// 更新分类请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct UpdateCategoryRequest {
     pub category_name: String,
     pub asset_type: String,
@@ -34,18 +33,6 @@ pub struct UpdateCategoryRequest {
 }
 
 /// 获取所有资产分类
-#[utoipa::path(
-    get,
-    path = "/api/categories",
-    tag = "资产分类",
-    responses(
-        (status = 200, description = "获取成功", body = ApiResponse<Vec<AssetCategory>>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn get_categories() -> Result<Json<ApiResponse<Vec<AssetCategory>>>, ApiError> {
     match service::assets_categories_service::get_categories().await {
         Ok(categories) => Ok(Json(ApiResponse::success(categories))),
@@ -54,18 +41,6 @@ pub async fn get_categories() -> Result<Json<ApiResponse<Vec<AssetCategory>>>, A
 }
 
 /// 获取顶级分类
-#[utoipa::path(
-    get,
-    path = "/api/categories/parents",
-    tag = "资产分类",
-    responses(
-        (status = 200, description = "获取成功", body = ApiResponse<Vec<AssetCategory>>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn get_categories_parents() -> Result<Json<ApiResponse<Vec<AssetCategory>>>, ApiError> {
     match service::assets_categories_service::get_super_categories().await {
         Ok(categories) => Ok(Json(ApiResponse::success(categories))),
@@ -74,19 +49,6 @@ pub async fn get_categories_parents() -> Result<Json<ApiResponse<Vec<AssetCatego
 }
 
 /// 新增资产分类
-#[utoipa::path(
-    post,
-    path = "/api/categories",
-    tag = "资产分类",
-    request_body = CreateCategoryRequest,
-    responses(
-        (status = 200, description = "创建成功", body = ApiResponse<AssetCategory>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn insert_category(
     Json(req): Json<CreateCategoryRequest>,
 ) -> Result<Json<ApiResponse<AssetCategory>>, ApiError> {
@@ -111,19 +73,6 @@ pub async fn insert_category(
 }
 
 /// 更新资产分类
-#[utoipa::path(
-    put,
-    path = "/api/categories/{id}",
-    tag = "资产分类",
-    request_body = UpdateCategoryRequest,
-    responses(
-        (status = 200, description = "更新成功", body = ApiResponse<AssetCategory>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn update_category(
     Path(id): Path<String>,
     Json(req): Json<UpdateCategoryRequest>,
@@ -153,18 +102,6 @@ pub async fn update_category(
 }
 
 /// 删除资产分类
-#[utoipa::path(
-    delete,
-    path = "/api/categories/{id}",
-    tag = "资产分类",
-    responses(
-        (status = 200, description = "删除成功"),
-        (status = 500, description = "服务器错误"),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn delete_category(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>, ApiError> {
     let id: i64 = id
         .parse()

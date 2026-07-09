@@ -3,11 +3,10 @@ use crate::utils::snowflake::next_id;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use tracing::{error, info, warn};
-use utoipa::ToSchema;
 
 // ======================== 固定资产（JOIN 视图） ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareAssetView {
     // assets 主表字段
     #[serde(
@@ -79,7 +78,7 @@ pub struct HardwareAssetView {
 
 // ======================== 无形资产（JOIN 视图） ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntangibleAssetView {
     // assets 主表字段
     #[serde(
@@ -156,7 +155,7 @@ pub struct IntangibleAssetView {
 
 // ======================== 新增/修改请求体 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HardwareAssetInput {
     // assets 主表字段
     #[serde(deserialize_with = "crate::database::models::i64_from_string")]
@@ -189,7 +188,7 @@ pub struct HardwareAssetInput {
     pub fault_desc: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IntangibleAssetInput {
     // assets 主表字段
     #[serde(deserialize_with = "crate::database::models::i64_from_string")]
@@ -361,7 +360,10 @@ pub async fn get_hardware_assets() -> Result<Vec<HardwareAssetView>, String> {
 }
 
 /// 新增固定资产
-pub async fn insert_hardware_asset(input: HardwareAssetInput, current_user_id: i64) -> Result<HardwareAssetView, String> {
+pub async fn insert_hardware_asset(
+    input: HardwareAssetInput,
+    current_user_id: i64,
+) -> Result<HardwareAssetView, String> {
     let pool = database::get_write_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let asset_id = next_id() as i64;
     let hard_id = next_id() as i64;

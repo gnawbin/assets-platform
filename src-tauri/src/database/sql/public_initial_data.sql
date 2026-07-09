@@ -20,6 +20,63 @@ WHERE
     );
 
 -- ==============================
+-- 2. 默认管理员（超级管理员）
+-- ==============================
+INSERT INTO
+    public.sys_user (
+        id,
+        username,
+        passwd,
+        "domain",
+        real_name,
+        email,
+        phone,
+        department_id,
+        is_super_admin,
+        status,
+        nickname,
+        avatar,
+        person_id,
+        person_code,
+        super_user_id,
+        tenant_id,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    1,
+    'admin',
+    '$argon2id$v=19$m=19456,t=2,p=1$S7zOnvLNvJiMnyJLjiy2RQ$LQqh8tWo5DFucqeoMktGKOvmcGDM2jh10Yu/H6PJOg4',
+    NULL,
+    '超级管理员',
+    NULL,
+    NULL,
+    NULL,
+    true,
+    1,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    '2026-06-22 09:25:24.470',
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_user
+        WHERE
+            id = 1
+    );
+
+-- ==============================
 -- 系统菜单种子数据
 -- 对应 public.sys_menu 表结构
 -- menu_type: 1=目录 2=菜单 3=按钮

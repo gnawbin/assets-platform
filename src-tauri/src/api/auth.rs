@@ -150,4 +150,4 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, A
 }
 
 /// 不需要认证的路由列表
-pub const PUBLIC_ROUTES: &[&str] = &["/api/auth/login", "/api/swagger-ui", "/api/openapi.json"];
+pub const PUBLIC_ROUTES: &[&str] = &["/api/auth/login"];

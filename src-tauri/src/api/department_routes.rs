@@ -2,12 +2,10 @@
 //!
 //! 提供部门的 RESTful 接口。
 
-use axum::{extract::Path, extract::Query, Json};
-use serde::Deserialize;
-use utoipa::ToSchema;
-
 use crate::database::models::Department;
 use crate::service;
+use axum::{extract::Path, extract::Query, Json};
+use serde::Deserialize;
 
 use super::response::{ApiError, ApiResponse};
 
@@ -18,7 +16,7 @@ pub struct DepartmentQuery {
 }
 
 /// 创建部门请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct CreateDepartmentRequest {
     pub department_name: String,
     #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
@@ -29,7 +27,7 @@ pub struct CreateDepartmentRequest {
 }
 
 /// 更新部门请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct UpdateDepartmentRequest {
     pub department_name: String,
     #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
@@ -38,18 +36,6 @@ pub struct UpdateDepartmentRequest {
 }
 
 /// 获取所有部门
-#[utoipa::path(
-    get,
-    path = "/api/departments",
-    tag = "部门管理",
-    responses(
-        (status = 200, description = "获取成功", body = ApiResponse<Vec<Department>>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn get_departments(
     Query(query): Query<DepartmentQuery>,
 ) -> Result<Json<ApiResponse<Vec<Department>>>, ApiError> {
@@ -67,19 +53,6 @@ pub async fn get_departments(
 }
 
 /// 新增部门
-#[utoipa::path(
-    post,
-    path = "/api/departments",
-    tag = "部门管理",
-    request_body = CreateDepartmentRequest,
-    responses(
-        (status = 200, description = "创建成功", body = ApiResponse<Department>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn insert_department(
     Json(req): Json<CreateDepartmentRequest>,
 ) -> Result<Json<ApiResponse<Department>>, ApiError> {
@@ -98,19 +71,6 @@ pub async fn insert_department(
 }
 
 /// 更新部门
-#[utoipa::path(
-    put,
-    path = "/api/departments/{id}",
-    tag = "部门管理",
-    request_body = UpdateDepartmentRequest,
-    responses(
-        (status = 200, description = "更新成功", body = ApiResponse<Department>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn update_department(
     Path(id): Path<String>,
     Json(req): Json<UpdateDepartmentRequest>,
@@ -134,18 +94,6 @@ pub async fn update_department(
 }
 
 /// 删除部门
-#[utoipa::path(
-    delete,
-    path = "/api/departments/{id}",
-    tag = "部门管理",
-    responses(
-        (status = 200, description = "删除成功"),
-        (status = 500, description = "服务器错误"),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn delete_department(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>, ApiError> {
     let id: i64 = id
         .parse()
