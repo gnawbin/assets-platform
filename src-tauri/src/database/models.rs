@@ -141,25 +141,32 @@ pub struct AssetCategory {
     pub id: i64,
     pub category_name: String,
     pub asset_type: String,
+    #[serde(default)]
     #[serde(
         serialize_with = "opt_i64_to_string",
         deserialize_with = "opt_i64_from_string"
     )]
     pub parent_id: Option<i64>,
     pub sort: i16,
+    #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
     #[serde(
         serialize_with = "opt_i64_to_string",
         deserialize_with = "opt_i64_from_string"
     )]
     pub created_by: Option<i64>,
+    #[serde(default)]
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     #[serde(
         serialize_with = "opt_i64_to_string",
         deserialize_with = "opt_i64_from_string"
     )]
     pub updated_by: Option<i64>,
+    #[serde(default)]
     pub updated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub deleted: Option<i16>,
 }
 

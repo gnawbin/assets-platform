@@ -1,3 +1,8 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -6,7 +11,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Tauri ����
+  // Tauri 适配
   webpack: (config) => {
     config.resolve.fallback = {
       fs: false,
@@ -15,6 +20,11 @@ const nextConfig = {
       crypto: false,
       stream: false,
       buffer: false,
+    };
+    // 确保 @/ 路径别名在 webpack 中正确解析
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@': path.resolve(__dirname, 'src'),
     };
     return config;
   },

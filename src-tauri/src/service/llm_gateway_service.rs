@@ -196,12 +196,14 @@ impl LLMRouter {
     pub async fn refresh_providers(&self) -> Result<(), String> {
         let pool = database::get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
         let prefix = database::schema_prefix();
-
-        let providers = sqlx::query_as::<_, LlmProvider>(
-            "SELECT id, provider_code, provider_name, base_url, api_key, secret_key, \
-             extra_config, weight, is_local, enable, created_by, created_at, updated_at, deleted \
-             FROM public.llm_provider WHERE enable = true AND deleted = 0",
-        )
+        let providers = sqlx::query_as::<_, LlmProvider>(sqlx::AssertSqlSafe(
+            format!(
+                "SELECT id, provider_code, provider_name, base_url, api_key, secret_key, \
+                 extra_config, weight, is_local, enable, created_by, created_at, updated_at, deleted \
+                 FROM {}llm_provider WHERE enable = true AND deleted = 0",
+                prefix
+            )
+        ))
         .fetch_all(&pool)
         .await
         .map_err(|e| format!("查询厂商失败: {}", e))?;

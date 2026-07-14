@@ -36,129 +36,6 @@ COMMENT ON COLUMN public.sys_user_profile.auto_summary IS '上传文件后是否
 COMMENT ON COLUMN public.sys_user_profile.auto_vectorize IS '上传文件后是否自动向量化';
 
 -- =====================
--- 2. llm_provider 大模型服务商配置
--- =====================
-CREATE TABLE IF NOT EXISTS public.llm_provider (
-    id BIGSERIAL PRIMARY KEY,
-    provider_code VARCHAR(50) NOT NULL UNIQUE,
-    -- openai / claude / qwen / volcengine / tencent / ollama
-    provider_name VARCHAR(100) NOT NULL,
-    base_url VARCHAR(1024),
-    api_key TEXT, -- AES-256-GCM 加密存储
-    secret_key TEXT, -- AES-256-GCM 加密存储
-    extra_config JSONB, -- {region, project_id, endpoint_id}
-    weight INT NOT NULL DEFAULT 10, -- 负载均衡权重
-    is_local BOOLEAN NOT NULL DEFAULT false,
-    enable BOOLEAN NOT NULL DEFAULT true,
-    created_by BIGINT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted SMALLINT NOT NULL DEFAULT 0
-);
-
-COMMENT ON TABLE public.llm_provider IS '大模型服务商配置';
-
-COMMENT ON COLUMN public.llm_provider.api_key IS 'AES-256-GCM 加密存储，前端永不返回明文';
-
-COMMENT ON COLUMN public.llm_provider.weight IS '负载均衡权重，越高优先被选择';
-
-CREATE INDEX IF NOT EXISTS idx_llm_provider_code ON public.llm_provider (provider_code, deleted);
-
-CREATE INDEX IF NOT EXISTS idx_llm_provider_enable ON public.llm_provider (enable, deleted);
-
--- =====================
--- 3. llm_model 模型明细表
--- =====================
-CREATE TABLE IF NOT EXISTS public.llm_model (
-    id BIGSERIAL PRIMARY KEY,
-    provider_id BIGINT NOT NULL REFERENCES public.llm_provider (id) ON DELETE CASCADE,
-    model_code VARCHAR(100) NOT NULL,
-    model_name VARCHAR(100) NOT NULL,
-    model_type VARCHAR(30) NOT NULL, -- chat / embedding / asr / tts
-    context_window INT,
-    temperature_default FLOAT DEFAULT 0.7,
-    max_tokens_default INT DEFAULT 2048,
-    price_input NUMERIC(10, 6) DEFAULT 0,
-    price_output NUMERIC(10, 6) DEFAULT 0,
-    enable BOOLEAN NOT NULL DEFAULT true,
-    created_by BIGINT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted SMALLINT NOT NULL DEFAULT 0,
-    UNIQUE (provider_id, model_code)
-);
-
-COMMENT ON TABLE public.llm_model IS '模型明细表';
-
-COMMENT ON COLUMN public.llm_model.model_type IS 'chat=对话 embedding=向量 asr=语音识别 tts=语音合成';
-
-COMMENT ON COLUMN public.llm_model.price_input IS '输入价格（每1K tokens，单位：元）';
-
-COMMENT ON COLUMN public.llm_model.price_output IS '输出价格（每1K tokens，单位：元）';
-
-CREATE INDEX IF NOT EXISTS idx_llm_model_provider ON public.llm_model (provider_id, deleted);
-
-CREATE INDEX IF NOT EXISTS idx_llm_model_type ON public.llm_model (model_type, enable, deleted);
-
--- =====================
--- 4. user_llm_setting 用户模型偏好
--- =====================
-CREATE TABLE IF NOT EXISTS public.user_llm_setting (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL UNIQUE,
-    default_provider_id BIGINT REFERENCES public.llm_provider (id),
-    default_chat_model_id BIGINT REFERENCES public.llm_model (id),
-    default_embed_model_id BIGINT REFERENCES public.llm_model (id),
-    custom_temp FLOAT,
-    custom_max_token INT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted SMALLINT NOT NULL DEFAULT 0
-);
-
-COMMENT ON TABLE public.user_llm_setting IS '用户模型偏好配置';
-
-COMMENT ON COLUMN public.user_llm_setting.custom_temp IS '用户自定义温度，覆盖模型默认值';
-
-COMMENT ON COLUMN public.user_llm_setting.custom_max_token IS '用户自定义最大输出Token';
-
-CREATE INDEX IF NOT EXISTS idx_user_llm_uid ON public.user_llm_setting (user_id, deleted);
-
--- =====================
--- 5. llm_call_record LLM调用用量日志
--- =====================
-CREATE TABLE IF NOT EXISTS public.llm_call_record (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT,
-    conv_id BIGINT,
-    provider_id BIGINT NOT NULL,
-    model_id BIGINT NOT NULL,
-    call_type VARCHAR(30) NOT NULL, -- chat / embedding / asr / tts
-    input_tokens INT NOT NULL DEFAULT 0,
-    output_tokens INT NOT NULL DEFAULT 0,
-    total_cost NUMERIC(10, 6) DEFAULT 0,
-    duration_ms INT DEFAULT 0,
-    status VARCHAR(20) NOT NULL, -- success / fail
-    error_msg TEXT,
-    request_id VARCHAR(255),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-COMMENT ON TABLE public.llm_call_record IS 'LLM 调用全链路日志';
-
-COMMENT ON COLUMN public.llm_call_record.total_cost IS '费用=price_input*(输入tokens/1000) + price_output*(输出tokens/1000)';
-
-COMMENT ON COLUMN public.llm_call_record.duration_ms IS '调用耗时，用于性能监控';
-
-CREATE INDEX IF NOT EXISTS idx_llm_call_user ON public.llm_call_record (user_id);
-
-CREATE INDEX IF NOT EXISTS idx_llm_call_conv ON public.llm_call_record (conv_id);
-
-CREATE INDEX IF NOT EXISTS idx_llm_call_time ON public.llm_call_record (created_at);
-
-CREATE INDEX IF NOT EXISTS idx_llm_call_status ON public.llm_call_record (status);
-
--- =====================
 -- 6. sys_system_config 平台全局参数
 -- =====================
 CREATE TABLE IF NOT EXISTS public.sys_system_config (
@@ -198,6 +75,8 @@ CREATE TABLE IF NOT EXISTS public.sys_scheduled_task (
     task_key VARCHAR(50) NOT NULL UNIQUE,
     task_name VARCHAR(100),
     cron_expr VARCHAR(50),
+    task_handler VARCHAR(100),
+    task_params JSONB,
     task_status SMALLINT NOT NULL DEFAULT 1, -- 0=停用 1=启用
     last_exec_at TIMESTAMPTZ,
     next_exec_at TIMESTAMPTZ,
@@ -280,6 +159,129 @@ CREATE TABLE IF NOT EXISTS public.sys_tag (
 -- 二、{schema} 租户级表
 -- 执行前将 {schema} 替换为实际 schema 名
 -- ==============================
+
+-- =====================
+-- 2. llm_provider 大模型服务商配置（多租户）
+-- =====================
+CREATE TABLE IF NOT EXISTS {schema}.llm_provider (
+    id BIGSERIAL PRIMARY KEY,
+    provider_code VARCHAR(50) NOT NULL UNIQUE,
+    -- openai / claude / qwen / volcengine / tencent / ollama
+    provider_name VARCHAR(100) NOT NULL,
+    base_url VARCHAR(1024),
+    api_key TEXT, -- AES-256-GCM 加密存储
+    secret_key TEXT, -- AES-256-GCM 加密存储
+    extra_config JSONB, -- {region, project_id, endpoint_id}
+    weight INT NOT NULL DEFAULT 10, -- 负载均衡权重
+    is_local BOOLEAN NOT NULL DEFAULT false,
+    enable BOOLEAN NOT NULL DEFAULT true,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.llm_provider IS '大模型服务商配置（多租户）';
+
+COMMENT ON COLUMN {schema}.llm_provider.api_key IS 'AES-256-GCM 加密存储，前端永不返回明文';
+
+COMMENT ON COLUMN {schema}.llm_provider.weight IS '负载均衡权重，越高优先被选择';
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_code ON {schema}.llm_provider (provider_code, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_enable ON {schema}.llm_provider (enable, deleted);
+
+-- =====================
+-- 3. llm_model 模型明细表（多租户）
+-- =====================
+CREATE TABLE IF NOT EXISTS {schema}.llm_model (
+    id BIGSERIAL PRIMARY KEY,
+    provider_id BIGINT NOT NULL REFERENCES {schema}.llm_provider (id) ON DELETE CASCADE,
+    model_code VARCHAR(100) NOT NULL,
+    model_name VARCHAR(100) NOT NULL,
+    model_type VARCHAR(30) NOT NULL, -- chat / embedding / asr / tts
+    context_window INT,
+    temperature_default FLOAT DEFAULT 0.7,
+    max_tokens_default INT DEFAULT 2048,
+    price_input NUMERIC(10, 6) DEFAULT 0,
+    price_output NUMERIC(10, 6) DEFAULT 0,
+    enable BOOLEAN NOT NULL DEFAULT true,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0,
+    UNIQUE (provider_id, model_code)
+);
+
+COMMENT ON TABLE {schema}.llm_model IS '模型明细表（多租户）';
+
+COMMENT ON COLUMN {schema}.llm_model.model_type IS 'chat=对话 embedding=向量 asr=语音识别 tts=语音合成';
+
+COMMENT ON COLUMN {schema}.llm_model.price_input IS '输入价格（每1K tokens，单位：元）';
+
+COMMENT ON COLUMN {schema}.llm_model.price_output IS '输出价格（每1K tokens，单位：元）';
+
+CREATE INDEX IF NOT EXISTS idx_llm_model_provider ON {schema}.llm_model (provider_id, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_llm_model_type ON {schema}.llm_model (model_type, enable, deleted);
+
+-- =====================
+-- 4. user_llm_setting 用户模型偏好（多租户）
+-- =====================
+CREATE TABLE IF NOT EXISTS {schema}.user_llm_setting (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL UNIQUE,
+    default_provider_id BIGINT REFERENCES {schema}.llm_provider (id),
+    default_chat_model_id BIGINT REFERENCES {schema}.llm_model (id),
+    default_embed_model_id BIGINT REFERENCES {schema}.llm_model (id),
+    custom_temp FLOAT,
+    custom_max_token INT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.user_llm_setting IS '用户模型偏好配置（多租户）';
+
+COMMENT ON COLUMN {schema}.user_llm_setting.custom_temp IS '用户自定义温度，覆盖模型默认值';
+
+COMMENT ON COLUMN {schema}.user_llm_setting.custom_max_token IS '用户自定义最大输出Token';
+
+CREATE INDEX IF NOT EXISTS idx_user_llm_uid ON {schema}.user_llm_setting (user_id, deleted);
+
+-- =====================
+-- 5. llm_call_record LLM调用用量日志（多租户）
+-- =====================
+CREATE TABLE IF NOT EXISTS {schema}.llm_call_record (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT,
+    conv_id BIGINT,
+    provider_id BIGINT NOT NULL,
+    model_id BIGINT NOT NULL,
+    call_type VARCHAR(30) NOT NULL, -- chat / embedding / asr / tts
+    input_tokens INT NOT NULL DEFAULT 0,
+    output_tokens INT NOT NULL DEFAULT 0,
+    total_cost NUMERIC(10, 6) DEFAULT 0,
+    duration_ms INT DEFAULT 0,
+    status VARCHAR(20) NOT NULL, -- success / fail
+    error_msg TEXT,
+    request_id VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE {schema}.llm_call_record IS 'LLM 调用全链路日志（多租户）';
+
+COMMENT ON COLUMN {schema}.llm_call_record.total_cost IS '费用=price_input*(输入tokens/1000) + price_output*(输出tokens/1000)';
+
+COMMENT ON COLUMN {schema}.llm_call_record.duration_ms IS '调用耗时，用于性能监控';
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_user ON {schema}.llm_call_record (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_conv ON {schema}.llm_call_record (conv_id);
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_time ON {schema}.llm_call_record (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_status ON {schema}.llm_call_record (status);
 
 -- =====================
 -- 13. document_chunk 向量分片检索表
@@ -420,35 +422,35 @@ CREATE INDEX IF NOT EXISTS idx_skill_asset ON {schema}.skill_execution(asset_id)
 CREATE INDEX IF NOT EXISTS idx_skill_status ON {schema}.skill_execution(status);
 
 -- ==============================
--- 三、用户注册自动初始化触发器
+-- 三、用户注册自动初始化触发器（public 全局）
 -- ==============================
 
 -- 新用户注册时自动创建 user_llm_setting
-CREATE OR REPLACE FUNCTION public.init_user_llm_setting()
+CREATE OR REPLACE FUNCTION public.init_user_llm_setting(schema_name TEXT)
 RETURNS TRIGGER AS $$
 DECLARE
     v_provider_id BIGINT;
     v_chat_model_id BIGINT;
     v_embed_model_id BIGINT;
+    v_schema TEXT;
 BEGIN
-    -- 找第一个启用的 chat provider
-    SELECT id INTO v_provider_id FROM public.llm_provider 
-    WHERE enable = true AND deleted = 0 
-    ORDER BY weight DESC LIMIT 1;
+    v_schema := quote_ident(schema_name);
+    
+    -- 找第一个启用的 chat provider（在对应租户 schema 中查询）
+    EXECUTE format('SELECT id FROM %I.llm_provider WHERE enable = true AND deleted = 0 ORDER BY weight DESC LIMIT 1', v_schema)
+        INTO v_provider_id;
     
     IF v_provider_id IS NOT NULL THEN
-        SELECT id INTO v_chat_model_id FROM public.llm_model 
-        WHERE provider_id = v_provider_id AND model_type = 'chat' AND enable = true
-        ORDER BY id LIMIT 1;
+        EXECUTE format('SELECT id FROM %I.llm_model WHERE provider_id = $1 AND model_type = ''chat'' AND enable = true ORDER BY id LIMIT 1', v_schema)
+            INTO v_chat_model_id
+            USING v_provider_id;
         
-        SELECT id INTO v_embed_model_id FROM public.llm_model 
-        WHERE model_type = 'embedding' AND enable = true
-        ORDER BY id LIMIT 1;
+        EXECUTE format('SELECT id FROM %I.llm_model WHERE model_type = ''embedding'' AND enable = true ORDER BY id LIMIT 1', v_schema)
+            INTO v_embed_model_id;
     END IF;
     
-    INSERT INTO public.user_llm_setting (user_id, default_provider_id, default_chat_model_id, default_embed_model_id)
-    VALUES (NEW.id, v_provider_id, v_chat_model_id, v_embed_model_id)
-    ON CONFLICT (user_id) DO NOTHING;
+    EXECUTE format('INSERT INTO %I.user_llm_setting (user_id, default_provider_id, default_chat_model_id, default_embed_model_id) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO NOTHING', v_schema)
+        USING NEW.id, v_provider_id, v_chat_model_id, v_embed_model_id;
     
     RETURN NEW;
 END;
@@ -467,12 +469,12 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ==============================
--- 四、知识库种子数据
+-- 四、知识库种子数据（{schema} 租户级）
 -- ==============================
 
--- 内置 LLM 厂商种子
+-- 内置 LLM 厂商种子（每个租户 schema 独立）
 INSERT INTO
-    public.llm_provider (
+    {schema}.llm_provider (
         provider_code,
         provider_name,
         base_url,
@@ -483,13 +485,13 @@ SELECT 'openai', 'OpenAI', 'https://api.openai.com', 10, false
 WHERE
     NOT EXISTS (
         SELECT 1
-        FROM public.llm_provider
+        FROM {schema}.llm_provider
         WHERE
             provider_code = 'openai'
     );
 
 INSERT INTO
-    public.llm_provider (
+    {schema}.llm_provider (
         provider_code,
         provider_name,
         base_url,
@@ -500,13 +502,13 @@ SELECT 'claude', 'Anthropic Claude', 'https://api.anthropic.com', 8, false
 WHERE
     NOT EXISTS (
         SELECT 1
-        FROM public.llm_provider
+        FROM {schema}.llm_provider
         WHERE
             provider_code = 'claude'
     );
 
 INSERT INTO
-    public.llm_provider (
+    {schema}.llm_provider (
         provider_code,
         provider_name,
         base_url,
@@ -517,13 +519,13 @@ SELECT 'qwen', '通义千问', 'https://dashscope.aliyuncs.com', 5, false
 WHERE
     NOT EXISTS (
         SELECT 1
-        FROM public.llm_provider
+        FROM {schema}.llm_provider
         WHERE
             provider_code = 'qwen'
     );
 
 INSERT INTO
-    public.llm_provider (
+    {schema}.llm_provider (
         provider_code,
         provider_name,
         base_url,
@@ -534,13 +536,13 @@ SELECT 'volcengine', '火山引擎', 'https://ark.cn-beijing.volces.com', 3, fal
 WHERE
     NOT EXISTS (
         SELECT 1
-        FROM public.llm_provider
+        FROM {schema}.llm_provider
         WHERE
             provider_code = 'volcengine'
     );
 
 INSERT INTO
-    public.llm_provider (
+    {schema}.llm_provider (
         provider_code,
         provider_name,
         base_url,
@@ -551,13 +553,13 @@ SELECT 'tencent', '腾讯混元', 'https://api.hunyuan.cloud.tencent.com', 3, fa
 WHERE
     NOT EXISTS (
         SELECT 1
-        FROM public.llm_provider
+        FROM {schema}.llm_provider
         WHERE
             provider_code = 'tencent'
     );
 
 INSERT INTO
-    public.llm_provider (
+    {schema}.llm_provider (
         provider_code,
         provider_name,
         base_url,
@@ -568,14 +570,14 @@ SELECT 'ollama', 'Ollama 本地', 'http://localhost:11434', 3, true
 WHERE
     NOT EXISTS (
         SELECT 1
-        FROM public.llm_provider
+        FROM {schema}.llm_provider
         WHERE
             provider_code = 'ollama'
     );
 
--- OpenAI 内置模型
+-- OpenAI 内置模型（每个租户 schema 独立）
 INSERT INTO
-    public.llm_model (
+    {schema}.llm_model (
         provider_id,
         model_code,
         model_name,
@@ -585,19 +587,19 @@ INSERT INTO
         price_output
     )
 SELECT p.id, 'gpt-4o', 'GPT-4o', 'chat', 128000, 0.0025, 0.01
-FROM public.llm_provider p
+FROM {schema}.llm_provider p
 WHERE
     p.provider_code = 'openai'
     AND NOT EXISTS (
         SELECT 1
-        FROM public.llm_model
+        FROM {schema}.llm_model
         WHERE
             provider_id = p.id
             AND model_code = 'gpt-4o'
     );
 
 INSERT INTO
-    public.llm_model (
+    {schema}.llm_model (
         provider_id,
         model_code,
         model_name,
@@ -607,19 +609,19 @@ INSERT INTO
         price_output
     )
 SELECT p.id, 'gpt-4o-mini', 'GPT-4o Mini', 'chat', 128000, 0.00015, 0.0006
-FROM public.llm_provider p
+FROM {schema}.llm_provider p
 WHERE
     p.provider_code = 'openai'
     AND NOT EXISTS (
         SELECT 1
-        FROM public.llm_model
+        FROM {schema}.llm_model
         WHERE
             provider_id = p.id
             AND model_code = 'gpt-4o-mini'
     );
 
 INSERT INTO
-    public.llm_model (
+    {schema}.llm_model (
         provider_id,
         model_code,
         model_name,
@@ -628,12 +630,12 @@ INSERT INTO
         price_output
     )
 SELECT p.id, 'text-embedding-3-small', 'Text Embedding 3 Small', 'embedding', 0.00002, 0
-FROM public.llm_provider p
+FROM {schema}.llm_provider p
 WHERE
     p.provider_code = 'openai'
     AND NOT EXISTS (
         SELECT 1
-        FROM public.llm_model
+        FROM {schema}.llm_model
         WHERE
             provider_id = p.id
             AND model_code = 'text-embedding-3-small'
