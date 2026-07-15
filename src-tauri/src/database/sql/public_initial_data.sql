@@ -1656,6 +1656,56 @@ WHERE
             id = 46
     );
 
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    47,
+    '编号规则',
+    5,
+    '/settings/numbering',
+    '/settings/numbering/page',
+    NULL,
+    6,
+    true,
+    'system:numbering:list',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 47
+    );
+
 -- =====================
 -- 6. 按钮级权限
 -- =====================

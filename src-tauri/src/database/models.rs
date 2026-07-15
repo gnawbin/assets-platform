@@ -1116,6 +1116,47 @@ pub struct RetrieveParams {
     pub min_similarity: f64,
 }
 
+/// 单据编号规则配置
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DocNumberingRule {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    pub biz_type: String,
+    pub biz_name: String,
+    pub prefix: Option<String>,
+    pub date_format: Option<String>,
+    pub date_position: Option<String>,
+    pub serial_length: i32,
+    pub separator: Option<String>,
+    pub reset_mode: Option<String>,
+    pub sample_output: Option<String>,
+    pub is_active: bool,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: i16,
+}
+
+/// 单据编号流水号计数
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DocNumberingSequence {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    pub biz_type: String,
+    pub reset_key: String,
+    pub current_seq: i32,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
 /// 记忆条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryItem {

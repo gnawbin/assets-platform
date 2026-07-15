@@ -670,3 +670,69 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_asset_tree_node ON {schema}.knowledge_a
 CREATE INDEX IF NOT EXISTS idx_knowledge_asset_okf_type ON {schema}.knowledge_asset (okf_type);
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_asset_status ON {schema}.knowledge_asset (status);
+
+-- ==============================
+-- 19. 单据编号规则配置表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.doc_numbering_rule (
+    id BIGINT PRIMARY KEY,
+    biz_type VARCHAR(50) NOT NULL UNIQUE,
+    biz_name VARCHAR(100) NOT NULL,
+    prefix VARCHAR(50),
+    date_format VARCHAR(20) DEFAULT 'yyyyMMdd',
+    date_position VARCHAR(100) DEFAULT 'after_prefix',
+    serial_length INT NOT NULL DEFAULT 4,
+    separator VARCHAR(5) DEFAULT '-',
+    reset_mode VARCHAR(20) DEFAULT 'yearly',
+    sample_output VARCHAR(100),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_by BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_by BIGINT,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.doc_numbering_rule IS '单据编号规则配置表';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.biz_type IS '业务类型：asset/receive/return/transfer/repair/scrap/purchase';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.biz_name IS '业务名称：资产编号/领用单号/归还单号/调拨单号/维修单号/报废单号/采购单号';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.prefix IS '前缀，如 ZC/LY/GH/DB/WX/BF/CG';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.date_format IS '日期格式：yyyyMMdd/yyMMdd/yyyyMM/yyyy/空（无日期）';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.date_position IS '日期位置：after_prefix（前缀后）/before_serial（流水号前）';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.serial_length IS '流水号位数，如4→0001';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.separator IS '分隔符，如"-"';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.reset_mode IS '重置模式：yearly（按年）/monthly（按月）/never（永不）';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.sample_output IS '示例输出，如"ZC-202607-0001"';
+
+COMMENT ON COLUMN {schema}.doc_numbering_rule.is_active IS '是否启用';
+
+-- ==============================
+-- 20. 单据编号流水号计数表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.doc_numbering_sequence (
+    id BIGINT PRIMARY KEY,
+    biz_type VARCHAR(50) NOT NULL,
+    reset_key VARCHAR(50) NOT NULL DEFAULT '',
+    current_seq INT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_numbering_seq UNIQUE (biz_type, reset_key)
+);
+
+COMMENT ON TABLE {schema}.doc_numbering_sequence IS '单据编号流水号计数表';
+
+COMMENT ON COLUMN {schema}.doc_numbering_sequence.biz_type IS '业务类型';
+
+COMMENT ON COLUMN {schema}.doc_numbering_sequence.reset_key IS '重置键：如"202607"（年月）或"2026"（年）';
+
+COMMENT ON COLUMN {schema}.doc_numbering_sequence.current_seq IS '当前流水号值';
+
+CREATE INDEX IF NOT EXISTS idx_numbering_seq_biz ON {schema}.doc_numbering_sequence (biz_type);
