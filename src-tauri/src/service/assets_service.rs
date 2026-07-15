@@ -24,16 +24,8 @@ pub struct HardwareAssetView {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
-    #[serde(
-        serialize_with = "crate::database::models::opt_i64_to_string",
-        deserialize_with = "crate::database::models::opt_i64_from_string"
-    )]
-    pub department_id: Option<i64>,
-    #[serde(
-        serialize_with = "crate::database::models::opt_i64_to_string",
-        deserialize_with = "crate::database::models::opt_i64_from_string"
-    )]
-    pub user_id: Option<i64>,
+    pub department_ids: Option<Vec<i64>>,
+    pub user_ids: Option<Vec<i64>>,
     pub status: i16,
     pub purchase_date: Option<String>,
     pub purchase_price: Option<f64>,
@@ -64,11 +56,6 @@ pub struct HardwareAssetView {
     pub mac_address: Option<String>,
     pub location: Option<String>,
     pub hardware_config: Option<String>,
-    #[serde(
-        serialize_with = "crate::database::models::opt_i64_to_string",
-        deserialize_with = "crate::database::models::opt_i64_from_string"
-    )]
-    pub use_user_id: Option<i64>,
     pub use_start_date: Option<String>,
     pub maintenance_vendor: Option<String>,
     pub maintenance_type: Option<String>,
@@ -96,16 +83,8 @@ pub struct IntangibleAssetView {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
-    #[serde(
-        serialize_with = "crate::database::models::opt_i64_to_string",
-        deserialize_with = "crate::database::models::opt_i64_from_string"
-    )]
-    pub department_id: Option<i64>,
-    #[serde(
-        serialize_with = "crate::database::models::opt_i64_to_string",
-        deserialize_with = "crate::database::models::opt_i64_from_string"
-    )]
-    pub user_id: Option<i64>,
+    pub department_ids: Option<Vec<i64>>,
+    pub user_ids: Option<Vec<i64>>,
     pub status: i16,
     pub purchase_date: Option<String>,
     pub purchase_price: Option<f64>,
@@ -142,7 +121,6 @@ pub struct IntangibleAssetView {
     pub license_key: Option<String>,
     pub license_type: Option<String>,
     pub authorized_scope: Option<String>,
-    pub assigned_user_ids: Option<String>,
     pub bind_type: Option<String>,
     pub bind_info: Option<String>,
     pub version: Option<String>,
@@ -163,10 +141,8 @@ pub struct HardwareAssetInput {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
-    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
-    pub department_id: Option<i64>,
-    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
-    pub user_id: Option<i64>,
+    pub department_ids: Option<Vec<i64>>,
+    pub user_ids: Option<Vec<i64>>,
     pub status: Option<i16>,
     pub purchase_date: Option<String>,
     pub purchase_price: Option<f64>,
@@ -179,8 +155,6 @@ pub struct HardwareAssetInput {
     pub mac_address: Option<String>,
     pub location: Option<String>,
     pub hardware_config: Option<String>,
-    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
-    pub use_user_id: Option<i64>,
     pub use_start_date: Option<String>,
     pub maintenance_vendor: Option<String>,
     pub maintenance_type: Option<String>,
@@ -196,10 +170,8 @@ pub struct IntangibleAssetInput {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
-    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
-    pub department_id: Option<i64>,
-    #[serde(deserialize_with = "crate::database::models::opt_i64_from_string")]
-    pub user_id: Option<i64>,
+    pub department_ids: Option<Vec<i64>>,
+    pub user_ids: Option<Vec<i64>>,
     pub status: Option<i16>,
     pub purchase_date: Option<String>,
     pub purchase_price: Option<f64>,
@@ -218,7 +190,6 @@ pub struct IntangibleAssetInput {
     pub license_key: Option<String>,
     pub license_type: Option<String>,
     pub authorized_scope: Option<String>,
-    pub assigned_user_ids: Option<String>,
     pub bind_type: Option<String>,
     pub bind_info: Option<String>,
     pub version: Option<String>,
@@ -240,8 +211,8 @@ fn row_to_hardware_view(row: &sqlx::postgres::PgRow) -> HardwareAssetView {
         asset_name: row.get("asset_name"),
         manufacturer: row.get("manufacturer"),
         model: row.get("model"),
-        department_id: row.get("department_id"),
-        user_id: row.get("user_id"),
+        department_ids: row.get("department_ids"),
+        user_ids: row.get("user_ids"),
         status: row.get("status"),
         purchase_date: row.get("purchase_date"),
         purchase_price: row.get("purchase_price"),
@@ -259,7 +230,6 @@ fn row_to_hardware_view(row: &sqlx::postgres::PgRow) -> HardwareAssetView {
         mac_address: row.get("mac_address"),
         location: row.get("location"),
         hardware_config: row.get("hardware_config"),
-        use_user_id: row.get("use_user_id"),
         use_start_date: row.get("use_start_date"),
         maintenance_vendor: row.get("maintenance_vendor"),
         maintenance_type: row.get("maintenance_type"),
@@ -277,8 +247,8 @@ fn row_to_intangible_view(row: &sqlx::postgres::PgRow) -> IntangibleAssetView {
         asset_name: row.get("asset_name"),
         manufacturer: row.get("manufacturer"),
         model: row.get("model"),
-        department_id: row.get("department_id"),
-        user_id: row.get("user_id"),
+        department_ids: row.get("department_ids"),
+        user_ids: row.get("user_ids"),
         status: row.get("status"),
         purchase_date: row.get("purchase_date"),
         purchase_price: row.get("purchase_price"),
@@ -302,7 +272,6 @@ fn row_to_intangible_view(row: &sqlx::postgres::PgRow) -> IntangibleAssetView {
         license_key: row.get("license_key"),
         license_type: row.get("license_type"),
         authorized_scope: row.get("authorized_scope"),
-        assigned_user_ids: row.get("assigned_user_ids"),
         bind_type: row.get("bind_type"),
         bind_info: row.get("bind_info"),
         version: row.get("version"),
@@ -321,12 +290,12 @@ fn hardware_select_sql(prefix: &str) -> String {
         r#"
 SELECT
     a.id, a.asset_no, a.asset_type, a.category_id, a.asset_name,
-    a.manufacturer, a.model, a.department_id, a.user_id, a.status,
+    a.manufacturer, a.model, a.department_ids, a.user_ids, a.status,
     a.purchase_date::text as purchase_date, a.purchase_price, a.quantity, a.used_quantity,
     a.expire_date::text as expire_date, a.description,
     a.created_by, a.created_at::text as created_at, a.updated_by, a.updated_at::text as updated_at, a.deleted,
     h.id as hard_id, h.sn, h.mac_address, h.location, h.hardware_config,
-    h.use_user_id, h.use_start_date::text as use_start_date, h.maintenance_vendor,
+    h.use_start_date::text as use_start_date, h.maintenance_vendor,
     h.maintenance_type, h.maintenance_expire_date::text as maintenance_expire_date, h.fault_desc
 FROM {}assets a
 LEFT JOIN {}hard_assets h ON h.asset_id = a.id AND (h.deleted IS NULL OR h.deleted = 0)
@@ -379,7 +348,7 @@ pub async fn insert_hardware_asset(
     let sql = format!(
         r#"
         INSERT INTO {}assets (id, asset_no, asset_type, category_id, asset_name, manufacturer, model,
-            department_id, user_id, status, purchase_date, purchase_price, quantity, used_quantity,
+            department_ids, user_ids, status, purchase_date, purchase_price, quantity, used_quantity,
             expire_date, description, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, 'fixed', $3, $4, $5, $6, $7, $8, $9,
             $10::timestamp, $11, $12, $13, $14::timestamp, $15,
@@ -394,8 +363,8 @@ pub async fn insert_hardware_asset(
         .bind(&input.asset_name)
         .bind(&input.manufacturer)
         .bind(&input.model)
-        .bind(input.department_id)
-        .bind(input.user_id)
+        .bind(&input.department_ids)
+        .bind(&input.user_ids)
         .bind(input.status.unwrap_or(0))
         .bind(&input.purchase_date)
         .bind(input.purchase_price)
@@ -403,7 +372,7 @@ pub async fn insert_hardware_asset(
         .bind(input.used_quantity)
         .bind(&input.expire_date)
         .bind(&input.description)
-        .bind(current_user_id) // updated_by
+        .bind(current_user_id)
         .execute(&pool)
         .await
         .map_err(|e| format!("插入资产主表失败: {}", e))?;
@@ -412,10 +381,10 @@ pub async fn insert_hardware_asset(
     let sql = format!(
         r#"
         INSERT INTO {}hard_assets (id, asset_id, sn, mac_address, location, hardware_config,
-            use_user_id, use_start_date, maintenance_vendor, maintenance_type,
+            use_start_date, maintenance_vendor, maintenance_type,
             maintenance_expire_date, fault_desc, created_by, created_at, updated_by, updated_at, deleted)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10,
-            $11::timestamp, $12, $13, NOW(), $13, NOW(), 0)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, $9,
+            $10::timestamp, $11, $12, NOW(), $12, NOW(), 0)
         "#,
         prefix
     );
@@ -426,7 +395,6 @@ pub async fn insert_hardware_asset(
         .bind(&input.mac_address)
         .bind(&input.location)
         .bind(&input.hardware_config)
-        .bind(input.use_user_id)
         .bind(&input.use_start_date)
         .bind(&input.maintenance_vendor)
         .bind(&input.maintenance_type)
@@ -486,7 +454,7 @@ pub async fn update_hardware_asset(
         r#"
         UPDATE {}assets SET
             category_id = $2, asset_name = $3, manufacturer = $4, model = $5,
-            department_id = $6, user_id = $7, status = $8,
+            department_ids = $6, user_ids = $7, status = $8,
             purchase_date = $9::timestamp, purchase_price = $10,
             quantity = $11, used_quantity = $12,
             expire_date = $13::timestamp, description = $14,
@@ -501,8 +469,8 @@ pub async fn update_hardware_asset(
         .bind(&input.asset_name)
         .bind(&input.manufacturer)
         .bind(&input.model)
-        .bind(input.department_id)
-        .bind(input.user_id)
+        .bind(&input.department_ids)
+        .bind(&input.user_ids)
         .bind(input.status.unwrap_or(0))
         .bind(&input.purchase_date)
         .bind(input.purchase_price)
@@ -530,10 +498,10 @@ pub async fn update_hardware_asset(
             r#"
             UPDATE {}hard_assets SET
                 sn = $2, mac_address = $3, location = $4, hardware_config = $5,
-                use_user_id = $6, use_start_date = $7::timestamp,
-                maintenance_vendor = $8, maintenance_type = $9,
-                maintenance_expire_date = $10::timestamp, fault_desc = $11,
-                updated_by = $12, updated_at = NOW()
+                use_start_date = $6::timestamp,
+                maintenance_vendor = $7, maintenance_type = $8,
+                maintenance_expire_date = $9::timestamp, fault_desc = $10,
+                updated_by = $11, updated_at = NOW()
             WHERE id = $1
             "#,
             prefix
@@ -544,7 +512,6 @@ pub async fn update_hardware_asset(
             .bind(&input.mac_address)
             .bind(&input.location)
             .bind(&input.hardware_config)
-            .bind(input.use_user_id)
             .bind(&input.use_start_date)
             .bind(&input.maintenance_vendor)
             .bind(&input.maintenance_type)
@@ -559,10 +526,10 @@ pub async fn update_hardware_asset(
         let sql = format!(
             r#"
             INSERT INTO {}hard_assets (id, asset_id, sn, mac_address, location, hardware_config,
-                use_user_id, use_start_date, maintenance_vendor, maintenance_type,
+                use_start_date, maintenance_vendor, maintenance_type,
                 maintenance_expire_date, fault_desc, created_by, created_at, updated_by, updated_at, deleted)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamp, $9, $10,
-                $11::timestamp, $12, $13, NOW(), $13, NOW(), 0)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::timestamp, $8, $9,
+                $10::timestamp, $11, $12, NOW(), $12, NOW(), 0)
             "#,
             prefix
         );
@@ -573,7 +540,6 @@ pub async fn update_hardware_asset(
             .bind(&input.mac_address)
             .bind(&input.location)
             .bind(&input.hardware_config)
-            .bind(input.use_user_id)
             .bind(&input.use_start_date)
             .bind(&input.maintenance_vendor)
             .bind(&input.maintenance_type)
@@ -623,14 +589,14 @@ fn intangible_select_sql(prefix: &str) -> String {
         r#"
 SELECT
     a.id, a.asset_no, a.asset_type, a.category_id, a.asset_name,
-    a.manufacturer, a.model, a.department_id, a.user_id, a.status,
+    a.manufacturer, a.model, a.department_ids, a.user_ids, a.status,
     a.purchase_date::text as purchase_date, a.purchase_price, a.quantity, a.used_quantity,
     a.expire_date::text as expire_date, a.description,
     a.created_by, a.created_at::text as created_at, a.updated_by, a.updated_at::text as updated_at, a.deleted,
     i.id as intangible_id, i.intangible_type, i.register_no, i.register_owner,
     i.register_date::text as register_date, i.valid_start_date::text as valid_start_date,
     i.valid_end_date::text as valid_end_date, i.right_status,
-    i.license_key, i.license_type, i.authorized_scope, i.assigned_user_ids,
+    i.license_key, i.license_type, i.authorized_scope,
     i.bind_type, i.bind_info, i.version, i.download_link,
     i.amortization_method, i.useful_life, i.amortization_amount, i.residual_rate
 FROM {}assets a
@@ -684,7 +650,7 @@ pub async fn insert_intangible_asset(
     let sql = format!(
         r#"
         INSERT INTO {}assets (id, asset_no, asset_type, category_id, asset_name, manufacturer, model,
-            department_id, user_id, status, purchase_date, purchase_price, quantity, used_quantity,
+            department_ids, user_ids, status, purchase_date, purchase_price, quantity, used_quantity,
             expire_date, description, created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, 'intangible', $3, $4, $5, $6, $7, $8, $9,
             $10::timestamp, $11, $12, $13, $14::timestamp, $15,
@@ -699,8 +665,8 @@ pub async fn insert_intangible_asset(
         .bind(&input.asset_name)
         .bind(&input.manufacturer)
         .bind(&input.model)
-        .bind(input.department_id)
-        .bind(input.user_id)
+        .bind(&input.department_ids)
+        .bind(&input.user_ids)
         .bind(input.status.unwrap_or(0))
         .bind(&input.purchase_date)
         .bind(input.purchase_price)
@@ -719,16 +685,16 @@ pub async fn insert_intangible_asset(
         INSERT INTO {}intangible_assets (
             id, asset_id, intangible_type, register_no, register_owner, register_date,
             valid_start_date, valid_end_date, right_status,
-            license_key, license_type, authorized_scope, assigned_user_ids,
+            license_key, license_type, authorized_scope,
             bind_type, bind_info, version, download_link,
             amortization_method, useful_life, amortization_amount, residual_rate,
             created_by, created_at, updated_by, updated_at, deleted)
         VALUES ($1, $2, $3, $4, $5, $6::timestamp,
             $7::timestamp, $8::timestamp, $9,
-            $10, $11, $12, $13,
-            $14, $15, $16, $17,
-            $18, $19, $20, $21,
-            $22, NOW(), $22, NOW(), 0)
+            $10, $11, $12,
+            $13, $14, $15, $16,
+            $17, $18, $19, $20,
+            $21, NOW(), $21, NOW(), 0)
         "#,
         prefix
     );
@@ -745,7 +711,6 @@ pub async fn insert_intangible_asset(
         .bind(&input.license_key)
         .bind(&input.license_type)
         .bind(&input.authorized_scope)
-        .bind(&input.assigned_user_ids)
         .bind(&input.bind_type)
         .bind(&input.bind_info)
         .bind(&input.version)
@@ -807,7 +772,7 @@ pub async fn update_intangible_asset(
         r#"
         UPDATE {}assets SET
             category_id = $2, asset_name = $3, manufacturer = $4, model = $5,
-            department_id = $6, user_id = $7, status = $8,
+            department_ids = $6, user_ids = $7, status = $8,
             purchase_date = $9::timestamp, purchase_price = $10,
             quantity = $11, used_quantity = $12,
             expire_date = $13::timestamp, description = $14,
@@ -822,8 +787,8 @@ pub async fn update_intangible_asset(
         .bind(&input.asset_name)
         .bind(&input.manufacturer)
         .bind(&input.model)
-        .bind(input.department_id)
-        .bind(input.user_id)
+        .bind(&input.department_ids)
+        .bind(&input.user_ids)
         .bind(input.status.unwrap_or(0))
         .bind(&input.purchase_date)
         .bind(input.purchase_price)
@@ -854,11 +819,11 @@ pub async fn update_intangible_asset(
                 register_date = $5::timestamp, valid_start_date = $6::timestamp,
                 valid_end_date = $7::timestamp, right_status = $8,
                 license_key = $9, license_type = $10, authorized_scope = $11,
-                assigned_user_ids = $12, bind_type = $13, bind_info = $14,
-                version = $15, download_link = $16,
-                amortization_method = $17, useful_life = $18,
-                amortization_amount = $19, residual_rate = $20,
-                updated_by = $21, updated_at = NOW()
+                bind_type = $12, bind_info = $13,
+                version = $14, download_link = $15,
+                amortization_method = $16, useful_life = $17,
+                amortization_amount = $18, residual_rate = $19,
+                updated_by = $20, updated_at = NOW()
             WHERE id = $1
             "#,
             prefix
@@ -875,7 +840,6 @@ pub async fn update_intangible_asset(
             .bind(&input.license_key)
             .bind(&input.license_type)
             .bind(&input.authorized_scope)
-            .bind(&input.assigned_user_ids)
             .bind(&input.bind_type)
             .bind(&input.bind_info)
             .bind(&input.version)
@@ -895,16 +859,16 @@ pub async fn update_intangible_asset(
             INSERT INTO {}intangible_assets (
                 id, asset_id, intangible_type, register_no, register_owner, register_date,
                 valid_start_date, valid_end_date, right_status,
-                license_key, license_type, authorized_scope, assigned_user_ids,
+                license_key, license_type, authorized_scope,
                 bind_type, bind_info, version, download_link,
                 amortization_method, useful_life, amortization_amount, residual_rate,
                 created_by, created_at, updated_by, updated_at, deleted)
             VALUES ($1, $2, $3, $4, $5, $6::timestamp,
                 $7::timestamp, $8::timestamp, $9,
-                $10, $11, $12, $13,
-                $14, $15, $16, $17,
-                $18, $19, $20, $21,
-                $22, NOW(), $22, NOW(), 0)
+                $10, $11, $12,
+                $13, $14, $15, $16,
+                $17, $18, $19, $20,
+                $21, NOW(), $21, NOW(), 0)
             "#,
             prefix
         );
@@ -921,7 +885,6 @@ pub async fn update_intangible_asset(
             .bind(&input.license_key)
             .bind(&input.license_type)
             .bind(&input.authorized_scope)
-            .bind(&input.assigned_user_ids)
             .bind(&input.bind_type)
             .bind(&input.bind_info)
             .bind(&input.version)

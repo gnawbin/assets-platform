@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS {schema}.assets (
     asset_name VARCHAR(255) NOT NULL,
     manufacturer VARCHAR(255),
     model VARCHAR(255),
-    department_id BIGINT,
-    user_id BIGINT,
+    department_ids BIGINT[],
+    user_ids BIGINT[],
     status SMALLINT NOT NULL DEFAULT 0,
     purchase_date TIMESTAMP WITH TIME ZONE,
     purchase_price NUMERIC(12, 2) DEFAULT 0.00,
@@ -69,9 +69,9 @@ COMMENT ON COLUMN {schema}.assets.manufacturer IS '制造商/厂商';
 
 COMMENT ON COLUMN {schema}.assets.model IS '型号';
 
-COMMENT ON COLUMN {schema}.assets.department_id IS '使用部门ID';
+COMMENT ON COLUMN {schema}.assets.department_ids IS '使用部门ID集合';
 
-COMMENT ON COLUMN {schema}.assets.user_id IS '使用人ID';
+COMMENT ON COLUMN {schema}.assets.user_ids IS '使用人ID集合';
 
 COMMENT ON COLUMN {schema}.assets.status IS '状态：0=正常 1=借用 2=维修 3=报废 4=过期';
 
@@ -105,7 +105,6 @@ CREATE TABLE IF NOT EXISTS {schema}.hard_assets (
     mac_address VARCHAR(100),
     location VARCHAR(255),
     hardware_config TEXT,
-    use_user_id BIGINT,
     use_start_date TIMESTAMP WITH TIME ZONE,
     maintenance_vendor VARCHAR(255),
     maintenance_type VARCHAR(100),
@@ -131,8 +130,6 @@ COMMENT ON COLUMN {schema}.hard_assets.mac_address IS 'MAC地址';
 COMMENT ON COLUMN {schema}.hard_assets.location IS '存放位置';
 
 COMMENT ON COLUMN {schema}.hard_assets.hardware_config IS '硬件配置';
-
-COMMENT ON COLUMN {schema}.hard_assets.use_user_id IS '使用人ID';
 
 COMMENT ON COLUMN {schema}.hard_assets.use_start_date IS '使用开始日期';
 
@@ -170,7 +167,6 @@ CREATE TABLE IF NOT EXISTS {schema}.intangible_assets (
     license_key VARCHAR(255),
     license_type VARCHAR(100),
     authorized_scope VARCHAR(255),
-    assigned_user_ids TEXT,
     bind_type VARCHAR(100),
     bind_info TEXT,
     version VARCHAR(100),
@@ -211,8 +207,6 @@ COMMENT ON COLUMN {schema}.intangible_assets.license_key IS '许可证密钥';
 COMMENT ON COLUMN {schema}.intangible_assets.license_type IS '许可证类型：permanent/subscription/device/user';
 
 COMMENT ON COLUMN {schema}.intangible_assets.authorized_scope IS '授权范围';
-
-COMMENT ON COLUMN {schema}.intangible_assets.assigned_user_ids IS '授权用户ID集合';
 
 COMMENT ON COLUMN {schema}.intangible_assets.bind_type IS '绑定类型：设备/用户/IP';
 
@@ -310,7 +304,7 @@ CREATE INDEX IF NOT EXISTS idx_document_asset ON {schema}.asset_documents (asset
 -- 6. 资产知识库表
 CREATE TABLE IF NOT EXISTS {schema}.asset_knowledge (
     id BIGINT PRIMARY KEY,
-    asset_id BIGINT,                              -- 改为可选，知识条目可不关联资产
+    asset_id BIGINT,
     doc_source VARCHAR(50) NOT NULL DEFAULT 'manual',
     knowledge_type VARCHAR(50) NOT NULL DEFAULT 'basic',
     title VARCHAR(255) NOT NULL,
@@ -372,7 +366,7 @@ CREATE TABLE IF NOT EXISTS {schema}.knowledge_tree (
     id BIGINT PRIMARY KEY,
     knowledge_id BIGINT REFERENCES {schema}.asset_knowledge(id) ON DELETE CASCADE,
     parent_id BIGINT REFERENCES {schema}.knowledge_tree(id),
-    node_type VARCHAR(20) NOT NULL DEFAULT 'document',  -- folder / document / link
+    node_type VARCHAR(20) NOT NULL DEFAULT 'document',
     title VARCHAR(255) NOT NULL,
     icon VARCHAR(50),
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -548,32 +542,32 @@ CREATE TABLE IF NOT EXISTS {schema}.file_uploads (
     id BIGINT PRIMARY KEY,
 
 -- 版本管理字段
-file_group_id VARCHAR(36) NOT NULL, -- UUID，同一文件的不同版本共用
-version INTEGER NOT NULL DEFAULT 1, -- 版本号，从 1 开始递增
-is_latest BOOLEAN NOT NULL DEFAULT true, -- 是否为当前最新版本
-change_reason VARCHAR(500), -- 变更原因，如"更新合同条款"
-file_md5 VARCHAR(64), -- 文件 MD5，用于判断是否真的变更
+file_group_id VARCHAR(36) NOT NULL,
+version INTEGER NOT NULL DEFAULT 1,
+is_latest BOOLEAN NOT NULL DEFAULT true,
+change_reason VARCHAR(500),
+file_md5 VARCHAR(64),
 
 -- S3 分片上传字段
-upload_id VARCHAR(255),                            -- S3 Multipart Upload ID（pending 状态时可为空）
-    bucket VARCHAR(255),                               -- S3 存储桶
-    object_key VARCHAR(1024),                          -- S3 对象键
+upload_id VARCHAR(255),
+    bucket VARCHAR(255),
+    object_key VARCHAR(1024),
     original_filename VARCHAR(512) NOT NULL,
     file_size BIGINT NOT NULL,
     mime_type VARCHAR(255),
     chunk_size INTEGER NOT NULL DEFAULT 5242880,
     total_chunks INTEGER NOT NULL,
     received_chunks INTEGER[] NOT NULL DEFAULT '{}',
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',     -- pending/uploading/completed/committed/cancelled/failed
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
     file_url VARCHAR(2048),
     etag VARCHAR(255),
 
--- 业务上下文（关联业务实体）
+-- 业务上下文
 
 
-context_type VARCHAR(50),                          -- 业务类型：knowledge/asset/document
-    context_id BIGINT,                                 -- 业务实体 ID
-    commit_at TIMESTAMP WITH TIME ZONE,                -- 正式提交时间
+context_type VARCHAR(50),
+    context_id BIGINT,
+    commit_at TIMESTAMP WITH TIME ZONE,
 
     created_by BIGINT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -736,3 +730,256 @@ COMMENT ON COLUMN {schema}.doc_numbering_sequence.reset_key IS '重置键：如"
 COMMENT ON COLUMN {schema}.doc_numbering_sequence.current_seq IS '当前流水号值';
 
 CREATE INDEX IF NOT EXISTS idx_numbering_seq_biz ON {schema}.doc_numbering_sequence (biz_type);
+
+-- ==============================
+-- 21. llm_provider 大模型服务商配置（多租户）
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.llm_provider (
+    id BIGSERIAL PRIMARY KEY,
+    provider_code VARCHAR(50) NOT NULL UNIQUE,
+    provider_name VARCHAR(100) NOT NULL,
+    base_url VARCHAR(1024),
+    api_key TEXT,
+    secret_key TEXT,
+    extra_config JSONB,
+    weight INT NOT NULL DEFAULT 10,
+    is_local BOOLEAN NOT NULL DEFAULT false,
+    enable BOOLEAN NOT NULL DEFAULT true,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.llm_provider IS '大模型服务商配置（多租户）';
+
+COMMENT ON COLUMN {schema}.llm_provider.api_key IS 'AES-256-GCM 加密存储，前端永不返回明文';
+
+COMMENT ON COLUMN {schema}.llm_provider.weight IS '负载均衡权重，越高优先被选择';
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_code ON {schema}.llm_provider (provider_code, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_llm_provider_enable ON {schema}.llm_provider (enable, deleted);
+
+-- ==============================
+-- 22. llm_model 模型明细表（多租户）
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.llm_model (
+    id BIGSERIAL PRIMARY KEY,
+    provider_id BIGINT NOT NULL REFERENCES {schema}.llm_provider (id) ON DELETE CASCADE,
+    model_code VARCHAR(100) NOT NULL,
+    model_name VARCHAR(100) NOT NULL,
+    model_type VARCHAR(30) NOT NULL,
+    context_window INT,
+    temperature_default FLOAT DEFAULT 0.7,
+    max_tokens_default INT DEFAULT 2048,
+    price_input NUMERIC(10, 6) DEFAULT 0,
+    price_output NUMERIC(10, 6) DEFAULT 0,
+    enable BOOLEAN NOT NULL DEFAULT true,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0,
+    UNIQUE (provider_id, model_code)
+);
+
+COMMENT ON TABLE {schema}.llm_model IS '模型明细表（多租户）';
+
+COMMENT ON COLUMN {schema}.llm_model.model_type IS 'chat=对话 embedding=向量 asr=语音识别 tts=语音合成';
+
+COMMENT ON COLUMN {schema}.llm_model.price_input IS '输入价格（每1K tokens，单位：元）';
+
+COMMENT ON COLUMN {schema}.llm_model.price_output IS '输出价格（每1K tokens，单位：元）';
+
+CREATE INDEX IF NOT EXISTS idx_llm_model_provider ON {schema}.llm_model (provider_id, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_llm_model_type ON {schema}.llm_model (model_type, enable, deleted);
+
+-- ==============================
+-- 23. user_llm_setting 用户模型偏好（多租户）
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.user_llm_setting (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL UNIQUE,
+    default_provider_id BIGINT REFERENCES {schema}.llm_provider (id),
+    default_chat_model_id BIGINT REFERENCES {schema}.llm_model (id),
+    default_embed_model_id BIGINT REFERENCES {schema}.llm_model (id),
+    custom_temp FLOAT,
+    custom_max_token INT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.user_llm_setting IS '用户模型偏好配置（多租户）';
+
+COMMENT ON COLUMN {schema}.user_llm_setting.custom_temp IS '用户自定义温度，覆盖模型默认值';
+
+COMMENT ON COLUMN {schema}.user_llm_setting.custom_max_token IS '用户自定义最大输出Token';
+
+CREATE INDEX IF NOT EXISTS idx_user_llm_uid ON {schema}.user_llm_setting (user_id, deleted);
+
+-- ==============================
+-- 24. llm_call_record LLM调用用量日志（多租户）
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.llm_call_record (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT,
+    conv_id BIGINT,
+    provider_id BIGINT NOT NULL,
+    model_id BIGINT NOT NULL,
+    call_type VARCHAR(30) NOT NULL,
+    input_tokens INT NOT NULL DEFAULT 0,
+    output_tokens INT NOT NULL DEFAULT 0,
+    total_cost NUMERIC(10, 6) DEFAULT 0,
+    duration_ms INT DEFAULT 0,
+    status VARCHAR(20) NOT NULL,
+    error_msg TEXT,
+    request_id VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE {schema}.llm_call_record IS 'LLM 调用全链路日志（多租户）';
+
+COMMENT ON COLUMN {schema}.llm_call_record.total_cost IS '费用=price_input*(输入tokens/1000) + price_output*(输出tokens/1000)';
+
+COMMENT ON COLUMN {schema}.llm_call_record.duration_ms IS '调用耗时，用于性能监控';
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_user ON {schema}.llm_call_record (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_conv ON {schema}.llm_call_record (conv_id);
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_time ON {schema}.llm_call_record (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_llm_call_status ON {schema}.llm_call_record (status);
+
+-- ==============================
+-- 25. document_chunk 向量分片检索表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.document_chunk (
+    id BIGSERIAL PRIMARY KEY,
+    asset_id BIGINT NOT NULL REFERENCES {schema}.knowledge_asset(id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL,
+    chunk_text TEXT NOT NULL,
+    token_count INT,
+    embedding vector(1536),
+    title VARCHAR(512),
+    okf_type VARCHAR(30),
+    tags TEXT[],
+    tree_node_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.document_chunk IS 'RAG向量分片检索表';
+
+COMMENT ON COLUMN {schema}.document_chunk.embedding IS '1536维pgvector向量，HNSW索引加速';
+
+COMMENT ON COLUMN {schema}.document_chunk.title IS '来源资产标题（冗余，避免每次关联查询）';
+
+COMMENT ON COLUMN {schema}.document_chunk.tree_node_id IS '来源目录ID（冗余，用于限定目录检索）';
+
+CREATE INDEX IF NOT EXISTS idx_chunk_asset ON {schema}.document_chunk(asset_id, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_tree ON {schema}.document_chunk(tree_node_id, deleted);
+
+-- ==============================
+-- 26. conversation 对话会话表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.conversation (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255),
+    bind_knowledge_tree_id BIGINT REFERENCES {schema}.knowledge_tree(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.conversation IS '多轮对话会话';
+
+COMMENT ON COLUMN {schema}.conversation.title IS '首次提问截取前30字，用户可重命名';
+
+COMMENT ON COLUMN {schema}.conversation.bind_knowledge_tree_id IS '绑定知识树目录ID，NULL=全部知识库，非NULL=仅检索该目录';
+
+CREATE INDEX IF NOT EXISTS idx_conv_user ON {schema}.conversation(user_id, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_conv_tree ON {schema}.conversation(bind_knowledge_tree_id, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_conv_time ON {schema}.conversation(created_at DESC);
+
+-- ==============================
+-- 27. message 会话消息表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.message (
+    id BIGSERIAL PRIMARY KEY,
+    conv_id BIGINT NOT NULL REFERENCES {schema}.conversation(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    audio_url VARCHAR(1024),
+    reference_asset_ids BIGINT[],
+    reference_text VARCHAR(2048),
+    metadata JSONB,
+    input_tokens INT DEFAULT 0,
+    output_tokens INT DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.message IS '会话消息记录';
+
+COMMENT ON COLUMN {schema}.message.role IS '消息角色：user=用户 assistant=AI system=系统提示词';
+
+COMMENT ON COLUMN {schema}.message.reference_asset_ids IS '本次回答引用的 knowledge_asset.id 数组，前端可点击跳转';
+
+COMMENT ON COLUMN {schema}.message.reference_text IS '引用原文快照，返回相关文档片段的原文';
+
+COMMENT ON COLUMN {schema}.message.input_tokens IS '本次请求消耗的输入Token数';
+
+COMMENT ON COLUMN {schema}.message.output_tokens IS '本次回复消耗的输出Token数';
+
+CREATE INDEX IF NOT EXISTS idx_msg_conv ON {schema}.message(conv_id, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_msg_conv_time ON {schema}.message(conv_id, created_at ASC);
+
+-- ==============================
+-- 28. memory 用户长期记忆表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.memory (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    content TEXT NOT NULL,
+    category VARCHAR(50),
+    importance FLOAT DEFAULT 0.5,
+    source_conv_id BIGINT REFERENCES {schema}.conversation(id),
+    next_review_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE {schema}.memory IS '用户长期记忆，遗忘曲线间隔重复复习';
+
+COMMENT ON COLUMN {schema}.memory.next_review_at IS '下次复习时间，遗忘曲线调度';
+
+CREATE INDEX IF NOT EXISTS idx_memory_user_review ON {schema}.memory(user_id, next_review_at, deleted);
+
+-- ==============================
+-- 29. skill_execution 技能执行日志表
+-- ==============================
+CREATE TABLE IF NOT EXISTS {schema}.skill_execution (
+    id BIGSERIAL PRIMARY KEY,
+    asset_id BIGINT REFERENCES {schema}.knowledge_asset(id),
+    trigger_type VARCHAR(30),
+    input_params JSONB,
+    output_result JSONB,
+    status VARCHAR(20) NOT NULL,
+    error_msg TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE {schema}.skill_execution IS 'Skill规则/流程执行日志';
+
+CREATE INDEX IF NOT EXISTS idx_skill_asset ON {schema}.skill_execution(asset_id);
+
+CREATE INDEX IF NOT EXISTS idx_skill_status ON {schema}.skill_execution(status);

@@ -183,10 +183,8 @@ pub struct HardAssets {
     pub maintenance_type: Option<String>, //维保方式，取值：上门维保、寄修、远程维保
     pub maintenance_expire_date: Option<NaiveDateTime>, //维保到期日期，用于维保到期提醒，优先级高于主表expire_date
     pub hardware_config: Option<String>, //硬件配置详情，如CPU、内存、硬盘、显卡等，JSON格式存储（如{"cpu":"i7-13700H","memory":"16GB"}）
-    #[serde(serialize_with = "opt_i64_to_string")]
-    pub use_user_id: Option<i64>, //外键，关联用户表（user）id，记录当前使用人，状态为“在用/借用”时必填
     pub use_start_date: Option<NaiveDateTime>, //使用开始日期，状态变更为“在用/借用”时自动记录
-    pub fault_desc: Option<String>,            //故障描述，状态为“维修”时填写，记录故障详情
+    pub fault_desc: Option<String>,      //故障描述，状态为“维修”时填写，记录故障详情
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
@@ -211,7 +209,6 @@ pub struct IntangibleAssets {
     pub license_key: Option<String>,  //许可证密钥，软件资产特有，记录软件授权的许可证密钥
     pub license_type: Option<String>, //许可证类型，软件资产特有，取值：permanent/subscription/device/user
     pub authorized_scope: Option<String>, //授权范围，软件资产特有，记录软件授权的范围，如授权给哪个部门、哪个用户等
-    pub assigned_user_ids: Option<String>, //授权用户ID集合，软件资产特有，记录被授权的用户ID列表，逗号分隔
     pub bind_type: Option<String>, //绑定类型，软件资产特有，取值：设备/用户/IP，记录软件授权的绑定方式
     pub bind_info: Option<String>, //绑定信息，软件资产特有，记录软件授权的绑定详情，如绑定的设备ID、用户ID或IP地址等
     pub version: Option<String>,   //版本号，软件资产特有，记录软件的版本信息
@@ -646,10 +643,8 @@ pub struct Assets {
     pub asset_name: String, //资产名称
     pub manufacturer: Option<String>, //制造商
     pub model: Option<String>, //型号
-    #[serde(serialize_with = "opt_i64_to_string")]
-    pub department_id: Option<i64>, //使用部门ID，外键，关联部门表（department）id
-    #[serde(serialize_with = "opt_i64_to_string")]
-    pub user_id: Option<i64>, //使用人ID，外键，关联用户表（sys_user）id
+    pub department_ids: Option<Vec<i64>>, //使用部门ID集合
+    pub user_ids: Option<Vec<i64>>, //使用人ID集合
     pub status: i16,        //状态：0=正常 1=借用 2=维修 3=报废 4=过期
     pub purchase_date: Option<NaiveDateTime>, //购买日期 ；
     pub purchase_price: Option<f64>, //购买价格
