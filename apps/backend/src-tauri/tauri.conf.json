@@ -4,9 +4,9 @@
   "version": "0.0.7",
   "identifier": "com.it.assets",
   "build": {
-    "beforeDevCommand": "cmd /c \"cd ..\\..\\web && pnpm dev\"",
+    "beforeDevCommand": "pnpm --prefix ../web dev",
     "devUrl": "http://localhost:1480",
-    "beforeBuildCommand": "cmd /c \"cd ..\\..\\web && pnpm build\"",
+    "beforeBuildCommand": "pnpm --prefix ../web build",
     "frontendDist": "../../web/dist"
   },
   "app": {
