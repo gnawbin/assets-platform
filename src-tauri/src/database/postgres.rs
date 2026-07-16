@@ -630,18 +630,24 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                 j += 1;
             }
             if is_dollar_start {
+                // 把整个 $tag$ 或 $$ 加到输出中
+                let dollar_quote = if tag.is_empty() {
+                    "$$".to_string()
+                } else {
+                    format!("${}$", tag)
+                };
+                current.push_str(&dollar_quote);
+
                 if !in_dollar_quote {
                     // 开始 dollar-quoting
                     in_dollar_quote = true;
                     dollar_tag = tag.clone();
-                    // 跳过 $tag$
                     i = j;
                     continue;
                 } else if tag == dollar_tag {
                     // 结束 dollar-quoting
                     in_dollar_quote = false;
                     dollar_tag.clear();
-                    // 跳过 $tag$
                     i = j;
                     continue;
                 }

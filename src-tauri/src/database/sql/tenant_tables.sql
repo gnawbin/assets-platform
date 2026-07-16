@@ -558,6 +558,7 @@ upload_id VARCHAR(255),
     chunk_size INTEGER NOT NULL DEFAULT 5242880,
     total_chunks INTEGER NOT NULL,
     received_chunks INTEGER[] NOT NULL DEFAULT '{}',
+    received_etags TEXT[] NOT NULL DEFAULT '{}',
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     file_url VARCHAR(2048),
     etag VARCHAR(255),
@@ -601,6 +602,8 @@ COMMENT ON COLUMN {schema}.file_uploads.chunk_size IS '分片大小（字节）�
 COMMENT ON COLUMN {schema}.file_uploads.total_chunks IS '总分片数';
 
 COMMENT ON COLUMN {schema}.file_uploads.received_chunks IS '已接收的分片序号数组';
+
+COMMENT ON COLUMN {schema}.file_uploads.received_etags IS '已接收的分片对应的真实 ETag 数组（与 received_chunks 一一对应）';
 
 COMMENT ON COLUMN {schema}.file_uploads.status IS '状态：pending=待上传(占位) / uploading=上传中 / completed=已合并(待提交) / committed=已提交(已关联业务) / cancelled=已取消 / failed=失败';
 

@@ -33,6 +33,7 @@ pub struct FileUploadRecord {
     pub chunk_size: i32,
     pub total_chunks: i32,
     pub received_chunks: Vec<i32>,
+    pub received_etags: Vec<String>,
     pub status: String, // pending/uploading/completed/committed/cancelled/failed
     pub file_url: Option<String>,
     pub etag: Option<String>,
@@ -196,13 +197,13 @@ impl UploadManager {
             INSERT INTO {}.file_uploads
                 (id, file_group_id, version, is_latest, change_reason, file_md5,
                  original_filename, file_size, mime_type,
-                 chunk_size, total_chunks, received_chunks, status,
+                 chunk_size, total_chunks, received_chunks, received_etags, status,
                  context_type, context_id, created_by, created_at, updated_at)
             VALUES
                 ($1, $2, $3, $4, $5, $6,
                  $7, $8, $9,
-                 $10, $11, $12, 'pending',
-                 $13, $14, $15, NOW(), NOW())
+                 $10, $11, $12, $13, 'pending',
+                 $14, $15, $16, NOW(), NOW())
             "#,
             schema
         )))
@@ -218,6 +219,7 @@ impl UploadManager {
         .bind(chunk_size as i32)
         .bind(total_chunks)
         .bind(&Vec::<i32>::new())
+        .bind(&Vec::<String>::new())
         .bind(context_type)
         .bind(context_id)
         .bind(created_by)
@@ -331,7 +333,7 @@ impl UploadManager {
         schema: &str,
         upload_id: i64,
         part_number: i32,
-        _etag: &str,
+        etag: &str,
     ) -> Result<(), String> {
         // 参数校验（不依赖数据库查询）
         if part_number < 1 {
@@ -357,18 +359,20 @@ impl UploadManager {
         let result = sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"
             UPDATE {}.file_uploads
-            SET received_chunks = received_chunks || $1::int[],
+            SET received_chunks = received_chunks || ARRAY[$1::int],
+                received_etags = received_etags || ARRAY[$3::text],
                 updated_at = NOW()
             WHERE id = $2
               AND deleted = 0
               AND status = 'uploading'
-              AND $1 <@ ARRAY(SELECT generate_series(1, total_chunks)) -- 分片号合法
+              AND $1 BETWEEN 1 AND total_chunks -- 分片号合法
               AND NOT ($1 = ANY(received_chunks)) -- 幂等性，已存在则跳过
             "#,
             schema
         )))
-        .bind(&vec![part_number])
+        .bind(part_number)
         .bind(upload_id)
+        .bind(etag)
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -530,14 +534,27 @@ impl UploadManager {
             ));
         }
 
-        // 3. 构建 CompletedPart 列表
-        let parts: Vec<aws_sdk_s3::types::CompletedPart> = record
+        // 3. 构建 CompletedPart 列表（S3 要求按 part_number 升序排列）
+        // 使用 report_chunk 时上报的真实 ETag
+        let mut indexed: Vec<(i32, String)> = record
             .received_chunks
             .iter()
-            .map(|part_number| {
+            .cloned()
+            .zip(
+                record
+                    .received_etags
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::repeat(String::new())),
+            )
+            .collect();
+        indexed.sort_unstable_by_key(|(pn, _)| *pn);
+        let parts: Vec<aws_sdk_s3::types::CompletedPart> = indexed
+            .iter()
+            .map(|(part_number, etag)| {
                 aws_sdk_s3::types::CompletedPart::builder()
                     .part_number(*part_number)
-                    .e_tag(format!("\"uploaded-{}\"", part_number))
+                    .e_tag(etag)
                     .build()
             })
             .collect();
