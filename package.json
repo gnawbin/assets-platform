@@ -16,8 +16,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json,css,md}\"",
     "storybook": "cd apps/web && pnpm storybook",
     "build-storybook": "cd apps/web && pnpm build-storybook",
-    "tauri-dev": "cd apps/backend && pnpm dev",
-    "tauri-build": "cd apps/backend && pnpm build",
+    "tauri-dev": "cd apps/backend; pnpm dev",
+    "tauri-build": "cd apps/backend; pnpm build",
     "setup": "node script/install-deps.cjs"
   },
   "dependencies": {},
