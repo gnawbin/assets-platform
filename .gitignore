@@ -6,6 +6,8 @@ dist/
 apps/*/dist
 .next
 apps/*/.next
+.turbo/
+apps/*/.turbo/
 pnpm-lock.yaml
 apps/*/pnpm-lock.yaml
 .vscode
@@ -18,3 +20,4 @@ apps/*/.env.local
 .env.*.local
 .ra-target
 package-lock.yaml
+output.log
