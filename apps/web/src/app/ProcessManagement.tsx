@@ -1,0 +1,41 @@
+import React from 'react';
+import { Card, Text, Title, Stack, Group, Badge, Button } from '@mantine/core';
+import { IconPlus, IconSearch } from '@tabler/icons-react';
+
+interface ProcessManagementProps {
+  title: string;
+}
+
+const ProcessManagement: React.FC<ProcessManagementProps> = ({ title }) => {
+  return (
+    <Stack gap="lg">
+      <Group justify="space-between">
+        <div>
+          <Title order={2}>{title}</Title>
+          <Text c="dimmed">流程管理 - {title}</Text>
+        </div>
+        <Group>
+          <Button variant="light" leftSection={<IconSearch size={16} />}>
+            搜索
+          </Button>
+          <Button leftSection={<IconPlus size={16} />}>
+            新建流程
+          </Button>
+        </Group>
+      </Group>
+
+      <Card withBorder padding="lg" radius="md">
+        <Stack gap="md" align="center" py="xl">
+          <Text c="dimmed" size="lg">
+            {title} - 功能开发中
+          </Text>
+          <Badge size="lg" variant="light" color="orange">
+            即将上线
+          </Badge>
+        </Stack>
+      </Card>
+    </Stack>
+  );
+};
+
+export default ProcessManagement;

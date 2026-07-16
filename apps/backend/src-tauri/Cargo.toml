@@ -1,0 +1,190 @@
+[package]
+authors = ["gengyuwangbin"]
+description = "资产平台APP"
+edition = "2021"
+name = "assets-platform"
+version = "0.0.8"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+name = "assetsplatform_lib"
+
+[[bin]]
+name = "assets-platform"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = {version = "2.5.6", default-features = false, features = [] }# 关闭默认特性
+
+[dependencies]
+tracing = "0.1.44"
+tracing-subscriber = {version = "0.3.23", features = ["env-filter", "json"] }
+
+# 加这两行
+getrandom = {version = "0.4.3", features = ["std"] }
+surrealdb = "3.2.1"
+thiserror = "2.0.18"
+# OTel 核心
+# 注意：opentelemetry-* 各包版本需保持兼容，当前使用 0.32.x 系列
+# 升级时请参考 https://opentelemetry.io/docs/languages/rust/instrumentation/
+# 确保 opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry / opentelemetry-appender-tracing 版本匹配
+argon2 = "0.5.3" # 最强密码哈希
+opentelemetry = {version = "0.32.0", features = ["trace", "metrics", "logs"] } 
+opentelemetry-appender-tracing = "0.32.0" # 日志桥接
+opentelemetry-otlp = {version = "0.32.0", features = [
+  "grpc-tonic",
+  "http-proto",
+  "trace",
+  "logs",
+  "metrics",
+] } 
+opentelemetry_sdk = {version = "0.32.1", features = [
+  "rt-tokio",
+  "trace",
+  "metrics",
+  "logs",
+] } 
+password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具                                                    
+rand = {version = "0.10.1", features = ["std_rng"] } 
+rand_core = "0.10.1" # 提供 RngCore 等核心随机数 trait
+tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
+# Tauri 核心（最小特性集）
+tauri = {version = "2.11.5", default-features = false, features = ["wry"] }
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-fs = "2.5.1"
+tauri-plugin-opener = {version = "2.5.4", default-features = false}
+tauri-plugin-process = "2.3.0"
+tauri-plugin-shell = "2.3.5"
+tauri-plugin-updater = "2.10.1"
+# 序列化
+serde = {version = "1.0", default-features = false, features = [
+  "derive",
+  "alloc",
+] }
+serde_json = {version = "1.0", default-features = false, features = ["alloc"] }
+
+# JWT
+jsonwebtoken = {version = "10.3.0", default-features = false, features = [
+  "aws_lc_rs",
+] }
+
+# 数据库（仅 PostgreSQL）
+sqlx = {version = "0.9.0", default-features = false, features = [
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+  "macros",
+  "chrono",
+  "rust_decimal",
+] }
+
+# 异步运行时（只开必须的特性，不要 full）
+tokio = {version = "1.52", default-features = false, features = [
+  "rt-multi-thread",
+  "rt",
+  "macros",
+  "time",
+  "fs",
+  "net",
+  "signal",
+] }
+
+# HTTP 服务框架（用于前后端分离时的 REST API）
+axum = {version = "0.8.9", features = ["macros"] }
+tower-http = {version = "0.7.0", features = ["cors", "trace"] }
+
+uuid = {version = "1.23.5", features = ["v4"] }
+# HTTP 客户端
+reqwest = {version = "0.13.4", features = [
+  "json",
+  "rustls",
+], default-features = false}
+# 异步流处理
+async-trait = "0.1"
+futures = "0.3"
+wfe-core = {version = "1.10.0", features = ["test-support"] }
+wfe-yaml = "1.10.0"
+# URL 解析
+url = "2.0"
+# 目录路径
+dirs = "6.0.0"
+# 懒加载静态变量
+lazy_static = "1.5.0"
+# 明确指定兼容版本
+base64 = "0.22.1"
+# 正则表达式
+regex = "1.13.0"
+# Cron表达式解析
+cron = "0.17.0"
+winapi = {version = "0.3", features = [
+  "memoryapi",
+  "debugapi",
+  "sysinfoapi",
+  "processthreadsapi",
+  "errhandlingapi",
+] }
+
+hex = "0.4"
+langchain-rust = "4.6.0"
+langgraph = "0.2.3"
+# Decimal type for NUMERIC database fields
+rust_decimal = "1.42.1"
+
+# AES encryption for API keys
+aes-gcm = "0.11.0"
+
+# AWS S3 SDK
+aws-config = {version = "1.9.0", default-features = false, features = ["rustls"] }
+aws-credential-types = "1.3.0"
+aws-sdk-s3 = {version = "1.138.0", default-features = false, features = ["rustls"] }
+aws-smithy-async = {version = "1.3.0", features = ["rt-tokio"] }
+
+# OpenAPI 文档支持（用于 proc-macro 解析）
+utoipa = {version = "5", features = ["axum_extras"] }
+
+# 工具库
+anyhow = "1.0.103"
+chrono = {version = "0.4", default-features = false, features = ["serde"] }
+config = {version = "0.15.25", default-features = false}
+dashmap = "6.1.0"
+once_cell = "1.21.4"
+opa-wasm = "0.3.1"
+toml = "1.1.2+spec-1.1.0"
+
+twitter_snowflake = "1.0.3"
+
+# Release模式优化配置
+[profile.release]
+codegen-units = 16
+incremental = false
+lto = false
+opt-level = 2
+panic = "abort"
+strip = true
+
+[features]
+# by default Tauri runs in production mode
+# when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
+default = ["custom-protocol"]
+# this feature is used used for production builds where `devPath` points to the filesystem
+# DO NOT remove this
+custom-protocol = ["tauri/custom-protocol"]
+
+# 禁用增量编译，减少缓存
+[profile.dev]
+incremental = true
+# 优化级别为0以加快编译速度
+opt-level = 0
+# 禁用调试信息以加速编译
+debug = false
+
+# 为特定依赖项设置优化级别（加快第三方库编译）
+[profile.dev.package."*"]
+opt-level = 2
+
+# 优化生产构建的依赖项
+[profile.release.package."*"]
+opt-level = 2
+
+# Remove patch to use default version
+[patch.crates-io]
