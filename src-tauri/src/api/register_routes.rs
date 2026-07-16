@@ -5,7 +5,6 @@
 use axum::extract::{Path, Query};
 use axum::{Extension, Json};
 use serde::Deserialize;
-use utoipa::ToSchema;
 
 use crate::service;
 use crate::service::register_service::RegisterResponse;
@@ -14,7 +13,7 @@ use super::auth;
 use super::response::{ApiError, ApiResponse};
 
 /// 注册申请请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
@@ -27,7 +26,7 @@ pub struct RegisterRequest {
 }
 
 /// 审核请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct ApproveRequest {
     #[serde(deserialize_with = "crate::database::models::i64_from_string")]
     pub tenant_id: i64,
@@ -35,7 +34,7 @@ pub struct ApproveRequest {
 }
 
 /// 驳回请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct RejectRequest {
     pub approve_remark: Option<String>,
 }
@@ -47,16 +46,6 @@ pub struct RegistrationQuery {
 }
 
 /// 用户注册申请（公开接口，无需认证）
-#[utoipa::path(
-    post,
-    path = "/api/auth/register",
-    tag = "认证",
-    request_body = RegisterRequest,
-    responses(
-        (status = 200, description = "注册申请提交成功", body = ApiResponse<RegisterResponse>),
-        (status = 400, description = "请求参数错误", body = ApiError),
-    ),
-)]
 pub async fn register(
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<ApiResponse<RegisterResponse>>, ApiError> {
@@ -78,21 +67,6 @@ pub async fn register(
 }
 
 /// 获取注册申请列表
-#[utoipa::path(
-    get,
-    path = "/api/auth/registrations",
-    tag = "注册审核",
-    params(
-        ("status" = Option<i16>, Query, description = "筛选状态：0=待审核、1=已通过、2=已驳回"),
-    ),
-    responses(
-        (status = 200, description = "获取成功", body = ApiResponse<Vec<RegisterResponse>>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn get_registrations(
     Query(query): Query<RegistrationQuery>,
 ) -> Result<Json<ApiResponse<Vec<RegisterResponse>>>, ApiError> {
@@ -103,19 +77,6 @@ pub async fn get_registrations(
 }
 
 /// 审核通过注册申请
-#[utoipa::path(
-    post,
-    path = "/api/auth/registrations/{id}/approve",
-    tag = "注册审核",
-    request_body = ApproveRequest,
-    responses(
-        (status = 200, description = "审核通过成功", body = ApiResponse<RegisterResponse>),
-        (status = 400, description = "请求参数错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn approve_registration(
     Extension(claims): Extension<auth::Claims>,
     Path(id): Path<String>,
@@ -139,19 +100,6 @@ pub async fn approve_registration(
 }
 
 /// 驳回注册申请
-#[utoipa::path(
-    post,
-    path = "/api/auth/registrations/{id}/reject",
-    tag = "注册审核",
-    request_body = RejectRequest,
-    responses(
-        (status = 200, description = "驳回成功", body = ApiResponse<RegisterResponse>),
-        (status = 400, description = "请求参数错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn reject_registration(
     Extension(claims): Extension<auth::Claims>,
     Path(id): Path<String>,

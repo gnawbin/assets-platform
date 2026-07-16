@@ -6,7 +6,6 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tracing::{error, info, warn};
-use utoipa::ToSchema;
 
 /// JWT 声明
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,7 +44,7 @@ pub struct LoginResponse {
 }
 
 /// 用户列表响应（不包含密码）
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize)]
 pub struct UserResponse {
     #[serde(serialize_with = "crate::database::models::i64_to_string")]
     pub id: i64,

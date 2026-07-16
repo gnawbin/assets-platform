@@ -291,6 +291,11 @@ pub fn run() {
             commands::skill_commands::register_custom_skill,
             commands::skill_commands::unregister_skill,
             commands::skill_commands::get_skill_count,
+            // 编号规则
+            commands::numbering_commands::get_numbering_rules,
+            commands::numbering_commands::get_numbering_rule,
+            commands::numbering_commands::save_numbering_rule,
+            commands::numbering_commands::reset_numbering_sequence,
             // 大文件上传（两步提交）
             commands::upload_commands::upload_init,
             commands::upload_commands::upload_start,

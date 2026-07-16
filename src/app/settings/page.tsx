@@ -19,6 +19,7 @@ import {
   IconBuildingStore,
   IconFileText,
   IconUserCheck,
+  IconHash,
 } from '@tabler/icons-react';
 
 const settingsItems = [
@@ -70,6 +71,13 @@ const settingsItems = [
     icon: IconFileText,
     color: 'cyan',
     href: '/settings/process-design',
+  },
+  {
+    title: '编号规则',
+    description: '配置单据编号生成规则',
+    icon: IconHash,
+    color: 'indigo',
+    href: '/settings/numbering',
   },
   {
     title: '操作日志',

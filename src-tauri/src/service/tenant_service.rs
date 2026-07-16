@@ -8,10 +8,9 @@ use crate::database::{get_read_pool, get_write_pool};
 use crate::utils::snowflake::next_id;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
-use utoipa::ToSchema;
 
 /// 租户响应
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TenantResponse {
     #[serde(serialize_with = "crate::database::models::i64_to_string")]
     pub id: i64,

@@ -8,10 +8,9 @@ use crate::utils::password_secret::hash_password;
 use crate::utils::snowflake::next_id;
 use serde::Serialize;
 use tracing::{error, info, warn};
-use utoipa::ToSchema;
 
 /// 注册申请响应
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize)]
 pub struct RegisterResponse {
     #[serde(serialize_with = "crate::database::models::i64_to_string")]
     pub id: i64,

@@ -280,3 +280,82 @@ WHERE NOT EXISTS (SELECT 1 FROM {schema}.asset_category WHERE id = 221);
 INSERT INTO {schema}.asset_category (id, category_name, asset_type, parent_id, sort, description, created_by, created_at, deleted)
 SELECT 222, '资质认证', 'intangible', 220, 2, 'ISO 认证、高新技术企业认证等', 1, NOW(), 0
 WHERE NOT EXISTS (SELECT 1 FROM {schema}.asset_category WHERE id = 222);
+
+-- ==============================
+-- 单据编号规则默认配置
+-- ==============================
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 1, 'asset', '资产编号', 'ZC', 'yyyyMMdd', 4, '-', 'never', 'ZC-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'asset');
+
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 2, 'receive', '领用单号', 'LY', 'yyyyMMdd', 4, '-', 'yearly', 'LY-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'receive');
+
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 3, 'return', '归还单号', 'GH', 'yyyyMMdd', 4, '-', 'yearly', 'GH-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'return');
+
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 4, 'transfer', '调拨单号', 'DB', 'yyyyMMdd', 4, '-', 'yearly', 'DB-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'transfer');
+
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 5, 'repair', '维修单号', 'WX', 'yyyyMMdd', 4, '-', 'yearly', 'WX-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'repair');
+
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 6, 'scrap', '报废单号', 'BF', 'yyyyMMdd', 4, '-', 'yearly', 'BF-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'scrap');
+
+INSERT INTO {schema}.doc_numbering_rule (id, biz_type, biz_name, prefix, date_format, serial_length, separator, reset_mode, sample_output, is_active, created_by, created_at, deleted)
+SELECT 7, 'purchase', '采购单号', 'CG', 'yyyyMMdd', 4, '-', 'yearly', 'CG-20260715-0001', true, 1, NOW(), 0
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.doc_numbering_rule WHERE biz_type = 'purchase');
+
+-- ==============================
+-- LLM 厂商种子数据
+-- ==============================
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'openai', 'OpenAI', 'https://api.openai.com', 10, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'openai');
+
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'claude', 'Anthropic Claude', 'https://api.anthropic.com', 8, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'claude');
+
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'qwen', '通义千问', 'https://dashscope.aliyuncs.com', 5, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'qwen');
+
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'volcengine', '火山引擎', 'https://ark.cn-beijing.volces.com', 3, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'volcengine');
+
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'tencent', '腾讯混元', 'https://api.hunyuan.cloud.tencent.com', 3, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'tencent');
+
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'ollama', 'Ollama 本地', 'http://localhost:11434', 3, true
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'ollama');
+
+-- ==============================
+-- LLM 模型种子数据（关联到 openai provider）
+-- ==============================
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, context_window, price_input, price_output)
+SELECT p.id, 'gpt-4o', 'GPT-4o', 'chat', 128000, 0.0025, 0.01
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'openai'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'gpt-4o');
+
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, context_window, price_input, price_output)
+SELECT p.id, 'gpt-4o-mini', 'GPT-4o Mini', 'chat', 128000, 0.00015, 0.0006
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'openai'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'gpt-4o-mini');
+
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, price_input, price_output)
+SELECT p.id, 'text-embedding-3-small', 'Text Embedding 3 Small', 'embedding', 0.00002, 0
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'openai'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'text-embedding-3-small');

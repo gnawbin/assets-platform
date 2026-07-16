@@ -56,10 +56,12 @@ export function insertCategory(params: InsertCategoryParams) {
             id: "0",
             category_name: params.categoryName,
             asset_type: params.assetType,
-            parent_id: params.parentId,
+            parent_id: params.parentId === "0" ? null : params.parentId,
             sort: params.sort,
             description: params.description,
-            deleted: null,
+            created_by: null,
+            updated_by: null,
+            deleted: 0,
         },
     });
 }
@@ -71,10 +73,12 @@ export function updateCategory(params: UpdateCategoryParams) {
             id: params.id,
             category_name: params.categoryName,
             asset_type: params.assetType,
-            parent_id: params.parentId,
+            parent_id: params.parentId === "0" ? null : params.parentId,
             sort: params.sort,
             description: params.description,
-            deleted: null,
+            created_by: null,
+            updated_by: null,
+            deleted: 0,
         },
     });
 }

@@ -8,7 +8,6 @@ pub mod auth;
 pub mod category_routes;
 pub mod department_routes;
 pub mod knowledge_routes;
-pub mod openapi;
 pub mod process_routes;
 pub mod register_routes;
 pub mod response;
@@ -29,11 +28,8 @@ use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use utoipa::OpenApi;
-use utoipa_swagger_ui::SwaggerUi;
 
 use self::auth::auth_middleware;
-use self::openapi::ApiDoc;
 use crate::engine::skill_registry::SkillRegistry;
 
 /// 启动 HTTP API 服务
@@ -96,7 +92,6 @@ pub async fn start_http_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http());
 
     info!("HTTP API 服务启动于 http://{}", addr);
-    info!("Swagger UI: http://localhost:{}/api/swagger-ui/", port);
 
     // 启动 HTTP 服务
     let listener = tokio::net::TcpListener::bind(addr)
@@ -340,15 +335,11 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     });
     let skill_routes = skill_routes::skill_routes().with_state(skill_router_state);
 
-    // Swagger UI
-    let swagger = SwaggerUi::new("/api/swagger-ui").url("/api/openapi.json", ApiDoc::openapi());
-
     // 合并所有路由（大文件上传路由在 start_http_server 中通过 .merge() 添加）
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .merge(skill_routes)
-        .merge(swagger)
         .with_state(state)
 }
 

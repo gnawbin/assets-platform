@@ -580,24 +580,117 @@ pub async fn test_postgres_connection(config: &PostgresConfig) -> Result<()> {
     Ok(())
 }
 
-/// 执行 SQL 文件内容（通过 include_str! 编译时嵌入）
-async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()> {
-    // 按分号分割多条 SQL 语句，逐条执行
-    for (i, statement) in sql.split(';').enumerate() {
-        let trimmed = statement.trim();
-        if trimmed.is_empty() {
+/// 按分号分割 SQL 语句，但跳过 $$...$$ 和 $tag$...$tag$ 内部的 semicolon
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut in_dollar_quote = false;
+    let mut dollar_tag = String::new();
+    let chars: Vec<char> = sql.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        if !in_dollar_quote && i + 1 < len && chars[i] == '-' && chars[i + 1] == '-' {
+            // 行注释：跳过到行尾
+            while i < len && chars[i] != '\n' {
+                i += 1;
+            }
+            current.push('\n');
+            i += 1;
             continue;
         }
-        // 跳过纯注释行（以 -- 开头），但如果包含非注释内容则保留
-        let mut lines = trimmed.lines();
+
+        if !in_dollar_quote && chars[i] == '\'' {
+            // 字符串字面量：跳过到匹配的 '
+            current.push(chars[i]);
+            i += 1;
+            while i < len {
+                current.push(chars[i]);
+                if chars[i] == '\'' && (i + 1 >= len || chars[i + 1] != '\'') {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        if chars[i] == '$' {
+            // 检查是否开始/结束 dollar-quoting
+            let mut j = i + 1;
+            let mut tag = String::new();
+            let mut is_dollar_start = false;
+            while j < len && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                tag.push(chars[j]);
+                j += 1;
+            }
+            if j < len && chars[j] == '$' {
+                is_dollar_start = true;
+                j += 1;
+            }
+            if is_dollar_start {
+                // 把整个 $tag$ 或 $$ 加到输出中
+                let dollar_quote = if tag.is_empty() {
+                    "$$".to_string()
+                } else {
+                    format!("${}$", tag)
+                };
+                current.push_str(&dollar_quote);
+
+                if !in_dollar_quote {
+                    // 开始 dollar-quoting
+                    in_dollar_quote = true;
+                    dollar_tag = tag.clone();
+                    i = j;
+                    continue;
+                } else if tag == dollar_tag {
+                    // 结束 dollar-quoting
+                    in_dollar_quote = false;
+                    dollar_tag.clear();
+                    i = j;
+                    continue;
+                }
+            }
+        }
+
+        if !in_dollar_quote && chars[i] == ';' {
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                statements.push(current.trim().to_string());
+            }
+            current = String::new();
+            i += 1;
+            continue;
+        }
+
+        current.push(chars[i]);
+        i += 1;
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        statements.push(trimmed.to_string());
+    }
+
+    statements
+}
+
+/// 执行 SQL 文件内容（通过 include_str! 编译时嵌入）
+async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()> {
+    let statements = split_sql_statements(sql);
+
+    for (i, sql_to_execute) in statements.iter().enumerate() {
+        // 跳过纯注释行
+        let mut lines = sql_to_execute.lines();
         let first_content = lines.find(|line| {
             let l = line.trim();
             !l.is_empty() && !l.starts_with("--")
         });
-        let sql_to_execute = match first_content {
-            Some(_) => trimmed,
-            None => continue,
-        };
+        if first_content.is_none() {
+            continue;
+        }
+
         sqlx::query(sqlx::AssertSqlSafe(sql_to_execute.to_string()))
             .execute(pool)
             .await
@@ -611,7 +704,11 @@ async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()
                 )
             })?;
     }
-    tracing::info!("SQL 文件 '{}' 执行成功", label);
+    tracing::info!(
+        "SQL 文件 '{}' 执行成功: {} statements",
+        label,
+        statements.len()
+    );
     Ok(())
 }
 
@@ -687,36 +784,6 @@ pub async fn init_knowledge_module_public(pool: &PgPool) -> Result<()> {
     }
 
     execute_sql_content(pool, &buffer, "knowledge_module_public").await
-}
-
-/// 初始化知识库模块租户表
-#[allow(dead_code)]
-pub async fn init_knowledge_module_tenant(pool: &PgPool, schema: &str) -> Result<()> {
-    let sql = include_str!("sql/knowledge_module_migration.sql");
-
-    // 只提取租户级表部分
-    let mut buffer = String::new();
-    let mut in_tenant_section = false;
-
-    for line in sql.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.contains("二、{schema} 租户级表") {
-            in_tenant_section = true;
-            continue;
-        }
-
-        if trimmed.contains("三、用户注册自动初始化触发器") {
-            break; // 触发器在 public 部分已执行
-        }
-
-        if in_tenant_section {
-            buffer.push_str(line);
-            buffer.push('\n');
-        }
-    }
-
-    execute_sql_content_with_schema(pool, &buffer, schema, "knowledge_module_tenant").await
 }
 
 /// 创建默认管理员账号（密码用 argon2 加密）
@@ -812,35 +879,34 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
 
     // 8. 创建租户 schema（如果不存在）
     tracing::info!("正在创建租户 schema '{}'...", schema);
-    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA IF NOT EXISTS {}", schema)))
-        .execute(&pool)
-        .await
-        .map_err(|e| anyhow!("创建 schema '{}' 失败: {}", schema, e))?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE SCHEMA IF NOT EXISTS {}",
+        schema
+    )))
+    .execute(&pool)
+    .await
+    .map_err(|e| anyhow!("创建 schema '{}' 失败: {}", schema, e))?;
 
-    // 9. 初始化租户 schema 表结构
-    tracing::info!("正在初始化租户 '{}' 表结构...", schema);
-    init_tenant_tables(&pool, &schema).await?;
-
-    // 10. 初始化租户 schema 默认数据
-    tracing::info!("正在初始化租户 '{}' 默认数据...", schema);
-    init_tenant_default_data(&pool, &schema).await?;
-
-    // 11. 安装 pgvector 扩展（document_chunk 表使用 vector 类型）
+    // 9. 安装 pgvector 扩展（document_chunk 表使用 vector 类型，需在 init_tenant_tables 之前）
     tracing::info!("正在安装 pgvector 扩展...");
     sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
         .execute(&pool)
         .await
         .map_err(|e| anyhow!("安装 pgvector 扩展失败: {}", e))?;
 
+    // 10. 初始化租户 schema 表结构
+    tracing::info!("正在初始化租户 '{}' 表结构...", schema);
+    init_tenant_tables(&pool, &schema).await?;
+
+    // 11. 初始化租户 schema 默认数据
+    tracing::info!("正在初始化租户 '{}' 默认数据...", schema);
+    init_tenant_default_data(&pool, &schema).await?;
+
     // 12. 初始化知识库模块 public 表
     tracing::info!("正在初始化知识库模块 public 表...");
     init_knowledge_module_public(&pool).await?;
 
-    // 13. 初始化知识库模块租户表
-    tracing::info!("正在初始化知识库模块租户 '{}' 表...", schema);
-    init_knowledge_module_tenant(&pool, &schema).await?;
-
-    // 14. 预加载 schema 缓存（供 middleware/ service 层使用）
+    // 13. 预加载 schema 缓存（供 middleware/ service 层使用）
     preload_schema_cache(&pool).await?;
 
     tracing::info!("数据库初始化完成！");

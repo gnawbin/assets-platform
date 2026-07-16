@@ -15,10 +15,9 @@ use axum::{
     Json,
 };
 use serde::Serialize;
-use utoipa::ToSchema;
 
 /// 统一 API 响应
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize)]
 pub struct ApiResponse<T: Serialize> {
     pub code: i32,
     pub message: String,
@@ -50,7 +49,7 @@ impl<T: Serialize> ApiResponse<T> {
 }
 
 /// 错误响应
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize)]
 pub struct ApiError {
     pub code: i32,
     pub message: String,

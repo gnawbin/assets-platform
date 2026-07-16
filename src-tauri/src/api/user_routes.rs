@@ -6,7 +6,6 @@ use axum::extract::Query;
 use axum::{extract::Path, Extension, Json};
 use serde::Deserialize;
 use std::collections::HashMap;
-use utoipa::ToSchema;
 
 use crate::service;
 use crate::service::user_service::UserResponse;
@@ -15,7 +14,7 @@ use super::auth;
 use super::response::{ApiError, ApiResponse};
 
 /// 创建用户请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
     pub username: String,
     pub password: String,
@@ -36,7 +35,7 @@ pub struct CreateUserRequest {
 }
 
 /// 更新用户请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
     pub real_name: String,
     pub email: Option<String>,
@@ -53,20 +52,20 @@ pub struct UpdateUserRequest {
 }
 
 /// 重置密码请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct ResetPasswordRequest {
     pub new_password: String,
 }
 
 /// 登录请求
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
 }
 
 /// 登录响应
-#[derive(Debug, serde::Serialize, ToSchema)]
+#[derive(Debug, serde::Serialize)]
 pub struct LoginResponse {
     pub token: String,
     pub user_id: String,
@@ -76,16 +75,6 @@ pub struct LoginResponse {
 }
 
 /// 用户登录
-#[utoipa::path(
-    post,
-    path = "/api/auth/login",
-    tag = "认证",
-    request_body = LoginRequest,
-    responses(
-        (status = 200, description = "登录成功", body = ApiResponse<LoginResponse>),
-        (status = 401, description = "认证失败", body = ApiError),
-    ),
-)]
 pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<ApiResponse<LoginResponse>>, ApiError> {
@@ -105,18 +94,6 @@ pub async fn login(
 }
 
 /// 获取所有用户
-#[utoipa::path(
-    get,
-    path = "/api/users",
-    tag = "用户管理",
-    responses(
-        (status = 200, description = "获取成功", body = ApiResponse<Vec<UserResponse>>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn get_users(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<ApiResponse<Vec<UserResponse>>>, ApiError> {
@@ -129,19 +106,6 @@ pub async fn get_users(
 }
 
 /// 新增用户
-#[utoipa::path(
-    post,
-    path = "/api/users",
-    tag = "用户管理",
-    request_body = CreateUserRequest,
-    responses(
-        (status = 200, description = "创建成功", body = ApiResponse<UserResponse>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn insert_user(
     Extension(claims): Extension<auth::Claims>,
     Json(req): Json<CreateUserRequest>,
@@ -169,19 +133,6 @@ pub async fn insert_user(
 }
 
 /// 更新用户
-#[utoipa::path(
-    put,
-    path = "/api/users/{id}",
-    tag = "用户管理",
-    request_body = UpdateUserRequest,
-    responses(
-        (status = 200, description = "更新成功", body = ApiResponse<UserResponse>),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn update_user(
     Extension(claims): Extension<auth::Claims>,
     Path(id): Path<String>,
@@ -213,19 +164,6 @@ pub async fn update_user(
 }
 
 /// 重置密码
-#[utoipa::path(
-    post,
-    path = "/api/users/{id}/reset-password",
-    tag = "用户管理",
-    request_body = ResetPasswordRequest,
-    responses(
-        (status = 200, description = "重置成功"),
-        (status = 500, description = "服务器错误", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn reset_password(
     Path(id): Path<String>,
     Json(req): Json<ResetPasswordRequest>,
@@ -241,18 +179,6 @@ pub async fn reset_password(
 }
 
 /// 删除用户
-#[utoipa::path(
-    delete,
-    path = "/api/users/{id}",
-    tag = "用户管理",
-    responses(
-        (status = 200, description = "删除成功"),
-        (status = 500, description = "服务器错误"),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn delete_user(
     Extension(claims): Extension<auth::Claims>,
     Path(id): Path<String>,
@@ -278,18 +204,6 @@ pub async fn delete_user(
 }
 
 /// 获取当前登录用户信息
-#[utoipa::path(
-    get,
-    path = "/api/users/me",
-    tag = "用户管理",
-    responses(
-        (status = 200, description = "获取成功", body = ApiResponse<UserResponse>),
-        (status = 401, description = "认证失败", body = ApiError),
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
 pub async fn get_current_user(
     Extension(claims): Extension<auth::Claims>,
 ) -> Result<Json<ApiResponse<UserResponse>>, ApiError> {
