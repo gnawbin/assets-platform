@@ -462,7 +462,7 @@ INSERT INTO
     )
 SELECT
     11,
-    '硬资产',
+    '固定资产',
     2,
     '/hardware',
     '/hardware/page',
@@ -512,7 +512,7 @@ INSERT INTO
     )
 SELECT
     12,
-    '软资产',
+    '无形资产',
     2,
     '/software',
     '/software/page',
@@ -1886,7 +1886,7 @@ INSERT INTO
     )
 SELECT
     110,
-    '新增硬资产',
+    '新增固定资产',
     11,
     NULL,
     NULL,
@@ -1936,7 +1936,7 @@ INSERT INTO
     )
 SELECT
     111,
-    '编辑硬资产',
+    '编辑固定资产',
     11,
     NULL,
     NULL,
@@ -1986,7 +1986,7 @@ INSERT INTO
     )
 SELECT
     112,
-    '删除硬资产',
+    '删除固定资产',
     11,
     NULL,
     NULL,
@@ -2036,7 +2036,7 @@ INSERT INTO
     )
 SELECT
     113,
-    '导出硬资产',
+    '导出固定资产',
     11,
     NULL,
     NULL,
@@ -2087,7 +2087,7 @@ INSERT INTO
     )
 SELECT
     120,
-    '新增软资产',
+    '新增无形资产',
     12,
     NULL,
     NULL,
@@ -2137,7 +2137,7 @@ INSERT INTO
     )
 SELECT
     121,
-    '编辑软资产',
+    '编辑无形资产',
     12,
     NULL,
     NULL,
@@ -2187,7 +2187,7 @@ INSERT INTO
     )
 SELECT
     122,
-    '删除软资产',
+    '删除无形资产',
     12,
     NULL,
     NULL,
@@ -2237,7 +2237,7 @@ INSERT INTO
     )
 SELECT
     123,
-    '导出软资产',
+    '导出无形资产',
     12,
     NULL,
     NULL,
