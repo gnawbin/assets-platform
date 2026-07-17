@@ -4,16 +4,16 @@
   "version": "0.0.7",
   "identifier": "com.it.assets",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm --prefix ../web dev",
     "devUrl": "http://localhost:1480",
-    "beforeBuildCommand": "pnpm build",
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "pnpm --prefix ../web build",
+    "frontendDist": "../../web/dist"
   },
   "app": {
     "windows": [
       {
         "title": "资产管理平台",
-        "width": 1280,
+        "width": 1480,
         "height": 800
       }
     ],
