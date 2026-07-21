@@ -226,8 +226,8 @@ const RegistrationsPage: React.FC = () => {
                             确认通过 <strong>{selected?.username}</strong> 的注册申请？
                         </Text>
                         <Select
-                            label="分配租户"
-                            placeholder="选择租户"
+                            label="分配组织结构"
+                            placeholder="选择组织结构"
                             data={tenants.map((t) => ({ value: String(t.id), label: t.tenant_name }))}
                             value={selectedTenantId}
                             onChange={setSelectedTenantId}

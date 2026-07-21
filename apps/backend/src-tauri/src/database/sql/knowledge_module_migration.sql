@@ -4,7 +4,7 @@
 -- 适用版本：基于 Git commit abdfd18
 -- 执行位置：
 --   public 表执行在 public 命名空间
---   {schema} 表需替换为实际租户 schema 名
+--   {schema} 表需替换为实际组织 schema 名
 -- ==============================
 
 -- ==============================
@@ -168,7 +168,7 @@ DECLARE
     v_embed_model_id BIGINT;
     v_schema TEXT;
 BEGIN
-    -- 根据新增用户的 tenant_id 动态获取对应的租户 schema
+    -- 根据新增用户的 tenant_id 动态获取对应的组织 schema
     SELECT quote_ident(schema_name) INTO v_schema
     FROM public.sys_tenant
     WHERE id = NEW.tenant_id;

@@ -2,7 +2,7 @@
 -- public schema 初始数据
 -- ==============================
 
--- 1. 默认租户
+-- 1. 默认组织结构
 INSERT INTO
     public.sys_tenant (
         id,
@@ -1630,7 +1630,7 @@ INSERT INTO
     )
 SELECT
     46,
-    '租户管理',
+    '组织结构管理',
     5,
     '/settings/tenants',
     '/settings/tenants/page',
@@ -3166,7 +3166,7 @@ WHERE
 
 -- 6.5 系统配置按钮
 
--- 租户管理按钮
+-- 组织结构管理按钮
 INSERT INTO
     public.sys_menu (
         id,
@@ -3191,7 +3191,7 @@ INSERT INTO
     )
 SELECT
     148,
-    '新增租户',
+    '新增组织结构',
     46,
     NULL,
     NULL,
@@ -3241,7 +3241,7 @@ INSERT INTO
     )
 SELECT
     149,
-    '编辑租户',
+    '编辑组织结构',
     46,
     NULL,
     NULL,
@@ -3291,7 +3291,7 @@ INSERT INTO
     )
 SELECT
     150,
-    '禁用租户',
+    '禁用组织结构',
     46,
     NULL,
     NULL,
@@ -3389,7 +3389,7 @@ WHERE
     );
 
 -- ==============================
--- 10. 默认用户租户关联（admin 用户 → 所有启用租户）
+-- 10. 默认用户组织关联（admin 用户 → 所有启用组织）
 -- ==============================
 INSERT INTO
     public.sys_user_tenant (

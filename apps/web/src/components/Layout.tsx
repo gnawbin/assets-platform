@@ -72,7 +72,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </Group>
 
           <Group gap="xs">
-            {/* 租户切换器：有可用租户时显示，方便查看当前租户 */}
+            {/* 组织结构切换器：有可用组织时显示，方便查看当前组织 */}
             {availableTenants.length > 0 && (
               <Menu shadow="md" width={220}>
                 <Menu.Target>
@@ -81,7 +81,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     size="sm"
                     leftSection={<IconBuildingStore size={16} />}
                   >
-                    {availableTenants.find(t => String(t.id) === String(selectedTenantId))?.tenant_name || '切换租户'}
+                    {availableTenants.find(t => String(t.id) === String(selectedTenantId))?.tenant_name || '切换组织结构'}
                   </Button>
                 </Menu.Target>
                 <Menu.Dropdown>

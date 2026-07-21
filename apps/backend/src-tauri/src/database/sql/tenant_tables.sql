@@ -1,5 +1,5 @@
 -- ==============================
--- 租户业务表（执行前替换 {schema} 为实际 schema 名）
+-- 组织结构业务表（执行前替换 {schema} 为实际 schema 名）
 -- ==============================
 
 -- 1. 资产分类表
@@ -735,7 +735,7 @@ COMMENT ON COLUMN {schema}.doc_numbering_sequence.current_seq IS '当前流水�
 CREATE INDEX IF NOT EXISTS idx_numbering_seq_biz ON {schema}.doc_numbering_sequence (biz_type);
 
 -- ==============================
--- 21. llm_provider 大模型服务商配置（多租户）
+-- 21. llm_provider 大模型服务商配置（多组织）
 -- ==============================
 CREATE TABLE IF NOT EXISTS {schema}.llm_provider (
     id BIGSERIAL PRIMARY KEY,
@@ -754,7 +754,7 @@ CREATE TABLE IF NOT EXISTS {schema}.llm_provider (
     deleted SMALLINT NOT NULL DEFAULT 0
 );
 
-COMMENT ON TABLE {schema}.llm_provider IS '大模型服务商配置（多租户）';
+COMMENT ON TABLE {schema}.llm_provider IS '大模型服务商配置（多组织）';
 
 COMMENT ON COLUMN {schema}.llm_provider.api_key IS 'AES-256-GCM 加密存储，前端永不返回明文';
 
@@ -765,7 +765,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_provider_code ON {schema}.llm_provider (provi
 CREATE INDEX IF NOT EXISTS idx_llm_provider_enable ON {schema}.llm_provider (enable, deleted);
 
 -- ==============================
--- 22. llm_model 模型明细表（多租户）
+-- 22. llm_model 模型明细表（多组织）
 -- ==============================
 CREATE TABLE IF NOT EXISTS {schema}.llm_model (
     id BIGSERIAL PRIMARY KEY,
@@ -786,7 +786,7 @@ CREATE TABLE IF NOT EXISTS {schema}.llm_model (
     UNIQUE (provider_id, model_code)
 );
 
-COMMENT ON TABLE {schema}.llm_model IS '模型明细表（多租户）';
+COMMENT ON TABLE {schema}.llm_model IS '模型明细表（多组织）';
 
 COMMENT ON COLUMN {schema}.llm_model.model_type IS 'chat=对话 embedding=向量 asr=语音识别 tts=语音合成';
 
@@ -799,7 +799,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_model_provider ON {schema}.llm_model (provide
 CREATE INDEX IF NOT EXISTS idx_llm_model_type ON {schema}.llm_model (model_type, enable, deleted);
 
 -- ==============================
--- 23. user_llm_setting 用户模型偏好（多租户）
+-- 23. user_llm_setting 用户模型偏好（多组织）
 -- ==============================
 CREATE TABLE IF NOT EXISTS {schema}.user_llm_setting (
     id BIGSERIAL PRIMARY KEY,
@@ -814,7 +814,7 @@ CREATE TABLE IF NOT EXISTS {schema}.user_llm_setting (
     deleted SMALLINT NOT NULL DEFAULT 0
 );
 
-COMMENT ON TABLE {schema}.user_llm_setting IS '用户模型偏好配置（多租户）';
+COMMENT ON TABLE {schema}.user_llm_setting IS '用户模型偏好配置（多组织）';
 
 COMMENT ON COLUMN {schema}.user_llm_setting.custom_temp IS '用户自定义温度，覆盖模型默认值';
 
@@ -823,7 +823,7 @@ COMMENT ON COLUMN {schema}.user_llm_setting.custom_max_token IS '用户自定义
 CREATE INDEX IF NOT EXISTS idx_user_llm_uid ON {schema}.user_llm_setting (user_id, deleted);
 
 -- ==============================
--- 24. llm_call_record LLM调用用量日志（多租户）
+-- 24. llm_call_record LLM调用用量日志（多组织）
 -- ==============================
 CREATE TABLE IF NOT EXISTS {schema}.llm_call_record (
     id BIGSERIAL PRIMARY KEY,
@@ -842,7 +842,7 @@ CREATE TABLE IF NOT EXISTS {schema}.llm_call_record (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-COMMENT ON TABLE {schema}.llm_call_record IS 'LLM 调用全链路日志（多租户）';
+COMMENT ON TABLE {schema}.llm_call_record IS 'LLM 调用全链路日志（多组织）';
 
 COMMENT ON COLUMN {schema}.llm_call_record.total_cost IS '费用=price_input*(输入tokens/1000) + price_output*(输出tokens/1000)';
 

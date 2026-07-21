@@ -95,22 +95,22 @@ const HardwarePage: React.FC = () => {
   const [formExpireDate, setFormExpireDate] = useState('');
   const [formDescription, setFormDescription] = useState('');
   // 部门/用户
-  const [formDepartmentId, setFormDepartmentId] = useState<string>('');
-  const [formUserId, setFormUserId] = useState<string>('');
+  const [formDepartmentId, setFormDepartmentId] = useState<string[]>([]);
+  const [formUserId, setFormUserId] = useState<string[]>([]);
 
-  // 根据选择的部门过滤用户（包含子部门）
+  // 根据选择的部门过滤用户（包含所有选中部门及子部门）
   const filteredUsers = useMemo(() => {
-    if (!formDepartmentId) return users;
-    // 查找所有子部门 ID
-    const deptIds = new Set<string>([formDepartmentId]);
+    if (formDepartmentId.length === 0) return users;
+    // 查找所有选中部门及其子部门 ID
+    const deptIds = new Set<string>();
     const findChildDepts = (parentId: string) => {
+      deptIds.add(parentId);
       const children = departments.filter((d) => d.parent_id === parentId || d.parent_id === `${parentId}`);
       for (const child of children) {
-        deptIds.add(child.id);
         findChildDepts(child.id);
       }
     };
-    findChildDepts(formDepartmentId);
+    formDepartmentId.forEach((id) => findChildDepts(id));
     return users.filter((u) => u.department_id && deptIds.has(u.department_id));
   }, [users, departments, formDepartmentId]);
   // 硬件扩展字段
@@ -215,8 +215,8 @@ const HardwarePage: React.FC = () => {
     setFormUsedQuantity(asset.used_quantity || 0);
     setFormExpireDate(asset.expire_date || '');
     setFormDescription(asset.description || '');
-    setFormDepartmentId(asset.department_id || '');
-    setFormUserId(asset.user_id || '');
+    setFormDepartmentId(asset.department_id ? [asset.department_id] : []);
+    setFormUserId(asset.user_id ? [asset.user_id] : []);
     setFormSn(asset.sn || '');
     setFormMacAddress(asset.mac_address || '');
     setFormLocation(asset.location || '');
@@ -242,8 +242,8 @@ const HardwarePage: React.FC = () => {
     setFormUsedQuantity(0);
     setFormExpireDate('');
     setFormDescription('');
-    setFormDepartmentId('');
-    setFormUserId('');
+    setFormDepartmentId([]);
+    setFormUserId([]);
     setFormSn('');
     setFormMacAddress('');
     setFormLocation('');
@@ -261,8 +261,8 @@ const HardwarePage: React.FC = () => {
     asset_name: formAssetName.trim(),
     manufacturer: formManufacturer.trim() || null,
     model: formModel.trim() || null,
-    department_id: formDepartmentId || null,
-    user_id: formUserId || null,
+    department_id: formDepartmentId[0] || null,
+    user_id: formUserId[0] || null,
     status: parseInt(formStatus),
     purchase_date: formPurchaseDate || null,
     purchase_price: formPurchasePrice || null,
@@ -535,6 +535,7 @@ const HardwarePage: React.FC = () => {
                 label="资产分类"
                 placeholder="请选择分类"
                 required
+                assetType="fixed"
                 categories={categories}
                 value={formCategoryId}
                 onChange={(val) => setFormCategoryId(val)}
@@ -647,23 +648,23 @@ const HardwarePage: React.FC = () => {
                 onChange={(val) => {
                   setFormDepartmentId(val);
                   // 部门切换时清空用户选择
-                  setFormUserId('');
+                  setFormUserId([]);
                 }}
               />
             </Grid.Col>
             <Grid.Col span={6}>
               <Select
                 label="使用人"
-                placeholder={formDepartmentId ? '请选择用户' : '请先选择部门'}
+                placeholder={formDepartmentId.length > 0 ? '请选择用户' : '请先选择部门'}
                 data={filteredUsers.map((u) => ({
                   value: String(u.id),
                   label: `${u.real_name || u.username}${u.department_id ? ` (${getDepartmentName(u.department_id)})` : ''}`,
                 }))}
-                value={formUserId}
-                onChange={(val) => setFormUserId(val || '')}
+                value={formUserId[0] || ''}
+                onChange={(val) => setFormUserId(val ? [val] : [])}
                 searchable
                 clearable
-                disabled={!formDepartmentId}
+                disabled={formDepartmentId.length === 0}
               />
             </Grid.Col>
           </Grid>

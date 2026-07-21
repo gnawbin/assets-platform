@@ -362,11 +362,11 @@ const DepartmentsPage: React.FC = () => {
           </Group>
         </Group>
 
-        {/* 超级管理员：租户选择器 */}
+        {/* 超级管理员：组织结构选择器 */}
         {isSuperAdmin && (
           <Select
-            label="选择租户"
-            placeholder="请选择租户查看其部门"
+            label="选择组织结构"
+            placeholder="请选择组织结构查看其部门"
             data={tenants
               .filter((t) => t.enable)
               .map((t) => ({
@@ -407,7 +407,7 @@ const DepartmentsPage: React.FC = () => {
               </Group>
             ) : !selectedTenantId ? (
               <Text ta="center" c="dimmed" py="xl">
-                {isSuperAdmin ? '请先选择租户' : '加载中...'}
+                {isSuperAdmin ? '请先选择组织结构' : '加载中...'}
               </Text>
             ) : treeData.length === 0 ? (
               <Text ta="center" c="dimmed" py="xl">

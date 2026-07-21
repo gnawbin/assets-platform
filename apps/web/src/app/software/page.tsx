@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import {
   Title,
@@ -43,6 +43,10 @@ import {
   type IntangibleAssetView,
   type IntangibleAssetInput,
 } from '@/services/softwareService';
+import { getDepartments, type Department } from '@/services/departmentService';
+import { getUsers, type User } from '@/services/userService';
+import CategoryTreeSelector from '@/components/CategoryTreeSelector';
+import DepartmentTreeSelector from '@/components/DepartmentTreeSelector';
 
 // 状态映射
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
@@ -56,6 +60,8 @@ const STATUS_MAP: Record<number, { label: string; color: string }> = {
 const SoftwarePage: React.FC = () => {
   const [assets, setAssets] = useState<IntangibleAssetView[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [searchText, setSearchText] = useState('');
 
   // 使用 useApi 管理数据获取
@@ -77,7 +83,7 @@ const SoftwarePage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
 
   // 表单字段
-  const [formCategoryId, setFormCategoryId] = useState<number>(0);
+  const [formCategoryId, setFormCategoryId] = useState<string>('');
   const [formAssetName, setFormAssetName] = useState('');
   const [formManufacturer, setFormManufacturer] = useState('');
   const [formModel, setFormModel] = useState('');
@@ -88,6 +94,9 @@ const SoftwarePage: React.FC = () => {
   const [formUsedQuantity, setFormUsedQuantity] = useState<number>(0);
   const [formExpireDate, setFormExpireDate] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  // 部门/用户
+  const [formDepartmentId, setFormDepartmentId] = useState<string[]>([]);
+  const [formUserId, setFormUserId] = useState<string[]>([]);
   // 无形资产扩展字段
   const [formIntangibleType, setFormIntangibleType] = useState('');
   const [formRegisterNo, setFormRegisterNo] = useState('');
@@ -105,6 +114,22 @@ const SoftwarePage: React.FC = () => {
   const [formUsefulLife, setFormUsefulLife] = useState<number>(0);
   const [formAmortizationAmount, setFormAmortizationAmount] = useState<number>(0);
   const [formResidualRate, setFormResidualRate] = useState<number>(0);
+
+  // 根据选择的部门过滤用户（包含所有选中部门及子部门）
+  const filteredUsers = useMemo(() => {
+    if (formDepartmentId.length === 0) return users;
+    // 查找所有选中部门及其子部门 ID
+    const deptIds = new Set<string>();
+    const findChildDepts = (parentId: string) => {
+      deptIds.add(parentId);
+      const children = departments.filter((d) => d.parent_id === parentId || d.parent_id === `${parentId}`);
+      for (const child of children) {
+        findChildDepts(child.id);
+      }
+    };
+    formDepartmentId.forEach((id) => findChildDepts(id));
+    return users.filter((u) => u.department_id && deptIds.has(u.department_id));
+  }, [users, departments, formDepartmentId]);
 
   // 删除确认
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -124,21 +149,55 @@ const SoftwarePage: React.FC = () => {
   useEffect(() => {
     fetchAssets();
     fetchCategories();
+    fetchDepartments();
+    fetchUsers();
   }, []);
 
   const fetchCategories = async () => {
     try {
       const data = await getCategories();
-      setCategories(data.filter((c) => c.asset_type === 'intangible'));
+      setCategories(data);
     } catch (err) {
       console.error('获取分类列表失败:', err);
     }
   };
 
+  const fetchDepartments = async () => {
+    try {
+      const data = await getDepartments();
+      setDepartments(data);
+    } catch (err) {
+      console.error('获取部门列表失败:', err);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const data = await getUsers();
+      setUsers(data);
+    } catch (err) {
+      console.error('获取用户列表失败:', err);
+    }
+  };
+
   // 获取分类名称
-  const getCategoryName = (id: number): string => {
-    const cat = categories.find((c) => String(c.id) === String(id));
+  const getCategoryName = (id: string): string => {
+    const cat = categories.find((c) => String(c.id) === id);
     return cat ? cat.category_name : `分类#${id}`;
+  };
+
+  // 获取部门名称
+  const getDepartmentName = (id: string | null): string => {
+    if (!id) return '-';
+    const dept = departments.find((d) => String(d.id) === id);
+    return dept ? dept.department_name : `部门#${id}`;
+  };
+
+  // 获取用户名称
+  const getUserName = (id: string | null): string => {
+    if (!id) return '-';
+    const user = users.find((u) => String(u.id) === id);
+    return user ? user.real_name || user.username : `用户#${id}`;
   };
 
   // 过滤后的资产列表
@@ -165,7 +224,7 @@ const SoftwarePage: React.FC = () => {
   // 打开编辑弹窗
   const openEditModal = (asset: IntangibleAssetView) => {
     setFormMode('edit');
-    setEditingId(asset.id);
+    setEditingId(Number(asset.id));
     setFormCategoryId(asset.category_id);
     setFormAssetName(asset.asset_name);
     setFormManufacturer(asset.manufacturer || '');
@@ -177,6 +236,8 @@ const SoftwarePage: React.FC = () => {
     setFormUsedQuantity(asset.used_quantity || 0);
     setFormExpireDate(asset.expire_date || '');
     setFormDescription(asset.description || '');
+    setFormDepartmentId(asset.department_id ? [asset.department_id] : []);
+    setFormUserId(asset.user_id ? [asset.user_id] : []);
     setFormIntangibleType(asset.intangible_type || '');
     setFormRegisterNo(asset.register_no || '');
     setFormRegisterOwner(asset.register_owner || '');
@@ -198,7 +259,7 @@ const SoftwarePage: React.FC = () => {
 
   // 重置表单
   const resetForm = () => {
-    setFormCategoryId(0);
+    setFormCategoryId('');
     setFormAssetName('');
     setFormManufacturer('');
     setFormModel('');
@@ -209,6 +270,8 @@ const SoftwarePage: React.FC = () => {
     setFormUsedQuantity(0);
     setFormExpireDate('');
     setFormDescription('');
+    setFormDepartmentId([]);
+    setFormUserId([]);
     setFormIntangibleType('');
     setFormRegisterNo('');
     setFormRegisterOwner('');
@@ -233,8 +296,8 @@ const SoftwarePage: React.FC = () => {
     asset_name: formAssetName.trim(),
     manufacturer: formManufacturer.trim() || null,
     model: formModel.trim() || null,
-    department_id: null,
-    user_id: null,
+    department_id: formDepartmentId[0] || null,
+    user_id: formUserId[0] || null,
     status: parseInt(formStatus),
     purchase_date: formPurchaseDate || null,
     purchase_price: formPurchasePrice || null,
@@ -281,7 +344,7 @@ const SoftwarePage: React.FC = () => {
         await doInsert({ input });
         notifySuccess('无形资产添加成功');
       } else if (editingId) {
-        await doUpdate({ id: editingId, input });
+        await doUpdate({ id: String(editingId), input });
         notifySuccess('无形资产更新成功');
       }
 
@@ -382,6 +445,8 @@ const SoftwarePage: React.FC = () => {
                   <Table.Th>资产编号</Table.Th>
                   <Table.Th>资产名称</Table.Th>
                   <Table.Th>分类</Table.Th>
+                  <Table.Th>使用部门</Table.Th>
+                  <Table.Th>使用人</Table.Th>
                   <Table.Th>类型</Table.Th>
                   <Table.Th>注册号</Table.Th>
                   <Table.Th>状态</Table.Th>
@@ -413,6 +478,12 @@ const SoftwarePage: React.FC = () => {
                         <Text size="sm">
                           {getCategoryName(asset.category_id)}
                         </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{getDepartmentName(asset.department_id)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{getUserName(asset.user_id)}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Badge variant="light" color="violet" size="sm">
@@ -488,17 +559,14 @@ const SoftwarePage: React.FC = () => {
               />
             </Grid.Col>
             <Grid.Col span={6}>
-              <Select
+              <CategoryTreeSelector
                 label="资产分类"
                 placeholder="请选择分类"
                 required
-                data={categories.map((c) => ({
-                  value: String(c.id),
-                  label: c.category_name,
-                }))}
-                value={String(formCategoryId)}
-                onChange={(val) => setFormCategoryId(Number(val) || 0)}
-                searchable
+                assetType="intangible"
+                categories={categories}
+                value={formCategoryId}
+                onChange={(val) => setFormCategoryId(val)}
               />
             </Grid.Col>
           </Grid>
@@ -593,6 +661,38 @@ const SoftwarePage: React.FC = () => {
                 placeholder="请输入版本号"
                 value={formVersion}
                 onChange={(e) => setFormVersion(e.target.value)}
+              />
+            </Grid.Col>
+          </Grid>
+
+          {/* 部门 & 用户 */}
+          <Grid>
+            <Grid.Col span={6}>
+              <DepartmentTreeSelector
+                label="使用部门"
+                placeholder="请选择部门"
+                departments={departments}
+                value={formDepartmentId}
+                onChange={(val) => {
+                  setFormDepartmentId(val);
+                  // 部门切换时清空用户选择
+                  setFormUserId([]);
+                }}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Select
+                label="使用人"
+                placeholder={formDepartmentId.length > 0 ? '请选择用户' : '请先选择部门'}
+                data={filteredUsers.map((u) => ({
+                  value: String(u.id),
+                  label: `${u.real_name || u.username}${u.department_id ? ` (${getDepartmentName(u.department_id)})` : ''}`,
+                }))}
+                value={formUserId[0] || ''}
+                onChange={(val) => setFormUserId(val ? [val] : [])}
+                searchable
+                clearable
+                disabled={formDepartmentId.length === 0}
               />
             </Grid.Col>
           </Grid>
@@ -832,6 +932,18 @@ const SoftwarePage: React.FC = () => {
                   <Text size="sm">
                     {getCategoryName(detailAsset.category_id)}
                   </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    使用部门
+                  </Text>
+                  <Text size="sm">{getDepartmentName(detailAsset.department_id)}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    使用人
+                  </Text>
+                  <Text size="sm">{getUserName(detailAsset.user_id)}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>

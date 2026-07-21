@@ -43,12 +43,39 @@ interface CategoryTreeSelectorProps {
     label?: string;
     placeholder?: string;
     required?: boolean;
+    /** 按资产类型过滤：'fixed' 仅显示固定资产，'intangible' 仅显示无形资产，不传则显示全部 */
+    assetType?: 'fixed' | 'intangible';
 }
 
 // ======================== 工具函数 ========================
 
+/** 获取指定资产类型的所有分类 ID（包括其祖先节点） */
+function getFilteredCategoryIds(cats: Category[], assetType: 'fixed' | 'intangible'): Set<string> {
+    const targetIds = new Set<string>();
+    const catMap = new Map<string, Category>();
+    cats.forEach((c) => catMap.set(c.id, c));
+
+    // 找出所有匹配 assetType 的分类
+    const matched = cats.filter((c) => c.asset_type === assetType);
+    matched.forEach((c) => {
+        targetIds.add(c.id);
+        // 向上追溯父节点，确保树结构完整
+        let parentId = c.parent_id;
+        while (parentId !== '0' && catMap.has(parentId)) {
+            targetIds.add(parentId);
+            parentId = catMap.get(parentId)!.parent_id;
+        }
+    });
+
+    return targetIds;
+}
+
 /** 构建树结构 */
-function buildTree(cats: Category[]): TreeNode[] {
+function buildTree(cats: Category[], assetType?: 'fixed' | 'intangible'): TreeNode[] {
+    if (assetType) {
+        const keepIds = getFilteredCategoryIds(cats, assetType);
+        cats = cats.filter((c) => keepIds.has(c.id));
+    }
     const map = new Map<string, TreeNode>();
     const roots: TreeNode[] = [];
 
@@ -122,15 +149,16 @@ const CategoryTreeSelector: React.FC<CategoryTreeSelectorProps> = ({
     label = '资产分类',
     placeholder = '请选择分类',
     required = false,
+    assetType,
 }) => {
     const [modalOpen, setModalOpen] = useState(false);
     const [searchText, setSearchText] = useState('');
-    const [treeData, setTreeData] = useState<TreeNode[]>(() => buildTree(categories));
+    const [treeData, setTreeData] = useState<TreeNode[]>(() => buildTree(categories, assetType));
 
-    // 当外部 categories 变化时重建树
+    // 当外部 categories 或 assetType 变化时重建树
     React.useEffect(() => {
-        setTreeData(buildTree(categories));
-    }, [categories]);
+        setTreeData(buildTree(categories, assetType));
+    }, [categories, assetType]);
 
     // 叶子节点 ID 集合
     const leafIds = useMemo(() => getLeafIds(categories), [categories]);
@@ -231,14 +259,16 @@ const CategoryTreeSelector: React.FC<CategoryTreeSelectorProps> = ({
                     <Text size="sm" fw={isSelected ? 600 : 400} lineClamp={1}>
                         {node.category_name}
                     </Text>
-                    <Badge
-                        size="xs"
-                        variant="light"
-                        color={node.asset_type === 'fixed' ? 'blue' : 'violet'}
-                        ml="auto"
-                    >
-                        {node.asset_type === 'fixed' ? '固定资产' : '无形资产'}
-                    </Badge>
+                    {!assetType && (
+                        <Badge
+                            size="xs"
+                            variant="light"
+                            color={node.asset_type === 'fixed' ? 'blue' : 'violet'}
+                            ml="auto"
+                        >
+                            {node.asset_type === 'fixed' ? '固定资产' : '无形资产'}
+                        </Badge>
+                    )}
                 </Box>
                 {hasChildren && node.expanded && (
                     <>
@@ -310,7 +340,7 @@ const CategoryTreeSelector: React.FC<CategoryTreeSelectorProps> = ({
 
                     <Group justify="space-between">
                         <Text size="xs" c="dimmed">
-                            {leafIds.size} 个可选的叶子分类 | 提示: 仅最下级分类可选
+                            {leafIds.size} 个可选的叶子分类 | 提示: 仅最下级分类可选{assetType ? ` | 当前仅显示${assetType === 'fixed' ? '固定资产' : '无形资产'}` : ''}
                         </Text>
                         <Button variant="default" onClick={() => setModalOpen(false)}>
                             取消

@@ -52,8 +52,8 @@ const settingsItems = [
     href: '/settings/permissions',
   },
   {
-    title: '租户管理',
-    description: '管理多租户配置和 Schema 隔离',
+    title: '组织结构管理',
+    description: '管理多租户树状结构和 Schema 隔离',
     icon: IconBuildingStore,
     color: 'orange',
     href: '/settings/tenants',
