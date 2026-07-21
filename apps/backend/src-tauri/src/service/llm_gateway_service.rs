@@ -210,16 +210,33 @@ impl LLMRouter {
 
         let mut weighted = Vec::new();
         for p in providers {
-            let adapter = create_adapter(&p)?;
-            let weight = p.weight.unwrap_or(10);
+            // 查询该 Provider 的第一个已启用的 chat 模型作为默认模型
+            let default_model: Option<String> = sqlx::query_scalar(
+                sqlx::AssertSqlSafe(format!(
+                    "SELECT model_code FROM {}llm_model WHERE provider_id = $1 AND model_type = 'chat' AND enable = true AND deleted = 0 ORDER BY id LIMIT 1",
+                    prefix
+                ))
+            )
+            .bind(p.id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("查询默认模型失败: {}", e))?;
 
-            weighted.push(WeightedProvider {
-                provider_id: p.id,
-                provider_code: p.provider_code.clone(),
-                adapter: std::sync::Arc::new(adapter),
-                weight,
-                model_type: "chat".to_string(),
-            });
+            match create_adapter_with_model(&p, default_model.as_deref()) {
+                Ok(adapter) => {
+                    let weight = p.weight.unwrap_or(10);
+                    weighted.push(WeightedProvider {
+                        provider_id: p.id,
+                        provider_code: p.provider_code.clone(),
+                        adapter: std::sync::Arc::new(adapter),
+                        weight,
+                        model_type: "chat".to_string(),
+                    });
+                }
+                Err(e) => {
+                    error!("跳过 Provider {} ({}): {}", p.id, p.provider_code, e);
+                }
+            }
         }
 
         let mut lb = self.load_balancer.lock().unwrap();
@@ -227,10 +244,48 @@ impl LLMRouter {
         Ok(())
     }
 
-    /// 调用 Chat
-    pub async fn chat(&self, request: LLMChatRequest) -> Result<LLMChatResponse, String> {
-        let provider_id = None; // 由负载均衡器选择
+    /// 获取所有可用的 chat provider ID 列表
+    fn get_chat_provider_ids(&self) -> Vec<i64> {
+        let lb = self.load_balancer.lock().unwrap();
+        lb.providers
+            .iter()
+            .filter(|p| p.model_type == "chat")
+            .map(|p| p.provider_id)
+            .collect()
+    }
 
+    /// 使用指定 provider 调用 Chat（内部方法，不锁熔断器）
+    async fn chat_with_provider(
+        &self,
+        request: LLMChatRequest,
+        provider_id: i64,
+    ) -> Result<LLMChatResponse, String> {
+        let adapter = {
+            let lb = self.load_balancer.lock().unwrap();
+            lb.providers
+                .iter()
+                .find(|p| p.provider_id == provider_id)
+                .map(|p| p.adapter.clone())
+        };
+
+        let adapter = match adapter {
+            Some(a) => a,
+            None => return Err("指定的 Provider 不可用".to_string()),
+        };
+
+        let result = adapter.chat(request).await;
+
+        let mut lb = self.load_balancer.lock().unwrap();
+        match &result {
+            Ok(_) => lb.record_success(provider_id),
+            Err(_) => lb.record_failure(provider_id),
+        }
+
+        result
+    }
+
+    /// 调用 Chat（支持多 Provider 自动故障转移）
+    pub async fn chat(&self, request: LLMChatRequest) -> Result<LLMChatResponse, String> {
         // 检查熔断器
         {
             let cb = self.circuit_breaker.lock().unwrap();
@@ -239,31 +294,36 @@ impl LLMRouter {
             }
         }
 
-        // 选择 Provider
-        let selected = {
-            let mut lb = self.load_balancer.lock().unwrap();
-            lb.select("chat", provider_id)?.clone()
-        };
+        // 获取所有可用的 chat provider
+        let provider_ids = self.get_chat_provider_ids();
+        if provider_ids.is_empty() {
+            return Err("没有可用的 Provider".to_string());
+        }
 
-        let start = Instant::now();
-        let result = selected.adapter.chat(request).await;
+        let mut last_error = String::new();
 
-        let duration = start.elapsed().as_millis() as i32;
-        let mut cb = self.circuit_breaker.lock().unwrap();
-        let mut lb = self.load_balancer.lock().unwrap();
-
-        match &result {
-            Ok(_) => {
-                cb.record_success();
-                lb.record_success(selected.provider_id);
-            }
-            Err(_) => {
-                cb.record_failure();
-                lb.record_failure(selected.provider_id);
+        // 逐个尝试每个 provider，直到成功
+        for &pid in &provider_ids {
+            info!("尝试调用 Provider {}", pid);
+            match self.chat_with_provider(request.clone(), pid).await {
+                Ok(resp) => {
+                    info!("Provider {} 调用成功", pid);
+                    // 成功时重置熔断器
+                    let mut cb = self.circuit_breaker.lock().unwrap();
+                    cb.record_success();
+                    return Ok(resp);
+                }
+                Err(e) => {
+                    error!("Provider {} 调用失败: {}", pid, e);
+                    last_error = e;
+                    // 记录失败到熔断器
+                    let mut cb = self.circuit_breaker.lock().unwrap();
+                    cb.record_failure();
+                }
             }
         }
 
-        result
+        Err(format!("所有 LLM Provider 都不可用: {}", last_error))
     }
 
     /// 调用 Embedding
@@ -292,8 +352,11 @@ impl LLMRouter {
 
 // ======================== 适配器工厂 ========================
 
-/// 根据厂商配置创建对应的适配器实例
-pub fn create_adapter(provider: &LlmProvider) -> Result<Box<dyn LLMProviderAdapter>, String> {
+/// 根据厂商配置创建适配器实例（使用数据库中的默认模型）
+pub fn create_adapter_with_model(
+    provider: &LlmProvider,
+    default_model: Option<&str>,
+) -> Result<Box<dyn LLMProviderAdapter>, String> {
     let base_url = provider
         .base_url
         .clone()
@@ -312,23 +375,49 @@ pub fn create_adapter(provider: &LlmProvider) -> Result<Box<dyn LLMProviderAdapt
         None => String::new(),
     };
 
+    // 根据 provider_code 选择默认模型
+    let model = default_model
+        .unwrap_or_else(|| get_default_model(&provider.provider_code))
+        .to_string();
+
     match provider.provider_code.as_str() {
         "openai" => Ok(Box::new(adapters::OpenAIAdapter::new(
             &api_key,
             &base_url,
             &provider.provider_code,
+            &model,
         ))),
-        "qwen" | "ollama" => {
+        "qwen" | "ollama" | "volcengine" | "deepseek" | "tencent" => {
             // OpenAI 兼容格式
             Ok(Box::new(adapters::OpenAIAdapter::new(
                 &api_key,
                 &base_url,
                 &provider.provider_code,
+                &model,
             )))
         }
         "claude" => Ok(Box::new(adapters::ClaudeAdapter::new(&api_key, &base_url))),
         _ => Err(format!("不支持的厂商类型: {}", provider.provider_code)),
     }
+}
+
+/// 根据厂商代码获取默认模型名（当数据库中未配置时使用）
+fn get_default_model(provider_code: &str) -> &'static str {
+    match provider_code {
+        "openai" => "gpt-4o",
+        "deepseek" => "deepseek-v4-flash",
+        "qwen" => "qwen-turbo",
+        "volcengine" => "doubao-lite-32k",
+        "tencent" => "hunyuan-lite",
+        "ollama" => "llama3.2",
+        "claude" => "claude-3-5-sonnet-20241022",
+        _ => "gpt-4o",
+    }
+}
+
+/// 根据厂商配置创建对应的适配器实例（向后兼容，不使用默认模型时使用 hardcoded 值）
+pub fn create_adapter(provider: &LlmProvider) -> Result<Box<dyn LLMProviderAdapter>, String> {
+    create_adapter_with_model(provider, None)
 }
 
 fn get_default_base_url(provider_code: &str) -> String {
@@ -338,6 +427,7 @@ fn get_default_base_url(provider_code: &str) -> String {
         "qwen" => "https://dashscope.aliyuncs.com".to_string(),
         "volcengine" => "https://ark.cn-beijing.volces.com".to_string(),
         "tencent" => "https://api.hunyuan.cloud.tencent.com".to_string(),
+        "deepseek" => "https://api.deepseek.com".to_string(),
         "ollama" => "http://localhost:11434".to_string(),
         _ => "http://localhost:11434".to_string(),
     }
@@ -353,15 +443,22 @@ pub mod adapters {
         api_key: String,
         base_url: String,
         provider_code: String,
+        default_model: String,
         http_client: reqwest::Client,
     }
 
     impl OpenAIAdapter {
-        pub fn new(api_key: &str, base_url: &str, provider_code: &str) -> Self {
+        pub fn new(
+            api_key: &str,
+            base_url: &str,
+            provider_code: &str,
+            default_model: &str,
+        ) -> Self {
             Self {
                 api_key: api_key.to_string(),
                 base_url: base_url.trim_end_matches('/').to_string(),
                 provider_code: provider_code.to_string(),
+                default_model: default_model.to_string(),
                 http_client: reqwest::Client::new(),
             }
         }
@@ -387,8 +484,9 @@ pub mod adapters {
                 })
                 .collect();
 
+            let model_name = request.model.unwrap_or_else(|| self.default_model.clone());
             let body = serde_json::json!({
-                "model": request.model.unwrap_or_else(|| "gpt-4o".to_string()),
+                "model": model_name,
                 "messages": messages,
                 "temperature": request.temperature.unwrap_or(0.7),
                 "max_tokens": request.max_tokens.unwrap_or(2048),

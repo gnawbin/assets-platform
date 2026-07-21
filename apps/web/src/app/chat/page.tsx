@@ -17,6 +17,8 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { notifications } from '@mantine/notifications';
 import MessageBubble from '@/components/Chat/MessageBubble';
+// SSE 流式对话 Hook（当前未接入，后续可替换 handleSend）
+// import { useChatStream } from '@/hooks/useChatStream';
 
 export default function ChatPage() {
     const { user } = useAuthStore();
@@ -31,6 +33,7 @@ export default function ChatPage() {
     const [loading, setLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isNewConversation, setIsNewConversation] = useState(false);
     const viewport = useRef<HTMLDivElement>(null);
 
     const loadConvList = useCallback(async () => {
@@ -68,6 +71,7 @@ export default function ChatPage() {
         setCurrentConvId(null);
         setMessages([]);
         setInput('');
+        setIsNewConversation(true);
     };
 
     const handleSend = async () => {
@@ -86,6 +90,7 @@ export default function ChatPage() {
             } else {
                 resp = await createConversation({ userId: user.id.toString(), question });
                 setCurrentConvId(resp.convId);
+                setIsNewConversation(false);
                 await loadConvList();
             }
 
@@ -170,7 +175,7 @@ export default function ChatPage() {
 
                     {/* 右侧对话区域 */}
                     <Card withBorder padding="lg" radius="md" style={{ flex: 1 }}>
-                        {currentConvId || messages.length > 0 ? (
+                        {currentConvId || messages.length > 0 || isNewConversation ? (
                             <Stack gap="md" style={{ height: 600 }}>
                                 <ScrollArea h={500} viewportRef={viewport}>
                                     {messages.length === 0 ? (

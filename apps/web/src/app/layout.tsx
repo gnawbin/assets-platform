@@ -71,8 +71,8 @@ export default function RootLayout({
       return;
     }
 
-    // 如果未登录且不在登录页面，重定向到登录页
-    if (!isLoggedIn && pathname !== '/login') {
+    // 如果未登录且不在登录/注册页面，重定向到登录页
+    if (!isLoggedIn && pathname !== '/login' && pathname !== '/register') {
       logger.info('未登录，重定向到登录页');
       router.push('/login');
     }

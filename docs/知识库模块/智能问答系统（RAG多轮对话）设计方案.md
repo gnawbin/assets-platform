@@ -16,6 +16,7 @@
 7. [API 接口设计](#7-api-接口设计)
 8. [前端交互设计](#8-前端交互设计)
 9. [实施路线图](#9-实施路线图)
+10. [附录：关于 langchain-rust 集成的评估](#10-附录关于-langchain-rust-集成的评估)
 
 ---
 
@@ -454,311 +455,32 @@ ORDER BY dc.embedding <=> $1::vector  -- 余弦距离升序
 LIMIT $4;  -- Top-K
 ```
 
-### 4.3 Rust RAG 检索器实现
+### 4.3 当前 RAG 检索器实现（`rag_service.rs`）
+
+当前实现使用 SQL 查询替代了向量检索（未启用 pgvector 时），直接按 `ORDER BY dc.id` 返回最新分片：
 
 ```rust
-/// RAG 检索结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChunkResult {
-    pub chunk_id: i64,
-    pub chunk_text: String,
-    pub chunk_index: i32,
-    pub title: String,
-    pub okf_type: String,
-    pub asset_id: i64,
-    pub similarity: f64,
-    pub token_count: i32,
-}
-
-/// RAG 检索参数
-#[derive(Debug, Clone)]
-pub struct RetrieveParams {
-    pub question: String,              // 用户问题
-    pub bind_tree_node_id: Option<i64>, // 绑定的知识树目录ID
-    pub top_k: i32,                     // 返回 Top-K 结果
-    pub max_tokens: i32,                // 最大 Token 数（用于上下文裁剪）
-    pub okf_type_filter: Option<String>, // OKF 类型过滤
-    pub min_similarity: f64,            // 最低相似度阈值
-}
-
-/// RAG 检索器
-pub struct RAGRetriever {
-    pool: PgPool,
-    embed_provider: Arc<dyn LLMProviderAdapter>,  // LLM 适配器（用于生成向量）
-}
+pub struct RAGRetriever;
 
 impl RAGRetriever {
-    /// 执行 RAG 检索
-    pub async fn retrieve(&self, params: &RetrieveParams) -> Result<Vec<ChunkResult>, String> {
-        // 1. 生成问题向量
-        let embedding = self.generate_embedding(&params.question).await?;
-        
-        // 2. 语义检索
-        let chunks = self.semantic_search(&embedding, params).await?;
-        
-        // 3. 过滤低相似度结果
-        let filtered: Vec<ChunkResult> = chunks
-            .into_iter()
-            .filter(|c| c.similarity >= params.min_similarity)
-            .collect();
-        
-        // 4. Token 预算裁剪
-        let trimmed = self.trim_by_token_budget(filtered, params.max_tokens);
-        
-        Ok(trimmed)
-    }
-    
-    /// 生成问题向量
-    async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>, String> {
-        let request = LLMEmbeddingRequest {
-            input: vec![text.to_string()],
-            model: String::new(),  // 由 LLM Router 选择默认模型
-            user_id: None,
-        };
-        let response = self.embed_provider.embedding(request).await?;
-        
-        response.embeddings
-            .into_iter()
-            .next()
-            .ok_or_else(|| "生成向量失败：返回为空".to_string())
-    }
-    
-    /// 语义检索
-    async fn semantic_search(
-        &self,
-        embedding: &[f32],
-        params: &RetrieveParams,
-    ) -> Result<Vec<ChunkResult>, String> {
+    pub async fn retrieve(params: &RetrieveParams) -> Result<Vec<ChunkResult>, String> {
+        let pool = database::get_read_pool()?;
         let prefix = database::schema_prefix();
         
-        let sql = format!(
-            r#"SELECT 
-                dc.id, dc.chunk_text, dc.chunk_index,
-                COALESCE(dc.title, '') AS title,
-                COALESCE(dc.okf_type, '') AS okf_type,
-                dc.asset_id, dc.token_count,
-                1 - (dc.embedding <=> $1::vector) AS similarity
+        let sql = format!(r#"
+            SELECT dc.id, dc.chunk_text, dc.chunk_index,
+                   COALESCE(dc.title, '') AS title,
+                   COALESCE(dc.okf_type, '') AS okf_type,
+                   dc.asset_id, dc.token_count, 0.0 AS similarity
             FROM {}document_chunk dc
             WHERE dc.deleted = 0
-                AND ($2::BIGINT IS NULL OR dc.tree_node_id IN (
-                    WITH RECURSIVE sub_tree AS (
-                        SELECT id FROM {}knowledge_tree WHERE id = $2 AND deleted = 0
-                        UNION ALL
-                        SELECT kt.id FROM {}knowledge_tree kt
-                        JOIN sub_tree st ON kt.parent_id = st.id
-                        WHERE kt.deleted = 0
-                    )
-                    SELECT id FROM sub_tree
-                ))
-                AND ($3::VARCHAR IS NULL OR dc.okf_type = $3)
-            ORDER BY dc.embedding <=> $1::vector
-            LIMIT $4"#,
-            prefix, prefix, prefix
-        );
+                -- 限定目录（递归子目录）
+                AND ($1::BIGINT IS NULL OR dc.tree_node_id IN (WITH RECURSIVE ...))
+                AND ($2::VARCHAR IS NULL OR dc.okf_type = $2)
+            ORDER BY dc.id
+            LIMIT $3"#, prefix, prefix, prefix);
         
-        let embedding_str: String = embedding
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        let embedding_pg = format!("[{}]", embedding_str);
-        
-        struct DbChunk {
-            id: i64,
-            chunk_text: String,
-            chunk_index: i32,
-            title: String,
-            okf_type: String,
-            asset_id: i64,
-            token_count: Option<i32>,
-            similarity: Option<f64>,
-        }
-        
-        let rows = sqlx::query_as::<_, DbChunk>(&sql)
-            .bind(&embedding_pg)
-            .bind(params.bind_tree_node_id)
-            .bind(&params.okf_type_filter)
-            .bind(params.top_k)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| format!("RAG 检索失败: {}", e))?;
-        
-        Ok(rows
-            .into_iter()
-            .map(|r| ChunkResult {
-                chunk_id: r.id,
-                chunk_text: r.chunk_text,
-                chunk_index: r.chunk_index,
-                title: r.title,
-                okf_type: r.okf_type,
-                asset_id: r.asset_id,
-                similarity: r.similarity.unwrap_or(0.0),
-                token_count: r.token_count.unwrap_or(0),
-            })
-            .collect())
-    }
-    
-    /// 按 Token 预算裁剪
-    fn trim_by_token_budget(&self, mut chunks: Vec<ChunkResult>, max_tokens: i32) -> Vec<ChunkResult> {
-        let mut total = 0;
-        chunks.retain(|c| {
-            if total >= max_tokens {
-                return false;
-            }
-            total += c.token_count.max(50);  // 至少每个分片算 50 tokens
-            true
-        });
-        chunks
-    }
-}
-```
-
-### 4.4 上下文构建器
-
-```rust
-/// 上下文构建器
-pub struct ContextBuilder {
-    max_context_tokens: i32,     // RAG 上下文最大 Token
-    max_history_tokens: i32,     // 历史消息最大 Token
-    max_memory_tokens: i32,      // 记忆最大 Token
-    max_system_tokens: i32,      // 系统提示最大 Token
-}
-
-impl ContextBuilder {
-    /// 构建完整 LLM Prompt
-    pub async fn build_prompt(
-        &self,
-        question: &str,
-        conv_id: i64,
-        user_id: i64,
-        chunks: &[ChunkResult],
-        memories: &[MemoryItem],
-    ) -> Result<Vec<ChatMessage>, String> {
-        let mut messages = Vec::new();
-        
-        // 1. 系统提示词
-        let system_prompt = self.build_system_prompt(chunks);
-        messages.push(ChatMessage {
-            role: "system".to_string(),
-            content: system_prompt,
-        });
-        
-        // 2. 多轮对话历史（最近 N 轮，裁剪到 max_history_tokens）
-        let history = self.get_conversation_history(conv_id).await?;
-        messages.extend(history);
-        
-        // 3. 用户记忆（如果有）
-        if !memories.is_empty() {
-            let memory_text = self.format_memories(memories);
-            messages.push(ChatMessage {
-                role: "system".to_string(),
-                content: format!("【用户相关记忆】\n{}", memory_text),
-            });
-        }
-        
-        // 4. 当前用户问题
-        messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: question.to_string(),
-        });
-        
-        Ok(messages)
-    }
-    
-    /// 构建系统提示词（包含 RAG 上下文）
-    fn build_system_prompt(&self, chunks: &[ChunkResult]) -> String {
-        let mut prompt = String::from(
-            "你是一个知识库智能助手。请基于以下参考资料回答用户问题。\n\n"
-        );
-        
-        prompt.push_str("【参考资料】\n");
-        for (i, chunk) in chunks.iter().enumerate() {
-            prompt.push_str(&format!(
-                "[来源 {}] 《{}》 (类型: {})\n{}\n\n",
-                i + 1,
-                chunk.title,
-                self.okf_type_label(&chunk.okf_type),
-                chunk.chunk_text
-            ));
-        }
-        
-        prompt.push_str(
-            "回答要求：\n\
-            1. 优先使用参考资料回答，如果资料不足以回答请明确说明\n\
-            2. 引用资料时请标注来源编号，例如「根据[来源1]所述...」\n\
-            3. 如果用户问题与知识库无关，可以直接回答\n\
-            4. 使用中文回答，保持简洁专业"
-        );
-        
-        prompt
-    }
-    
-    fn okf_type_label(&self, okf_type: &str) -> &str {
-        match okf_type {
-            "raw_source" => "原始素材",
-            "concept" => "概念",
-            "fact" => "事实",
-            "rule" => "规则",
-            "param" => "参数",
-            "process" => "流程",
-            "case" => "案例",
-            _ => "知识",
-        }
-    }
-    
-    /// 获取多轮对话历史
-    async fn get_conversation_history(&self, conv_id: i64) -> Result<Vec<ChatMessage>, String> {
-        // 查询最近的消息（按时间 ASC）
-        let pool = database::get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
-        let prefix = database::schema_prefix();
-        
-        let sql = format!(
-            "SELECT role, content, input_tokens, output_tokens FROM {}message \
-             WHERE conv_id = $1 AND deleted = 0 \
-             ORDER BY created_at ASC \
-             LIMIT 20",  // 最多取最近 20 轮
-            prefix
-        );
-        
-        struct MsgRow {
-            role: String,
-            content: String,
-            input_tokens: Option<i32>,
-            output_tokens: Option<i32>,
-        }
-        
-        let rows = sqlx::query_as::<_, MsgRow>(&sql)
-            .bind(conv_id)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| format!("查询历史消息失败: {}", e))?;
-        
-        let mut messages = Vec::new();
-        let mut total_tokens = 0;
-        
-        for row in rows {
-            let tokens = row.input_tokens.unwrap_or(0) + row.output_tokens.unwrap_or(0);
-            if total_tokens + tokens > self.max_history_tokens {
-                break;  // 超出历史预算，丢弃更早的消息
-            }
-            total_tokens += tokens;
-            
-            messages.push(ChatMessage {
-                role: row.role,
-                content: row.content,
-            });
-        }
-        
-        Ok(messages)
-    }
-    
-    /// 格式化记忆
-    fn format_memories(&self, memories: &[MemoryItem]) -> String {
-        memories
-            .iter()
-            .map(|m| format!("- [{}] {} (重要性: {:.1})", m.category, m.content, m.importance))
-            .collect::<Vec<_>>()
-            .join("\n")
+        // 执行查询返回 ChunkResult
     }
 }
 ```
@@ -785,216 +507,61 @@ stateDiagram-v2
     已删除 --> [*]
 ```
 
-### 5.2 标题自动生成策略
-
-```typescript
-/// 会话标题自动生成规则
-function generateConversationTitle(firstQuestion: string): string {
-    // 1. 取前 30 个字符
-    let title = firstQuestion.trim().slice(0, 30);
-    
-    // 2. 如果包含换行或问号，截断
-    const breakIdx = Math.min(
-        title.indexOf('\n') > -1 ? title.indexOf('\n') : 30,
-        title.indexOf('？') > -1 ? title.indexOf('？') + 1 : 30,
-        title.indexOf('?') > -1 ? title.indexOf('?') + 1 : 30,
-    );
-    
-    if (breakIdx < 30) {
-        title = title.slice(0, breakIdx);
-    }
-    
-    // 3. 添加省略号如果被截断
-    if (title.length < firstQuestion.trim().length) {
-        title += '...';
-    }
-    
-    return title;
-}
-```
-
-### 5.3 Rust 会话服务
+### 5.2 当前会话服务实现（`conversation_service.rs`）
 
 ```rust
-/// 对话系统 Service
-pub struct ConversationService {
-    retriever: RAGRetriever,
-    context_builder: ContextBuilder,
-    llm_router: LLMRouter,
-    call_recorder: CallRecorder,
-    pool: PgPool,
-}
+pub struct ConversationService;
 
 impl ConversationService {
     /// 创建新会话并回答
     pub async fn create_conversation_and_answer(
-        &self,
         user_id: i64,
         question: &str,
         bind_tree_node_id: Option<i64>,
+        router: &LLMRouter,
     ) -> Result<ConversationResponse, String> {
         // 1. 创建会话
-        let title = generate_title(question);
-        let conv = self.insert_conversation(user_id, &title, bind_tree_node_id).await?;
-        
+        let conv = Self::insert_conversation(user_id, &title, bind_tree_node_id).await?;
         // 2. 保存用户消息
-        self.insert_message(conv.id, "user", question, None, None, None, None, 0, 0).await?;
-        
-        // 3. 执行 RAG 检索
-        let params = RetrieveParams {
-            question: question.to_string(),
-            bind_tree_node_id,
-            top_k: 5,
-            max_tokens: 2000,
-            okf_type_filter: None,
-            min_similarity: 0.5,
+        Self::insert_message(conv.id, "user", question, ...).await?;
+        // 3. RAG 检索 + LLM 生成
+        let (answer, cited_ids) = Self::retrieve_and_answer(question, bind_tree_node_id, router).await?;
+        // 4. 保存 AI 消息并返回
+        Self::insert_message(conv.id, "assistant", &answer, ...).await?;
+        Ok(ConversationResponse { conv_id, answer, cited_assets, usage })
+    }
+    
+    /// 核心：RAG 检索 + LLM 调用（带降级）
+    async fn retrieve_and_answer(question, bind_tree_node_id, router) -> Result<(String, Vec<i64>), String> {
+        // 1. RAG 检索
+        let chunks = RAGRetriever::retrieve(&params).await?;
+        // 2. 刷新 Provider 列表
+        let _ = router.refresh_providers().await;
+        // 3. 构建 Prompt 并调用 LLM
+        let (system_prompt, user_msg) = Self::build_rag_prompt(question, &chunks);
+        let answer = match Self::generate_answer_with_llm(router, &system_prompt, &user_msg).await {
+            Ok(content) => content,
+            Err(e) => {
+                // 降级：直接拼接 RAG 结果
+                Self::build_rag_answer(question, &chunks)
+            }
         };
-        let chunks = self.retriever.retrieve(&params).await?;
-        
-        // 4. 召回用户记忆
-        let memories = self.memory_recall(user_id, 3).await?;
-        
-        // 5. 构建 Prompt
-        let messages = self.context_builder.build_prompt(
-            question, conv.id, user_id, &chunks, &memories,
-        ).await?;
-        
-        // 6. 调用 LLM
-        let llm_response = self.llm_router.chat(LLMChatRequest {
-            messages,
-            model: String::new(),   // 由 Router 选择
-            temperature: None,
-            max_tokens: None,
-            stream: Some(false),
-            user_id: Some(user_id),
-            conv_id: Some(conv.id),
-        }).await?;
-        
-        // 7. 解析引用
-        let (clean_answer, cited_ids) = self.parse_citations(&llm_response.content, &chunks);
-        
-        // 8. 保存 AI 消息（含引用信息）
-        self.insert_message(
-            conv.id,
-            "assistant",
-            &clean_answer,
-            None,
-            Some(&cited_ids),
-            Some(&serde_json::json!({
-                "model": llm_response.model,
-                "provider_id": llm_response.provider_id,
-                "model_id": llm_response.model_id,
-                "chunks_count": chunks.len(),
-            }).to_string()),
-            None,
-            llm_response.usage.input_tokens,
-            llm_response.usage.output_tokens,
-        ).await?;
-        
-        Ok(ConversationResponse {
-            conv_id: conv.id,
-            answer: clean_answer,
-            cited_assets: self.get_cited_asset_info(&cited_ids).await?,
-            usage: llm_response.usage,
-        })
+        Ok((answer, cited_ids))
     }
-    
-    /// 继续已有会话
-    pub async fn continue_conversation(
-        &self,
-        conv_id: i64,
-        user_id: i64,
-        question: &str,
-    ) -> Result<ConversationResponse, String> {
-        // 1. 验证会话所有权
-        let conv = self.get_conversation_by_id(conv_id).await?;
-        if conv.user_id != user_id {
-            return Err("无权访问此会话".to_string());
-        }
-        
-        // 2. 保存用户消息
-        self.insert_message(conv_id, "user", question, None, None, None, None, 0, 0).await?;
-        
-        // 3-8. 与创建流程相同
-        // ... (复用上述逻辑)
-        
-        unimplemented!()
-    }
-    
-    /// 解析引用标记
-    fn parse_citations(&self, answer: &str, chunks: &[ChunkResult]) -> (String, Vec<i64>) {
-        let mut cited_ids = Vec::new();
-        let mut clean = answer.to_string();
-        
-        // 查找 [来源 N] 标记
-        let re = regex::Regex::new(r"\[来源 (\d+)\]").unwrap();
-        for cap in re.captures_iter(answer) {
-            if let Ok(idx) = cap[1].parse::<usize>() {
-                if idx > 0 && idx <= chunks.len() {
-                    let asset_id = chunks[idx - 1].asset_id;
-                    if !cited_ids.contains(&asset_id) {
-                        cited_ids.push(asset_id);
-                    }
-                }
-            }
-        }
-        
-        // 替换为 Markdown 链接格式（前端渲染跳转）
-        clean = re.replace_all(&clean, |caps: &regex::Captures| {
-            if let Ok(idx) = caps[1].parse::<usize>() {
-                if idx > 0 && idx <= chunks.len() {
-                    let chunk = &chunks[idx - 1];
-                    format!("[📎 {}](asset:{})", chunk.title, chunk.asset_id)
-                } else {
-                    caps[0].to_string()
-                }
-            } else {
-                caps[0].to_string()
-            }
-        }).to_string();
-        
-        (clean, cited_ids)
-    }
-    
-    /// 生成标题
-    fn generate_title(question: &str) -> String {
-        let trimmed = question.trim();
-        let max_len = 30;
-        if trimmed.chars().count() <= max_len {
-            return trimmed.to_string();
-        }
-        // 取前 30 个字符
+}
+```
+
+### 5.3 标题自动生成
+
+```rust
+fn generate_title(question: &str) -> String {
+    let trimmed = question.trim();
+    let max_len = 30;
+    if trimmed.chars().count() <= max_len {
+        trimmed.to_string()
+    } else {
         let title: String = trimmed.chars().take(max_len).collect();
         format!("{}...", title)
-    }
-    
-    /// 插入会话
-    async fn insert_conversation(&self, user_id: i64, title: &str, bind_tree_node_id: Option<i64>) -> Result<Conversation, String> {
-        // INSERT RETURNING ...
-        unimplemented!()
-    }
-    
-    /// 插入消息
-    async fn insert_message(
-        &self, conv_id: i64, role: &str, content: &str,
-        audio_url: Option<&str>, reference_asset_ids: Option<&Vec<i64>>,
-        metadata: Option<&str>, reference_text: Option<&str>,
-        input_tokens: i32, output_tokens: i32,
-    ) -> Result<i64, String> {
-        // INSERT RETURNING id ...
-        unimplemented!()
-    }
-    
-    /// 获取引用资产信息
-    async fn get_cited_asset_info(&self, asset_ids: &[i64]) -> Result<Vec<AssetInfo>, String> {
-        // SELECT id, title, okf_type FROM knowledge_asset WHERE id = ANY($1)
-        unimplemented!()
-    }
-    
-    /// 记忆召回
-    async fn memory_recall(&self, user_id: i64, top_n: i32) -> Result<Vec<MemoryItem>, String> {
-        // SELECT content, category, importance FROM memory WHERE user_id = $1 AND next_review_at < NOW()
-        unimplemented!()
     }
 }
 ```
@@ -1003,455 +570,70 @@ impl ConversationService {
 
 ## 6. 溯源引用系统
 
-### 6.1 引用数据流
+### 6.1 引用标注机制
 
-```mermaid
-flowchart LR
-    subgraph RAG检索阶段
-        A[检索到 Top-K 分片] --> B[每个分片含 asset_id]
-        B --> C[拼接 Prompt: [来源1] [来源2]...]
-    end
-    
-    subgraph LLM回答阶段
-        C --> D[LLM 回答时引用来源]
-        D --> E["根据[来源1]所述..."]
-    end
-    
-    subgraph 解析阶段
-        E --> F[CitationParser 解析]
-        F --> G[提取被引用的 asset_id 列表]
-        F --> H[生成 Markdown 链接]
-    end
-    
-    subgraph 持久化阶段
-        G --> I[存入 message.reference_asset_ids]
-        H --> J[存入 message.content（已替换为链接）]
-    end
-    
-    subgraph 前端展示
-        I --> K[引用面板展示来源文档列表]
-        J --> L[回答中的 📎 可点击跳转]
-        K --> M[点击跳转到知识资产详情页]
-        L --> M
-    end
-```
+LLM 回答后，prompt 要求模型标注 `[来源 N]` 标记，后端正则提取引用的资产 ID 保存到 `reference_asset_ids` 字段。
 
-### 6.2 引用格式规范
+```rust
+fn build_rag_prompt(question: &str, chunks: &[ChunkResult]) -> (String, String) {
+    // 构建 system prompt 包含 RAG 上下文
+    // 要求 LLM 标注来源编号，如「根据来源1」
+}
 
-LLM 回答时要求使用 `[来源 N]` 标记引用，系统自动解析：
-
-```
-用户提问：采购资产的审批流程是什么？
-
-AI 回答：
-根据知识库中的相关资料，采购资产的审批流程如下：
-
-1. **需求提出**：使用部门填写采购申请单，注明资产名称、规格、数量、预算等信息。[来源1]
-2. **部门审批**：部门负责人审核采购需求的合理性和预算可行性。[来源1]
-3. **财务审核**：财务部门审核预算是否充足。[来源2]
-4. **领导审批**：根据金额大小进入不同审批层级：
-   - 5万元以下：部门分管领导审批
-   - 5-50万元：总经理审批
-   - 50万元以上：董事会审批 [来源2][来源3]
-5. **采购执行**：审批通过后，采购部门执行采购。[来源1]
-
-> 📎 引用来源：
-> - [来源1] 《资产采购流程规范》· 流程规则
-> - [来源2] 《审批权限管理制度》· 规则
-> - [来源3] 《合同管理办法》· 案例
-```
-
-解析后存储的引用结构：
-
-```json
-{
-    "reference_asset_ids": [101, 205, 308],
-    "reference_text": "- 《资产采购流程规范》· 流程规则：第2.3条...\n- 《审批权限管理制度》· 规则：第5条...\n- 《合同管理办法》· 案例：采购合同示例...",
-    "reference_assets": [
-        {"id": "101", "title": "资产采购流程规范", "okf_type": "process"},
-        {"id": "205", "title": "审批权限管理制度", "okf_type": "rule"},
-        {"id": "308", "title": "合同管理办法", "okf_type": "case"}
-    ]
+// 引用资产信息查询
+async fn get_cited_asset_info(asset_ids: &[i64]) -> Result<Vec<AssetInfo>, String> {
+    // 从 knowledge_asset 表查询 title/okf_type
 }
 ```
 
-### 6.3 前端引用渲染
+### 6.2 引用数据结构
 
 ```typescript
-/// 引用标记组件
-interface CitationProps {
-    assetId: string;
-    title: string;
-    children: React.ReactNode;
+interface AssetInfo {
+    id: string;       // 资产 ID
+    title: string;    // 资产标题
+    okfType: string;  // OKF 类型
 }
-
-const CitationLink: React.FC<CitationProps> = ({ assetId, title, children }) => (
-    <Anchor
-        href={`/knowledge-asset?id=${assetId}`}
-        target="_blank"
-        style={{
-            color: 'var(--mantine-color-blue-6)',
-            textDecoration: 'underline',
-            cursor: 'pointer',
-        }}
-        title={`查看：${title}`}
-    >
-        {children}
-    </Anchor>
-);
-
-/// 引用面板
-interface CitationPanelProps {
-    citedAssets: AssetInfo[];      // 被引用的资产列表
-    referenceText: string;         // 引用原文快照
-}
-
-const CitationPanel: React.FC<CitationPanelProps> = ({ citedAssets, referenceText }) => (
-    <Card withBorder padding="sm" mt="sm" style={{ backgroundColor: '#f8f9fa' }}>
-        <Text size="sm" fw={600} mb="xs">
-            📎 引用来源 ({citedAssets.length})
-        </Text>
-        {citedAssets.map((asset) => (
-            <Group key={asset.id} gap="xs" mb={4}>
-                <Badge variant="light" color="blue" size="xs">
-                    {okfTypeLabel(asset.okf_type)}
-                </Badge>
-                <Anchor
-                    href={`/knowledge-asset?id=${asset.id}`}
-                    target="_blank"
-                    size="sm"
-                >
-                    {asset.title}
-                </Anchor>
-            </Group>
-        ))}
-        {referenceText && (
-            <>
-                <Divider my="xs" />
-                <Text size="xs" c="dimmed" lineClamp={3}>
-                    {referenceText}
-                </Text>
-            </>
-        )}
-    </Card>
-);
-
-/// 消息气泡（含引用）
-interface MessageBubbleProps {
-    role: 'user' | 'assistant';
-    content: string;                 // Markdown 内容（含 [📎 title](asset:id) 链接）
-    citedAssets?: AssetInfo[];
-    referenceText?: string;
-    metadata?: {
-        model?: string;
-        duration_ms?: number;
-    };
-}
-
-const MessageBubble: React.FC<MessageBubbleProps> = ({
-    role, content, citedAssets, referenceText, metadata,
-}) => {
-    const isUser = role === 'user';
-    
-    return (
-        <Group
-            justify={isUser ? 'flex-end' : 'flex-start'}
-            align="flex-start"
-            mb="md"
-        >
-            {!isUser && <Avatar color="violet" radius="xl">AI</Avatar>}
-            
-            <Paper
-                withBorder
-                p="md"
-                style={{
-                    maxWidth: '70%',
-                    backgroundColor: isUser
-                        ? 'var(--mantine-color-blue-light)'
-                        : 'white',
-                }}
-            >
-                {/* Markdown 渲染（含引用链接自动可点击） */}
-                <MarkdownRenderer content={content} />
-                
-                {/* 引用面板 */}
-                {citedAssets && citedAssets.length > 0 && (
-                    <CitationPanel
-                        citedAssets={citedAssets}
-                        referenceText={referenceText || ''}
-                    />
-                )}
-                
-                {/* 模型元数据 */}
-                {metadata && (
-                    <Text size="xs" c="dimmed" ta="right" mt="xs">
-                        {metadata.model} · {metadata.duration_ms}ms
-                    </Text>
-                )}
-            </Paper>
-            
-            {isUser && <Avatar color="blue" radius="xl">👤</Avatar>}
-        </Group>
-    );
-};
 ```
 
 ---
 
 ## 7. API 接口设计
 
-### 7.1 Tauri Command 定义
+### 7.1 Tauri Command 列表
 
-```rust
-// ======================== 对话管理 ========================
+| Command | 方法 | 说明 |
+|---------|------|------|
+| `create_conversation` | POST | 创建新会话并发送第一条消息 |
+| `send_message` | POST | 继续已有会话 |
+| `get_conversations` | GET | 获取会话列表 |
+| `get_conversation_messages` | GET | 获取会话消息历史 |
+| `update_conversation_title` | PUT | 更新会话标题 |
+| `delete_conversation` | DELETE | 删除会话 |
 
-/// 创建新会话并发送第一条消息
-#[tauri::command]
-pub async fn create_conversation(
-    userId: String,
-    question: String,
-    bindTreeNodeId: Option<String>,
-) -> Result<ConversationResponse, String> {
-    // ...
+### 7.2 请求/响应示例
+
+```json
+// create_conversation 请求
+{
+    "userId": "12345",
+    "question": "什么是固定资产折旧？",
+    "bindTreeNodeId": null
 }
 
-/// 继续已有会话
-#[tauri::command]
-pub async fn send_message(
-    convId: String,
-    userId: String,
-    question: String,
-) -> Result<ConversationResponse, String> {
-    // ...
-}
-
-/// 获取会话列表
-#[tauri::command]
-pub async fn get_conversations(
-    userId: String,
-    page: Option<i32>,
-    pageSize: Option<i32>,
-) -> Result<ConversationListResponse, String> {
-    // ...
-}
-
-/// 获取会话历史消息
-#[tauri::command]
-pub async fn get_conversation_messages(
-    convId: String,
-    page: Option<i32>,
-    pageSize: Option<i32>,
-) -> Result<Vec<MessageResponse>, String> {
-    // ...
-}
-
-/// 修改会话标题
-#[tauri::command]
-pub async fn update_conversation_title(
-    convId: String,
-    title: String,
-) -> Result<(), String> {
-    // ...
-}
-
-/// 修改会话绑定的知识树目录
-#[tauri::command]
-pub async fn update_conversation_bind_tree(
-    convId: String,
-    bindTreeNodeId: Option<String>,
-) -> Result<(), String> {
-    // ...
-}
-
-/// 删除会话（软删除）
-#[tauri::command]
-pub async fn delete_conversation(
-    convId: String,
-) -> Result<(), String> {
-    // ...
-}
-
-// ======================== 向量分片管理 ========================
-
-/// 对知识资产执行向量切片（文档解析后调用）
-#[tauri::command]
-pub async fn chunk_and_vectorize(
-    assetId: String,
-    chunkSize: Option<i32>,
-    chunkOverlap: Option<i32>,
-) -> Result<Vec<DocumentChunk>, String> {
-    // ...
-}
-
-/// 手动触发重新向量化
-#[tauri::command]
-pub async fn re_vectorize_asset(
-    assetId: String,
-) -> Result<(), String> {
-    // ...
-}
-
-// ======================== RAG 检索 ========================
-
-/// 手动测试 RAG 检索
-#[tauri::command]
-pub async fn test_rag_retrieval(
-    question: String,
-    bindTreeNodeId: Option<String>,
-    topK: Option<i32>,
-) -> Result<Vec<ChunkResult>, String> {
-    // ...
-}
-```
-
-### 7.2 前端 Service
-
-```typescript
-// ======================== 对话相关 ========================
-
-/** 创建新会话 */
-export function createConversation(params: {
-    userId: string;
-    question: string;
-    bindTreeNodeId?: string;
-}): Promise<ConversationResponse> {
-    return api.post('create_conversation', params);
-}
-
-/** 继续会话 */
-export function sendMessage(params: {
-    convId: string;
-    userId: string;
-    question: string;
-}): Promise<ConversationResponse> {
-    return api.post('send_message', params);
-}
-
-/** 获取会话列表 */
-export function getConversations(params: {
-    userId: string;
-    page?: number;
-    pageSize?: number;
-}): Promise<ConversationListResponse> {
-    return api.get('get_conversations', params);
-}
-
-/** 获取会话消息 */
-export function getConversationMessages(params: {
-    convId: string;
-    page?: number;
-    pageSize?: number;
-}): Promise<MessageResponse[]> {
-    return api.get('get_conversation_messages', params);
-}
-
-/** 更新会话标题 */
-export function updateConversationTitle(params: {
-    convId: string;
-    title: string;
-}): Promise<void> {
-    return api.put('update_conversation_title', params);
-}
-
-/** 更新会话绑定目录 */
-export function updateConversationBindTree(params: {
-    convId: string;
-    bindTreeNodeId?: string;
-}): Promise<void> {
-    return api.put('update_conversation_bind_tree', params);
-}
-
-/** 删除会话 */
-export function deleteConversation(convId: string): Promise<void> {
-    return api.delete('delete_conversation', { convId });
-}
-
-// ======================== 向量分片 ========================
-
-/** 对资产执行分片 + 向量化 */
-export function chunkAndVectorize(params: {
-    assetId: string;
-    chunkSize?: number;
-    chunkOverlap?: number;
-}): Promise<DocumentChunk[]> {
-    return api.post('chunk_and_vectorize', params);
-}
-
-/** 触发重新向量化 */
-export function reVectorizeAsset(assetId: string): Promise<void> {
-    return api.post('re_vectorize_asset', { assetId });
-}
-
-/** 测试 RAG 检索 */
-export function testRagRetrieval(params: {
-    question: string;
-    bindTreeNodeId?: string;
-    topK?: number;
-}): Promise<ChunkResult[]> {
-    return api.get('test_rag_retrieval', params);
-}
-
-// ======================== 类型定义 ========================
-
-export interface ConversationResponse {
-    convId: string;
-    answer: string;
-    citedAssets: AssetInfo[];
-    usage: TokenUsage;
-}
-
-export interface ConversationListResponse {
-    items: ConversationSummary[];
-    total: number;
-    page: number;
-    pageSize: number;
-}
-
-export interface ConversationSummary {
-    id: string;
-    title: string;
-    bindKnowledgeTreeId: string | null;
-    messageCount: number;
-    lastMessageAt: string;
-    createdAt: string;
-}
-
-export interface MessageResponse {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    citedAssets?: AssetInfo[];
-    referenceText?: string;
-    metadata?: {
-        model?: string;
-        durationMs?: number;
-    };
-    createdAt: string;
-}
-
-export interface AssetInfo {
-    id: string;
-    title: string;
-    okfType: string;
-    summary?: string;
-}
-
-export interface DocumentChunk {
-    id: string;
-    assetId: string;
-    chunkIndex: number;
-    chunkText: string;
-    tokenCount: number;
-    title: string;
-}
-
-export interface ChunkResult {
-    chunkId: string;
-    chunkText: string;
-    title: string;
-    okfType: string;
-    assetId: string;
-    similarity: number;
+// create_conversation 响应
+{
+    "convId": "67890",
+    "answer": "根据知识库中相关资料...\n...",
+    "citedAssets": [
+        { "id": "1001", "title": "固定资产折旧方法", "okfType": "concept" }
+    ],
+    "usage": {
+        "inputTokens": 45,
+        "outputTokens": 128,
+        "totalTokens": 173,
+        "cost": 0.0
+    }
 }
 ```
 
@@ -1462,199 +644,102 @@ export interface ChunkResult {
 ### 8.1 对话界面布局
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  💬 智能问答                                   [设置] │
-├─────────────────────────────────────────────────────┤
-│  ┌───────────┐  ┌─────────────────────────────────┐│
-│  │ 📋 会话列表  │  │          对话区域               ││
-│  │            │  │                                 ││
-│  │ 今日        │  │  2026-07-02                    ││
-│  │ ├ 📎 资产   │  │  ┌─────────────────────────┐   ││
-│  │ │  采购流程  │  │  │ 👤 采购资产的审批流程是  │   ││
-│  │ ├ 📎 合同   │  │  │   什么样的？              │   ││
-│  │ │  模板管理  │  │  └─────────────────────────┘   ││
-│  │            │  │  ┌─────────────────────────┐   ││
-│  │ 昨天        │  │  │ 🤖 根据知识库资料...     │   ││
-│  │ ├ 🔍 报废   │  │  │                        │   ││
-│  │ │  流程咨询  │  │  │ 1. 需求提出[📎 采购流程]│   ││
-│  │            │  │  │ 2. 部门审批[📎 采购流程]│   ││
-│  │ 更早        │  │  │ 3. 财务审核[📎 审批权限]│   ││
-│  │ ├ 🔍 维修   │  │  │ 4. 领导审批[📎 审批权限]│   ││
-│  │ │  费用标准  │  │  │ 5. 采购执行[📎 采购流程]│   ││
-│  │            │  │  │                        │   ││
-│  │ [+新对话]   │  │  │ ┌────────────────┐     │   ││
-│  │            │  │  │ │ 📎 引用来源(3)   │     │   ││
-│  │            │  │  │ │ ├ 流程 采购流程  │     │   ││
-│  │            │  │  │ │ ├ 规则 审批权限  │     │   ││
-│  │            │  │  │ │ └ 案例 合同管理  │     │   ││
-│  │            │  │  │ └────────────────┘     │   ││
-│  │            │  │  │                        │   ││
-│  │            │  │  │ gpt-4o · 1,234ms      │   ││
-│  │            │  │  └─────────────────────────┘   ││
-│  │            │  │                                 ││
-│  │            │  ├─────────────────────────────────┤│
-│  │            │  │ 📁 当前知识库: 全部     [切换]   ││
-│  │            │  │ [                         ] [🎤]││
-│  │            │  │ [      输入问题...        ] [📎]││
-│  │            │  │ [                         ] [➤]││
-│  └───────────┘  └─────────────────────────────────┘│
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────┐
+│  🤖 智能问答                                │
+├──────────────┬──────────────────────────────┤
+│  📋 会话列表  │                              │
+│   [+ 新对话]  │    根据《固定资产折旧方法》    │
+│              │    直线法是最常用的折旧方...    │
+│  📝 什么是... │                              │
+│  📝 如何计算  │    📎 [固定资产折旧方法]       │
+│              │                              │
+│              │  ┌─────────────────────────┐  │
+│              │  │ 输入问题...      [发送] │  │
+│              │  └─────────────────────────┘  │
+└──────────────┴──────────────────────────────┘
 ```
 
-### 8.2 知识库目录绑定交互
+### 8.2 状态管理
 
-```
-┌──────────────────────────────────┐
-│  选择检索范围                    │
-├──────────────────────────────────┤
-│  ☑ 全部知识库                   │
-│  ○ 限定目录:                    │
-│     ┌───────────────────────┐  │
-│     │ 📁 知识库              │  │
-│     │  ├ 📁 资产管理         │  │
-│     │  │  ├ 📄 采购流程      │  │
-│     │  │  ├ 📄 报废条件      │  │
-│     │  │  └ ⚡ 采购审批      │  │
-│     │  ├ 📁 合同模板         │  │
-│     │  └ 📁 上传文件         │  │
-│     └───────────────────────┘  │
-│                                │
-│  已选择: 资产管理及其子目录     │
-│  涵盖 3 个知识资产, 24 个分片  │
-│                                │
-│          [取消]  [确认]        │
-└──────────────────────────────────┘
-```
-
-### 8.3 流式输出体验
-
-```typescript
-/// 流式输出钩子
-function useStreamAnswer() {
-    const [answer, setAnswer] = useState('');
-    const [isStreaming, setIsStreaming] = useState(false);
-    const answerRef = useRef('');
-    
-    const startStream = useCallback(async (convId: string, question: string) => {
-        setIsStreaming(true);
-        answerRef.current = '';
-        setAnswer('');
-        
-        try {
-            // 模拟 SSE 流式接收
-            const eventSource = new EventSource(`/api/chat/stream?convId=${convId}&question=${encodeURIComponent(question)}`);
-            
-            eventSource.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'token') {
-                    answerRef.current += data.text;
-                    setAnswer(answerRef.current);
-                } else if (data.type === 'done') {
-                    eventSource.close();
-                    setIsStreaming(false);
-                } else if (data.type === 'citations') {
-                    // 完成时返回引用信息
-                    setCitedAssets(data.citedAssets);
-                }
-            };
-            
-            eventSource.onerror = () => {
-                eventSource.close();
-                setIsStreaming(false);
-            };
-        } catch (err) {
-            setIsStreaming(false);
-        }
-    }, []);
-    
-    return { answer, isStreaming, startStream };
-}
-```
+| 状态 | 说明 | 处理 |
+|------|------|------|
+| `loading` | 加载会话列表 | List 区域显示 Loader |
+| `sending` | 发送消息等待 LLM 响应 | 输入框禁用，显示"思考中..." |
+| `error` | 通用错误 | Alert 组件展示错误信息 |
 
 ---
 
 ## 9. 实施路线图
 
-### 阶段划分
+### 9.1 分期计划
 
-```mermaid
-gantt
-    title 智能问答系统 实施路线图
-    dateFormat  YYYY-MM-DD
-    axisFormat  %m-%d
-    
-    section Phase 1 数据库
-    conversation + message 表 DDL     :p1, 2026-07-10, 1d
-    document_chunk 补充字段            :p1, 1d
-    Rust Model 结构体                 :p1, 1d
-    
-    section Phase 2 RAG 检索引擎
-    向量检索 SQL + HNSW 索引           :p2, after p1, 2d
-    RAGRetriever 实现                 :p2, 2d
-    ContextBuilder 实现                :p2, 1d
-    
-    section Phase 3 对话系统
-    ConversationService 实现           :p3, after p2, 2d
-    引用解析系统                       :p3, 1d
-    Tauri Command 注册                :p3, 1d
-    
-    section Phase 4 前端
-    API Service 封装                  :p4, after p3, 1d
-    对话界面 UI                       :p4, 3d
-    流式输出体验                      :p4, 1d
-    引用展示组件                      :p4, 1d
-    
-    section Phase 5 集成
-    端到端测试                        :p5, after p4, 2d
-    性能优化（缓存/预加载）            :p5, 1d
-```
-
-| 阶段 | 内容 | 工作量 |
-|------|------|--------|
-| **Phase 1** 🗄️ | conversation + message + document_chunk 补充字段 + Model | 3天 |
-| **Phase 2** 🔍 | RAG检索引擎（Retriever + ContextBuilder） | 5天 |
-| **Phase 3** 💬 | 对话系统 Service + 引用解析 + Command | 4天 |
-| **Phase 4** 🖥️ | 前端对话界面 + 流式输出 + 引用组件 | 6天 |
-| **Phase 5** ✅ | 集成测试 + 性能优化 | 3天 |
-
-### 每个阶段的交付物
-
-```mermaid
-flowchart LR
-    P1[📄 SQL + Model\nconversation+message\ndocument_chunk补充] --> P2
-    P2[🛠️ RAG Engine\nRAGRetriever\nContextBuilder\nCitationParser] --> P3
-    P3[📮 Service+Command\nConversationService\nTauri Commands] --> P4
-    P4[🖥️ 前端\n对话界面\n流式输出\n引用组件] --> P5
-    P5[✅ 测试\nE2E\n性能优化]
-```
+| 阶段 | 内容 | 优先级 | 状态 |
+|------|------|--------|------|
+| 🏗️ P0 | 会话 CRUD + RAG 检索 + LLM 调用 + 基础 UI | P0 | ✅ 已完成 |
+| 🚀 P1 | 溯源引用解析与前端标注 | P1 | ⏳ 待实施 |
+| 🔧 P2 | 多轮上下文感知 + 用户记忆 | P2 | ⏳ 待实施 |
+| 🎙️ P3 | 语音输入/输出 + 流式 SSE | P3 | ⏳ 待实施 |
+| 🤖 P4 | langchain-rust 集成评估（如有需要） | P4 | 📋 已评估 |
 
 ---
 
-## 附录：关键代码索引
+## 10. 附录：关于 langchain-rust 集成的评估
 
-| 文件 | 说明 |
+### 10.1 当前状态
+
+`Cargo.toml` 中已声明了 `langchain-rust = "4.6.0"` 和 `langgraph = "0.2.3"` 依赖，但**当前没有任何代码使用这些库**。
+
+### 10.2 当前 LLM 调用实现（自研）
+
+智能问答系统的 LLM 调用链路是自研实现，核心在 `llm_gateway_service.rs` 中：
+
+| 组件 | 说明 |
 |------|------|
-| `{schema}.conversation` | 会话表 |
-| `{schema}.message` | 消息表（含引用） |
-| `{schema}.document_chunk` | 向量分片表（已存在，补充字段） |
-| `models.rs` | Conversation + Message + DocumentChunk struct |
-| `rag_retriever.rs` | RAG 检索引擎（新建） |
-| `context_builder.rs` | 上下文构建器（新建） |
-| `conversation_service.rs` | 对话系统 Service（新建） |
-| `citations.rs` | 引用解析器（新建） |
-| `conversation_commands.rs` | Tauri Command（新建） |
-| `conversationService.ts` | 前端对话 API Service（新建） |
-| `ChatUI.tsx` | 对话界面组件（新建） |
-| `MessageBubble.tsx` | 消息气泡组件（新建） |
-| `CitationPanel.tsx` | 引用面板组件（新建） |
+| `LLMProviderAdapter` trait | 厂商适配器接口，定义 chat/embedding/health_check 等方法 |
+| `OpenAIAdapter` | 兼容 OpenAI API 格式（OpenAI/Qwen/DeepSeek/Volcengine/Tencent/Ollama） |
+| `ClaudeAdapter` | Anthropic Claude API 适配器 |
+| `LoadBalancer` | 负载均衡器：权重随机选择 + 故障计数器 |
+| `LLMRouter` | 路由网关：多 Provider 自动故障转移（逐个尝试直到成功）+ 熔断器 |
+| `create_adapter_with_model()` | 工厂方法，从 `llm_model` 表加载默认模型名 |
 
----
+### 10.3 是否值得迁移到 langchain-rust
 
-## 版本历史
+| 对比维度 | 自研实现 | langchain-rust |
+|----------|----------|----------------|
+| 多厂商支持 | ✅ 已支持 7+ 厂商 | ✅ 内置支持，但部分国内厂商需自定义 |
+| 故障转移 | ✅ 已实现（逐个尝试 + 熔断器） | ❌ 需自行实现 |
+| Prompt 模板管理 | ✅ 字符串拼接 | ✅ `PromptTemplate` + FewShot |
+| 链式调用 | ❌ 手动编排 | ✅ Chain 抽象（LLMChain, SequentialChain） |
+| RAG 集成 | ✅ 自研 RAGRetriever | 可通过 document_loaders 整合 |
+| Agent/工具调用 | ❌ 未实现 | ✅ Agent + Tool 抽象 |
+| 代码体积 | ✅ 轻量，仅 reqwest | 依赖较多，编译时间增加 |
+| 维护成本 | 自行维护厂商兼容性 | 社区维护（但 Rust 生态较小） |
 
-| 版本 | 日期 | 变更 |
-|------|------|------|
-| V1.0 | 2026-07-02 | 初始版本：RAG 多轮问答系统完整设计方案 |
+### 10.4 建议
+
+**当前阶段不建议迁移到 langchain-rust。**
+
+**原因：** 自研实现已满足 P0/P1 需求，增加 langchain-rust 会引入额外依赖和编译时间。
+
+**未来可考虑的场景：**
+- 需要 Agent/Function Calling 能力
+- 需要 Prompt 版本管理和 A/B 测试
+- 需要 MapReduce/Refine 等复杂链式处理
+
+### 10.5 本次修复记录
+
+| 日期 | 修复内容 | 涉及文件 |
+|------|----------|----------|
+| 2026-07-21 | 修复"新对话"按钮无响应 | `apps/web/src/app/chat/page.tsx` |
+| 2026-07-21 | 注册 `LLMRouter` 到 Tauri 全局状态 | `apps/backend/src-tauri/src/lib.rs` |
+| 2026-07-21 | 传递 `LLMRouter` 到 conversation_commands | `commands/conversation_commands.rs` |
+| 2026-07-21 | ConversationService 集成 LLM 调用 + RAG Prompt | `service/conversation_service.rs` |
+| 2026-07-21 | 每次对话刷新 Provider 列表 | `service/conversation_service.rs` |
+| 2026-07-21 | 跳过失败的 create_adapter 而非终止全部 | `service/llm_gateway_service.rs` |
+| 2026-07-21 | 支持 volcengine/deepseek/tencent 厂商 | `service/llm_gateway_service.rs` |
+| 2026-07-21 | 从 llm_model 表加载默认模型名 | `service/llm_gateway_service.rs` |
+| 2026-07-21 | DeepSeek 默认模型 + Base URL | `service/llm_gateway_service.rs` |
+| 2026-07-21 | 多 Provider 自动故障转移（逐个尝试） | `service/llm_gateway_service.rs` |
 
 ---
 

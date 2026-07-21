@@ -6,6 +6,7 @@
 pub mod asset_routes;
 pub mod auth;
 pub mod category_routes;
+pub mod chat_routes;
 pub mod department_routes;
 pub mod knowledge_routes;
 pub mod process_routes;
@@ -36,7 +37,10 @@ use crate::engine::skill_registry::SkillRegistry;
 ///
 /// 在 Tauri 的 setup 回调中调用此函数，通过 spawn 在后台运行。
 /// 返回 Result，方便调用方记录错误日志。
-pub async fn start_http_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
+pub async fn start_http_server(
+    pool: sqlx::PgPool,
+    llm_router: Option<std::sync::Arc<crate::service::llm_gateway_service::LLMRouter>>,
+) -> anyhow::Result<()> {
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
