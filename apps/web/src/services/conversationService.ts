@@ -63,6 +63,8 @@ export function createConversation(params: {
     userId: string;
     question: string;
     bindTreeNodeId?: string;
+    providerId?: string;
+    modelId?: string;
 }): Promise<ConversationResponse> {
     return api.post('create_conversation', params);
 }
@@ -72,6 +74,8 @@ export function sendMessage(params: {
     convId: string;
     userId: string;
     question: string;
+    providerId?: string;
+    modelId?: string;
 }): Promise<ConversationResponse> {
     return api.post('send_message', params);
 }

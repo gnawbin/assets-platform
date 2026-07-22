@@ -685,9 +685,14 @@ interface AssetInfo {
 
 ## 10. 附录：关于 langchain-rust 集成的评估
 
-### 10.1 当前状态
+### 10.1 评估结论
 
-`Cargo.toml` 中已声明了 `langchain-rust = "4.6.0"` 和 `langgraph = "0.2.3"` 依赖，但**当前没有任何代码使用这些库**。
+| 事项 | 状态 |
+|------|------|
+| 评估日期 | 2026-07-22 |
+| 结论 | ❌ **不采纳 langchain-rust** |
+| 依赖清理 | ✅ `langchain-rust` 和 `langgraph` 已从 `Cargo.toml` 移除 |
+| 详细评估报告 | 详见 [langchain-rust集成评估与Python侧车架构方案.md](./langchain-rust集成评估与Python侧车架构方案.md) |
 
 ### 10.2 当前 LLM 调用实现（自研）
 
@@ -702,29 +707,32 @@ interface AssetInfo {
 | `LLMRouter` | 路由网关：多 Provider 自动故障转移（逐个尝试直到成功）+ 熔断器 |
 | `create_adapter_with_model()` | 工厂方法，从 `llm_model` 表加载默认模型名 |
 
-### 10.3 是否值得迁移到 langchain-rust
+### 10.3 为什么不采纳 langchain-rust
 
-| 对比维度 | 自研实现 | langchain-rust |
+| 维度 | 自研实现 | langchain-rust |
 |----------|----------|----------------|
-| 多厂商支持 | ✅ 已支持 7+ 厂商 | ✅ 内置支持，但部分国内厂商需自定义 |
-| 故障转移 | ✅ 已实现（逐个尝试 + 熔断器） | ❌ 需自行实现 |
-| Prompt 模板管理 | ✅ 字符串拼接 | ✅ `PromptTemplate` + FewShot |
-| 链式调用 | ❌ 手动编排 | ✅ Chain 抽象（LLMChain, SequentialChain） |
-| RAG 集成 | ✅ 自研 RAGRetriever | 可通过 document_loaders 整合 |
-| Agent/工具调用 | ❌ 未实现 | ✅ Agent + Tool 抽象 |
-| 代码体积 | ✅ 轻量，仅 reqwest | 依赖较多，编译时间增加 |
-| 维护成本 | 自行维护厂商兼容性 | 社区维护（但 Rust 生态较小） |
+| 多厂商支持 | ✅ 已支持 7+ 厂商 | ⚠️ 国内厂商需自定义 |
+| 故障转移 + 熔断器 | ✅ 已实现 | ❌ 需自行实现 |
+| PDF 解析 | ❌ 需额外 crate | ❌ 不提供此能力 |
+| 视频解析 | ❌ 完全不支持 | ❌ 完全不支持 |
+| 编译时间 | ✅ 轻量 | ❌ 增加 150+ crate |
 
-### 10.4 建议
+### 10.4 替代架构方案
 
-**当前阶段不建议迁移到 langchain-rust。**
+经过完整评估，推荐 **Python 解析侧车 + Rust LLM 引擎** 架构：
 
-**原因：** 自研实现已满足 P0/P1 需求，增加 langchain-rust 会引入额外依赖和编译时间。
+```
+Rust (Tauri 主进程)
+  ├─ 对话服务 → 判断附件类型 → 调 Python 解析
+  ├─ LLMRouter → 负载均衡 + 熔断器 + 7+ 厂商
+  └─ Tauri Sidecar ──→ Python (PyMuPDF / ffmpeg+whisper)
+```
 
-**未来可考虑的场景：**
-- 需要 Agent/Function Calling 能力
-- 需要 Prompt 版本管理和 A/B 测试
-- 需要 MapReduce/Refine 等复杂链式处理
+核心原则：
+- **Python 只做"非结构化 → 文本"的转换**（PDF/视频/语音解析）
+- **LLM 调用统一走 Rust LLMRouter**（复用已有能力）
+
+详见 [langchain-rust集成评估与Python侧车架构方案.md](./langchain-rust集成评估与Python侧车架构方案.md)。
 
 ### 10.5 本次修复记录
 
@@ -740,6 +748,7 @@ interface AssetInfo {
 | 2026-07-21 | 从 llm_model 表加载默认模型名 | `service/llm_gateway_service.rs` |
 | 2026-07-21 | DeepSeek 默认模型 + Base URL | `service/llm_gateway_service.rs` |
 | 2026-07-21 | 多 Provider 自动故障转移（逐个尝试） | `service/llm_gateway_service.rs` |
+| 2026-07-22 | P4 langchain-rust 评估完成，清理依赖 | `Cargo.toml` / `langchain-rust集成评估与Python侧车架构方案.md` |
 
 ---
 

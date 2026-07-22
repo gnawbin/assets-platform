@@ -101,6 +101,8 @@ impl ConversationService {
         router: &LLMRouter,
         system_prompt: &str,
         user_message: &str,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
     ) -> Result<String, String> {
         let request = LLMChatRequest {
             messages: vec![
@@ -113,7 +115,7 @@ impl ConversationService {
                     content: user_message.to_string(),
                 },
             ],
-            model: None, // 由 LLMRouter 根据用户配置选择
+            model: model_name, // 用户选择的模型名，None 则由 Router 默认
             temperature: Some(0.7),
             max_tokens: Some(2048),
             stream: Some(false),
@@ -121,7 +123,7 @@ impl ConversationService {
             conv_id: None,
         };
 
-        let response = router.chat(request).await?;
+        let response = router.chat_with_provider_id(request, provider_id).await?;
         Ok(response.content)
     }
 
@@ -130,6 +132,8 @@ impl ConversationService {
         question: &str,
         bind_tree_node_id: Option<i64>,
         router: &LLMRouter,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
     ) -> Result<(String, Vec<i64>), String> {
         // 1. RAG 检索
         let params = RetrieveParams {
@@ -151,7 +155,15 @@ impl ConversationService {
 
         // 3. 尝试调用 LLM
         let (system_prompt, user_msg) = Self::build_rag_prompt(question, &chunks);
-        let answer = match Self::generate_answer_with_llm(router, &system_prompt, &user_msg).await {
+        let answer = match Self::generate_answer_with_llm(
+            router,
+            &system_prompt,
+            &user_msg,
+            provider_id,
+            model_name,
+        )
+        .await
+        {
             Ok(content) => content,
             Err(e) => {
                 error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
@@ -204,6 +216,8 @@ impl ConversationService {
         question: &str,
         bind_tree_node_id: Option<i64>,
         router: &LLMRouter,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
     ) -> Result<ConversationResponse, String> {
         // 1. 创建会话
         let title = Self::generate_title(question);
@@ -214,7 +228,8 @@ impl ConversationService {
 
         // 3. 执行 RAG 检索 + LLM 生成
         let (answer, cited_ids) =
-            Self::retrieve_and_answer(question, bind_tree_node_id, router).await?;
+            Self::retrieve_and_answer(question, bind_tree_node_id, router, provider_id, model_name)
+                .await?;
 
         // 4. 提取引用信息
         let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
@@ -262,6 +277,8 @@ impl ConversationService {
         user_id: i64,
         question: &str,
         router: &LLMRouter,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
     ) -> Result<ConversationResponse, String> {
         // 验证会话所有权
         let conv = Self::get_conversation_by_id(conv_id).await?;
@@ -275,7 +292,8 @@ impl ConversationService {
         // 执行 RAG 检索 + LLM 生成
         let bind_tree_node_id = conv.bind_knowledge_tree_id;
         let (answer, cited_ids) =
-            Self::retrieve_and_answer(question, bind_tree_node_id, router).await?;
+            Self::retrieve_and_answer(question, bind_tree_node_id, router, provider_id, model_name)
+                .await?;
 
         let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
 
@@ -566,13 +584,16 @@ impl ConversationService {
 
         // 3. 构建 Prompt 并调用 LLM（当前使用非流式接口，后续可改为真正流式）
         let (system_prompt, user_msg) = Self::build_rag_prompt(question, &chunks);
-        let answer = match Self::generate_answer_with_llm(router, &system_prompt, &user_msg).await {
-            Ok(content) => content,
-            Err(e) => {
-                error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
-                Self::build_rag_answer(question, &chunks)
-            }
-        };
+        let answer =
+            match Self::generate_answer_with_llm(router, &system_prompt, &user_msg, None, None)
+                .await
+            {
+                Ok(content) => content,
+                Err(e) => {
+                    error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
+                    Self::build_rag_answer(question, &chunks)
+                }
+            };
 
         // 4. 逐行推送（模拟流式效果）
         for line in answer.lines() {

@@ -284,6 +284,21 @@ impl LLMRouter {
         result
     }
 
+    /// 使用指定 Provider 调用 Chat（如果 provider_id 为 None，则自动故障转移）
+    pub async fn chat_with_provider_id(
+        &self,
+        request: LLMChatRequest,
+        provider_id: Option<i64>,
+    ) -> Result<LLMChatResponse, String> {
+        if let Some(pid) = provider_id {
+            // 使用用户指定的 provider
+            self.chat_with_provider(request, pid).await
+        } else {
+            // 未指定则走自动故障转移
+            self.chat(request).await
+        }
+    }
+
     /// 调用 Chat（支持多 Provider 自动故障转移）
     pub async fn chat(&self, request: LLMChatRequest) -> Result<LLMChatResponse, String> {
         // 检查熔断器

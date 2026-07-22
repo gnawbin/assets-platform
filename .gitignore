@@ -1,4 +1,4 @@
-node_modules
+node_modules/
 apps/*/node_modules
 target
 apps/backend/src-tauri/target
