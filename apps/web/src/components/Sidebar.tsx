@@ -23,8 +23,8 @@ import {
   IconListCheck,
   IconChartBar,
   IconSettings,
+  IconHierarchy,
   IconChevronDown,
-  IconBrain,
 } from '@tabler/icons-react';
 
 import { getUserMenus, type MenuItem } from '@/services/menuService';
@@ -41,7 +41,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   IconListCheck: <IconListCheck size={18} />,
   IconChartBar: <IconChartBar size={18} />,
   IconSettings: <IconSettings size={18} />,
-  IconBrain: <IconBrain size={18} />,
+  IconHierarchy: <IconHierarchy size={18} />,
 };
 
 
@@ -247,10 +247,10 @@ const Sidebar: React.FC = () => {
               <Text c="red" size="sm" ta="center" py="xl">
                 {error}
               </Text>
-            ) : menuItems.length === 0 ? (
-              <Text c="dimmed" size="sm" ta="center" py="xl">
-                暂无菜单
-              </Text>
+            ) : menuItems.length === 0 && !loading ? (
+              <>
+                <NavItem item={{ label: 'AI 工作流', path: '/knowledge/workflow', icon: 'IconHierarchy' }} />
+              </>
             ) : (
               menuItems.map((item, index) => (
                 <NavItem key={item.label + index} item={item} />
