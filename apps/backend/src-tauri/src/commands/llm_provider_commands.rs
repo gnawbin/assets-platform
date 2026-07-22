@@ -115,6 +115,76 @@ pub async fn get_llm_models(providerId: Option<String>) -> Result<Vec<LlmModel>,
     llm_provider_service::get_models(pid).await
 }
 
+/// 创建模型
+#[tauri::command]
+pub async fn create_llm_model(
+    providerId: String,
+    modelCode: String,
+    modelName: String,
+    modelType: String,
+    contextWindow: Option<i32>,
+    temperatureDefault: Option<f64>,
+    maxTokensDefault: Option<i32>,
+    enable: Option<bool>,
+) -> Result<LlmModel, String> {
+    let pid: i64 = providerId
+        .parse()
+        .map_err(|e| format!("无效的厂商ID: {}", e))?;
+    llm_provider_service::create_model(
+        pid,
+        &modelCode,
+        &modelName,
+        &modelType,
+        contextWindow,
+        temperatureDefault,
+        maxTokensDefault,
+        enable,
+    )
+    .await
+}
+
+/// 更新模型
+#[tauri::command]
+pub async fn update_llm_model(
+    id: String,
+    modelCode: Option<String>,
+    modelName: Option<String>,
+    modelType: Option<String>,
+    contextWindow: Option<i32>,
+    temperatureDefault: Option<f64>,
+    maxTokensDefault: Option<i32>,
+    enable: Option<bool>,
+) -> Result<LlmModel, String> {
+    let mid: i64 = id.parse().map_err(|e| format!("无效的模型ID: {}", e))?;
+    llm_provider_service::update_model(
+        mid,
+        modelCode.as_deref(),
+        modelName.as_deref(),
+        modelType.as_deref(),
+        contextWindow,
+        temperatureDefault,
+        maxTokensDefault,
+        enable,
+    )
+    .await
+}
+
+/// 删除模型
+#[tauri::command]
+pub async fn delete_llm_model(id: String) -> Result<(), String> {
+    let mid: i64 = id.parse().map_err(|e| format!("无效的模型ID: {}", e))?;
+    llm_provider_service::delete_model(mid).await
+}
+
+/// 从 OpenAI 兼容接口拉取模型列表
+#[tauri::command]
+pub async fn fetch_llm_models(providerId: String) -> Result<Vec<LlmModel>, String> {
+    let pid: i64 = providerId
+        .parse()
+        .map_err(|e| format!("无效的厂商ID: {}", e))?;
+    llm_provider_service::fetch_models_from_api(pid).await
+}
+
 /// 获取用户模型偏好
 #[tauri::command]
 pub async fn get_user_llm_setting(userId: String) -> Result<Option<UserLLmSetting>, String> {

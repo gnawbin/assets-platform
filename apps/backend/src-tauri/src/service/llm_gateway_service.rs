@@ -210,8 +210,10 @@ impl LLMRouter {
 
         let mut weighted = Vec::new();
         for p in providers {
-            // 查询该 Provider 的第一个已启用的 chat 模型作为默认模型
-            let default_model: Option<String> = sqlx::query_scalar(
+            let weight = p.weight.unwrap_or(10);
+
+            // 1. 加载 chat 模型
+            let chat_model: Option<String> = sqlx::query_scalar(
                 sqlx::AssertSqlSafe(format!(
                     "SELECT model_code FROM {}llm_model WHERE provider_id = $1 AND model_type = 'chat' AND enable = true AND deleted = 0 ORDER BY id LIMIT 1",
                     prefix
@@ -220,11 +222,10 @@ impl LLMRouter {
             .bind(p.id)
             .fetch_optional(&pool)
             .await
-            .map_err(|e| format!("查询默认模型失败: {}", e))?;
+            .map_err(|e| format!("查询 chat 模型失败: {}", e))?;
 
-            match create_adapter_with_model(&p, default_model.as_deref()) {
+            match create_adapter_with_model(&p, chat_model.as_deref()) {
                 Ok(adapter) => {
-                    let weight = p.weight.unwrap_or(10);
                     weighted.push(WeightedProvider {
                         provider_id: p.id,
                         provider_code: p.provider_code.clone(),
@@ -234,7 +235,37 @@ impl LLMRouter {
                     });
                 }
                 Err(e) => {
-                    error!("跳过 Provider {} ({}): {}", p.id, p.provider_code, e);
+                    error!("跳过 Provider {} chat ({}): {}", p.id, p.provider_code, e);
+                }
+            }
+
+            // 2. 加载 embedding 模型
+            let embed_model: Option<String> = sqlx::query_scalar(
+                sqlx::AssertSqlSafe(format!(
+                    "SELECT model_code FROM {}llm_model WHERE provider_id = $1 AND model_type = 'embedding' AND enable = true AND deleted = 0 ORDER BY id LIMIT 1",
+                    prefix
+                ))
+            )
+            .bind(p.id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("查询 embedding 模型失败: {}", e))?;
+
+            match create_adapter_with_model(&p, embed_model.as_deref()) {
+                Ok(adapter) => {
+                    weighted.push(WeightedProvider {
+                        provider_id: p.id,
+                        provider_code: p.provider_code.clone(),
+                        adapter: std::sync::Arc::new(adapter),
+                        weight,
+                        model_type: "embedding".to_string(),
+                    });
+                }
+                Err(e) => {
+                    error!(
+                        "跳过 Provider {} embedding ({}): {}",
+                        p.id, p.provider_code, e
+                    );
                 }
             }
         }
@@ -435,7 +466,7 @@ pub fn create_adapter(provider: &LlmProvider) -> Result<Box<dyn LLMProviderAdapt
     create_adapter_with_model(provider, None)
 }
 
-fn get_default_base_url(provider_code: &str) -> String {
+pub fn get_default_base_url(provider_code: &str) -> String {
     match provider_code {
         "openai" => "https://api.openai.com".to_string(),
         "claude" => "https://api.anthropic.com".to_string(),
@@ -622,24 +653,54 @@ pub mod adapters {
 
         async fn list_models(&self) -> Result<Vec<String>, String> {
             let url = format!("{}/v1/models", self.base_url);
-            let resp = self.http_client.get(&url).send().await.map_err(|e| {
-                error!("获取模型列表失败: {}", e);
-                format!("获取模型列表失败: {}", e)
-            })?;
+            let resp = self
+                .http_client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .send()
+                .await
+                .map_err(|e| {
+                    error!("获取模型列表失败: {}", e);
+                    format!("API 请求失败: {}", e)
+                })?;
 
+            let status = resp.status();
             let text = resp
                 .text()
                 .await
                 .map_err(|e| format!("读取响应失败: {}", e))?;
+
+            if !status.is_success() {
+                let msg = if text.len() > 200 {
+                    format!("{}...", &text[..200])
+                } else {
+                    text.clone()
+                };
+                return Err(format!("API 返回错误 [{}]: {}", status, msg));
+            }
+
             let json: serde_json::Value =
                 serde_json::from_str(&text).map_err(|e| format!("解析响应失败: {}", e))?;
 
             let models: Vec<String> = json["data"]
                 .as_array()
-                .unwrap_or(&vec![])
+                .ok_or_else(|| {
+                    format!(
+                        "API 响应格式异常：缺少 data 字段。响应内容: {}",
+                        &text[..200.min(text.len())]
+                    )
+                })?
                 .iter()
                 .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
                 .collect();
+
+            if models.is_empty() {
+                return Err(format!(
+                    "API 返回的模型列表为空（{} 可能不支持 list_models）",
+                    self.provider_code
+                ));
+            }
+
             Ok(models)
         }
     }

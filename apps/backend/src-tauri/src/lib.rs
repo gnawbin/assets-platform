@@ -297,6 +297,10 @@ pub fn run() {
             commands::llm_provider_commands::update_llm_provider,
             commands::llm_provider_commands::delete_llm_provider,
             commands::llm_provider_commands::get_llm_models,
+            commands::llm_provider_commands::create_llm_model,
+            commands::llm_provider_commands::update_llm_model,
+            commands::llm_provider_commands::delete_llm_model,
+            commands::llm_provider_commands::fetch_llm_models,
             commands::llm_provider_commands::get_user_llm_setting,
             commands::llm_provider_commands::save_user_llm_setting,
             // Zen Engine - Skill 管理
