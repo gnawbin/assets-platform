@@ -1230,7 +1230,7 @@ SELECT
     '/chat',
     '/chat/page',
     NULL,
-    2,
+    3,
     true,
     'knowledge:chat',
     2,
@@ -1280,7 +1280,7 @@ SELECT
     '/settings/llm',
     '/settings/llm/page',
     NULL,
-    4,
+    2,
     true,
     'knowledge:llm:list',
     2,
@@ -1301,6 +1301,9 @@ WHERE
             id = 54
     );
 
+-- =====================
+-- AI 工作流目录及其子菜单
+-- =====================
 INSERT INTO
     public.sys_menu (
         id,
@@ -1324,15 +1327,65 @@ INSERT INTO
         deleted
     )
 SELECT
-    55,
-    '模型偏好',
+    56,
+    'AI 工作流',
     6,
-    '/settings/llm/preference',
-    '/settings/llm/preference/page',
     NULL,
-    5,
+    NULL,
+    'IconHierarchy',
+    4,
     true,
-    'knowledge:llm:preference',
+    NULL,
+    1,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 56
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    57,
+    '工作流管理',
+    56,
+    '/knowledge/workflow',
+    '/knowledge/workflow/page',
+    NULL,
+    1,
+    true,
+    'workflow:list',
     2,
     false,
     NULL,
@@ -1348,10 +1401,9 @@ WHERE
         SELECT 1
         FROM public.sys_menu
         WHERE
-            id = 55
+            id = 57
     );
 
--- Skill 管理移到知识库下（原父级 AI 工作流已删除）
 INSERT INTO
     public.sys_menu (
         id,
@@ -1375,15 +1427,65 @@ INSERT INTO
         deleted
     )
 SELECT
-    60,
-    'Skill 管理',
-    6,
-    '/skills',
-    '/skills/page',
+    58,
+    '新建工作流',
+    56,
+    '/knowledge/workflow/new',
+    '/knowledge/workflow/new/page',
+    NULL,
+    2,
+    true,
+    'workflow:create',
+    2,
+    false,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 58
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    59,
+    '执行历史',
+    56,
+    '/knowledge/workflow/runs',
+    '/knowledge/workflow/runs/page',
     NULL,
     3,
     true,
-    'skill:list',
+    'workflow:history',
     2,
     false,
     NULL,
@@ -1399,7 +1501,7 @@ WHERE
         SELECT 1
         FROM public.sys_menu
         WHERE
-            id = 60
+            id = 59
     );
 
 -- =====================

@@ -133,22 +133,11 @@ const NavItem: React.FC<NavItemProps> = ({ item }) => {
           {ItemContent}
         </UnstyledButton>
         <Collapse expanded={opened}>
-          {item.children!.map((child) => {
-            const isLinkActive = pathname === child.path;
-            return (
-              <NavLink
-                key={child.label}
-                label={child.label}
-                active={isLinkActive}
-                onClick={() => child.path && router.push(child.path)}
-                style={{
-                  paddingLeft: 50,
-                  borderRadius: 8,
-                  margin: '2px 0',
-                }}
-              />
-            );
-          })}
+          {item.children!.map((child) => (
+            <Box key={child.label} style={{ paddingLeft: 16 }}>
+              <NavItem item={child} />
+            </Box>
+          ))}
         </Collapse>
       </>
     );
