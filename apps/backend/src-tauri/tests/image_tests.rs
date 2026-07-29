@@ -10,11 +10,8 @@
 //! 所有测试均在内存中生成测试图像，无需外部测试文件。
 
 use image::{
-    error::ImageError,
-    imageops::FilterType,
-    load_from_memory, load_from_memory_with_format,
-    DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageFormat, Luma, Pixel, Rgb,
-    RgbImage, Rgba, RgbaImage,
+    imageops::FilterType, load_from_memory, load_from_memory_with_format, DynamicImage,
+    GenericImageView, ImageBuffer, ImageFormat, Pixel, Rgb, RgbImage, Rgba, RgbaImage,
 };
 
 // ======================== 辅助函数 ========================
@@ -128,7 +125,11 @@ mod load_save_tests {
             "❌ PNG 图像颜色类型应为 RGBA8"
         );
 
-        println!("✅ PNG 图像从内存加载成功：{}x{}", loaded.width(), loaded.height());
+        println!(
+            "✅ PNG 图像从内存加载成功：{}x{}",
+            loaded.width(),
+            loaded.height()
+        );
     }
 
     /// 测试 2：从字节数组加载 JPEG 图像
@@ -181,7 +182,11 @@ mod load_save_tests {
         let png_bytes = encode_image(&dyn_img, ImageFormat::Png);
         assert!(!png_bytes.is_empty(), "❌ PNG 编码结果不应为空");
         // PNG 有固定的签名头（8 字节）
-        assert_eq!(&png_bytes[..8], &[137, 80, 78, 71, 13, 10, 26, 10], "❌ PNG 签名不正确");
+        assert_eq!(
+            &png_bytes[..8],
+            &[137, 80, 78, 71, 13, 10, 26, 10],
+            "❌ PNG 签名不正确"
+        );
 
         // 保存为 JPEG
         let jpeg_bytes = encode_image(&dyn_img, ImageFormat::Jpeg);
@@ -206,20 +211,20 @@ mod load_save_tests {
 
         assert_eq!(dyn_img.width(), 4, "❌ 图像宽度应为 4");
         assert_eq!(dyn_img.height(), 4, "❌ 图像高度应为 4");
-        assert!(
-            dyn_img.color().has_color(),
-            "❌ 图像应有颜色通道"
-        );
+        assert!(dyn_img.color().has_color(), "❌ 图像应有颜色通道");
         assert_eq!(
             dyn_img.color().channel_count(),
             4,
             "❌ RGBA 图像应有 4 个通道"
         );
 
-        println!("✅ 图像元数据验证通过：{}x{}, {}bit, {}通道",
-            dyn_img.width(), dyn_img.height(),
+        println!(
+            "✅ 图像元数据验证通过：{}x{}, {}bit, {}通道",
+            dyn_img.width(),
+            dyn_img.height(),
             dyn_img.color().bits_per_pixel(),
-            dyn_img.color().channel_count());
+            dyn_img.color().channel_count()
+        );
     }
 }
 
@@ -289,9 +294,9 @@ mod format_conversion_tests {
 
         // 验证右上角绿色像素
         let pixel = rgb_img.get_pixel(3, 0);
-        assert_eq!(pixel[0], 0);  // R
+        assert_eq!(pixel[0], 0); // R
         assert_eq!(pixel[1], 255); // G
-        assert_eq!(pixel[2], 0);  // B
+        assert_eq!(pixel[2], 0); // B
 
         println!("✅ RGBA → RGB 通道转换成功");
     }
@@ -472,7 +477,7 @@ mod image_processing_tests {
         // 红色 (255,0,0) → 约 76
         let red_gray = gray.get_pixel(0, 0);
         let gray_value = red_gray[0] as f64;
-        let expected = (0.299 * 255.0 + 0.587 * 0.0 + 0.114 * 0.0).round() as u8;
+        let expected = (0.299_f64 * 255.0_f64 + 0.587_f64 * 0.0 + 0.114_f64 * 0.0).round() as u8;
         assert_eq!(
             gray_value as u8, expected,
             "❌ 红色灰度化后亮度值应为 {}",
@@ -492,21 +497,13 @@ mod image_processing_tests {
         let flipped_h = dyn_img.fliph();
         // 翻转后左上角应为原来右上角的绿色
         let pixel = flipped_h.get_pixel(0, 0);
-        assert_eq!(
-            pixel,
-            Rgba([0, 255, 0, 255]),
-            "❌ 水平翻转后左上角应为绿色"
-        );
+        assert_eq!(pixel, Rgba([0, 255, 0, 255]), "❌ 水平翻转后左上角应为绿色");
 
         // 垂直翻转
         let flipped_v = dyn_img.flipv();
         // 翻转后左上角应为原来左下角的蓝色
         let pixel = flipped_v.get_pixel(0, 0);
-        assert_eq!(
-            pixel,
-            Rgba([0, 0, 255, 255]),
-            "❌ 垂直翻转后左上角应为蓝色"
-        );
+        assert_eq!(pixel, Rgba([0, 0, 255, 255]), "❌ 垂直翻转后左上角应为蓝色");
 
         println!("✅ 图像翻转测试通过（水平/垂直）");
     }
@@ -527,10 +524,7 @@ mod image_processing_tests {
         // 模糊后边界像素应有所变化（不再是纯色边界）
         let interior_pixel = blurred.get_pixel(1, 1); // 靠近红色区域内部
         let red_pixel = Rgba([255, 0, 0, 255]);
-        assert_ne!(
-            interior_pixel, red_pixel,
-            "❌ 模糊后内部像素不应保持纯红色"
-        );
+        assert_ne!(interior_pixel, red_pixel, "❌ 模糊后内部像素不应保持纯红色");
 
         println!("✅ 图像高斯模糊测试通过");
     }
@@ -555,14 +549,8 @@ mod image_processing_tests {
         let darkened = dyn_img.brighten(-50);
         let pixel = darkened.get_pixel(2, 2);
         // 白色(255,255,255) 降低亮度后应变为灰色
-        assert!(
-            pixel[0] < 255,
-            "❌ 降低亮度后 R 通道应小于 255"
-        );
-        assert!(
-            pixel[0] > 0,
-            "❌ 降低亮度后 R 通道应大于 0（灰色）"
-        );
+        assert!(pixel[0] < 255, "❌ 降低亮度后 R 通道应小于 255");
+        assert!(pixel[0] > 0, "❌ 降低亮度后 R 通道应大于 0（灰色）");
 
         println!("✅ 图像亮度调整测试通过");
     }
@@ -583,10 +571,7 @@ mod image_processing_tests {
         let low_contrast = dyn_img.adjust_contrast(-100.0);
         let pixel = low_contrast.get_pixel(0, 0);
         // 低对比度下红色应变为灰色
-        assert!(
-            pixel[0] > 0,
-            "❌ 低对比度下 R 通道应大于 0"
-        );
+        assert!(pixel[0] > 0, "❌ 低对比度下 R 通道应大于 0");
 
         println!("✅ 图像对比度调整测试通过");
     }
@@ -603,10 +588,26 @@ mod pixel_operations_tests {
         let img = create_test_rgba_image();
 
         // 四角的像素颜色验证
-        assert_eq!(img.get_pixel(0, 0), Rgba([255, 0, 0, 255]), "❌ 左上角应为红色");
-        assert_eq!(img.get_pixel(3, 0), Rgba([0, 255, 0, 255]), "❌ 右上角应为绿色");
-        assert_eq!(img.get_pixel(0, 3), Rgba([0, 0, 255, 255]), "❌ 左下角应为蓝色");
-        assert_eq!(img.get_pixel(3, 3), Rgba([255, 255, 255, 255]), "❌ 右下角应为白色");
+        assert_eq!(
+            *img.get_pixel(0, 0),
+            Rgba([255, 0, 0, 255]),
+            "❌ 左上角应为红色"
+        );
+        assert_eq!(
+            *img.get_pixel(3, 0),
+            Rgba([0, 255, 0, 255]),
+            "❌ 右上角应为绿色"
+        );
+        assert_eq!(
+            *img.get_pixel(0, 3),
+            Rgba([0, 0, 255, 255]),
+            "❌ 左下角应为蓝色"
+        );
+        assert_eq!(
+            *img.get_pixel(3, 3),
+            Rgba([255, 255, 255, 255]),
+            "❌ 右下角应为白色"
+        );
 
         println!("✅ 像素读取测试通过");
     }
@@ -619,14 +620,14 @@ mod pixel_operations_tests {
         // 修改像素：将左上角红色改为黄色
         img.put_pixel(0, 0, Rgba([255, 255, 0, 255]));
         assert_eq!(
-            img.get_pixel(0, 0),
+            *img.get_pixel(0, 0),
             Rgba([255, 255, 0, 255]),
             "❌ 修改后像素应为黄色"
         );
 
         // 验证相邻像素未被修改
         assert_eq!(
-            img.get_pixel(0, 1),
+            *img.get_pixel(0, 1),
             Rgba([255, 0, 0, 255]),
             "❌ 相邻像素应仍为红色"
         );
@@ -651,7 +652,7 @@ mod pixel_operations_tests {
         for y in 0..img.height() {
             for x in 0..img.width() {
                 assert_eq!(
-                    img.get_pixel(x, y),
+                    *img.get_pixel(x, y),
                     fill_color,
                     "❌ 所有像素应被填充为灰色 ({},{})",
                     x,
@@ -679,11 +680,11 @@ mod pixel_operations_tests {
         assert_eq!(channels[3], 255); // A
 
         // 获取各通道分量
-        let (r, g, b, a) = white_pixel.0;
-        assert_eq!(r, 255);
-        assert_eq!(g, 255);
-        assert_eq!(b, 255);
-        assert_eq!(a, 255);
+        let channels_arr = white_pixel.0;
+        assert_eq!(channels_arr[0], 255);
+        assert_eq!(channels_arr[1], 255);
+        assert_eq!(channels_arr[2], 255);
+        assert_eq!(channels_arr[3], 255);
 
         println!("✅ 像素通道操作测试通过");
     }
@@ -698,7 +699,7 @@ mod pixel_operations_tests {
         for (x, y, pixel) in img.enumerate_pixels() {
             assert_eq!(
                 *pixel,
-                img.get_pixel(x, y),
+                *img.get_pixel(x, y),
                 "❌ enumerate_pixels 返回的像素应与 get_pixel 一致"
             );
             pixel_count += 1;
@@ -723,11 +724,7 @@ mod edge_case_tests {
 
         assert_eq!(img.width(), 1, "❌ 1x1 图像宽度应为 1");
         assert_eq!(img.height(), 1, "❌ 1x1 图像高度应为 1");
-        assert_eq!(
-            img.get_pixel(0, 0),
-            pixel,
-            "❌ 1x1 图像像素应与设置值一致"
-        );
+        assert_eq!(*img.get_pixel(0, 0), pixel, "❌ 1x1 图像像素应与设置值一致");
 
         // 编码为 PNG
         let dyn_img = DynamicImage::ImageRgba8(img);
@@ -759,8 +756,16 @@ mod edge_case_tests {
         assert_eq!(img.height(), 4, "❌ 矩形图像高度应为 4");
 
         // 验证区域颜色
-        assert_eq!(img.get_pixel(0, 0), Rgba([255, 0, 0, 255]), "❌ 上半部分应为红色");
-        assert_eq!(img.get_pixel(0, 3), Rgba([0, 0, 255, 255]), "❌ 下半部分应为蓝色");
+        assert_eq!(
+            *img.get_pixel(0, 0),
+            Rgba([255, 0, 0, 255]),
+            "❌ 上半部分应为红色"
+        );
+        assert_eq!(
+            *img.get_pixel(0, 3),
+            Rgba([0, 0, 255, 255]),
+            "❌ 下半部分应为蓝色"
+        );
 
         // 编码与重新加载
         let dyn_img = DynamicImage::ImageRgba8(img);
@@ -789,7 +794,7 @@ mod edge_case_tests {
         for y in 0..img.height() {
             for x in 0..img.width() {
                 assert_eq!(
-                    img.get_pixel(x, y),
+                    *img.get_pixel(x, y),
                     uniform_color,
                     "❌ 所有像素应为同一颜色 ({},{})",
                     x,
@@ -819,7 +824,11 @@ mod edge_case_tests {
         let rgba_img = create_test_rgba_image();
         let rgb = DynamicImage::ImageRgba8(rgba_img).to_rgb8();
 
-        assert_eq!(rgb.channels().len(), 3, "❌ RGBA→RGB 后应有 3 通道");
+        assert_eq!(
+            rgb.samples().len() / (rgb.width() * rgb.height()),
+            3,
+            "❌ RGBA→RGB 后应有 3 通道"
+        );
 
         println!("✅ RGB ↔ RGBA 转换边界测试通过");
     }
@@ -930,20 +939,15 @@ mod image_buffer_tests {
 
         // 使用 from_fn 创建（渐变图案）
         let img3 = RgbaImage::from_fn(10, 10, |x, y| {
-            Rgba([
-                (x * 25) as u8,
-                (y * 25) as u8,
-                128,
-                255,
-            ])
+            Rgba([(x * 25) as u8, (y * 25) as u8, 128, 255])
         });
         assert_eq!(img3.width(), 10);
         assert_eq!(img3.height(), 10);
 
         // 验证渐变
         let pixel = img3.get_pixel(2, 3);
-        assert_eq!(pixel[0], 50, "❌ x=2 时 R 应为 50");  // 2*25=50
-        assert_eq!(pixel[1], 75, "❌ y=3 时 G 应为 75");  // 3*25=75
+        assert_eq!(pixel[0], 50, "❌ x=2 时 R 应为 50"); // 2*25=50
+        assert_eq!(pixel[1], 75, "❌ y=3 时 G 应为 75"); // 3*25=75
 
         println!("✅ ImageBuffer 创建测试通过（new/from_raw/from_fn）");
     }
@@ -961,8 +965,8 @@ mod image_buffer_tests {
         let _rgba = dyn_img.to_rgba8();
         let _luma = dyn_img.to_luma8();
         let _luma_alpha = dyn_img.to_luma_alpha8();
-        let _bgr = dyn_img.to_bgr8();
-        let _bgra = dyn_img.to_bgra8();
+        let _rgb = dyn_img.to_rgb8();
+        let _rgba = dyn_img.to_rgba8();
 
         // 验证转换后尺寸一致
         assert_eq!(dyn_img.to_rgb8().width(), 4);
@@ -1009,11 +1013,7 @@ mod image_buffer_tests {
 
         // 验证子视图中的像素
         let pixel = view.get_pixel(0, 0);
-        assert_eq!(
-            pixel,
-            Rgba([255, 0, 0, 255]),
-            "❌ 子视图左上角应为红色"
-        );
+        assert_eq!(pixel, Rgba([255, 0, 0, 255]), "❌ 子视图左上角应为红色");
 
         println!("✅ 图像子区域视图测试通过");
     }
