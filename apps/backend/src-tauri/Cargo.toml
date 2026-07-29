@@ -162,6 +162,7 @@ ffmpeg-light = "0.2"
 whisper-rs = "0.16.0"
 # VLM原型开发，本地多模态（快速落地）
 ollama-rs = "0.3.6"
+nats="0.26.0"
 
 # Release模式优化配置
 [profile.release]
