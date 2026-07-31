@@ -1,4 +1,4 @@
-"""视频解析器：分离音频转写 + 定时抽帧 VLM 解读 → 合并"""
+"""视频解析器：ffmpeg 抽帧 + Whisper 音频转写 → 帧路径进 images（语义描述由 Rust 调用 VLM）"""
 
 import os
 import time
@@ -6,12 +6,15 @@ import tempfile
 import ffmpeg
 from models.parse_result import ParseResult
 from parsers.audio_parser import AudioParser
-from vlm import describe_image
 
 
 class VideoParser:
     """
     视频解析器。
+
+    职责：
+    - ffmpeg 提取音频 → Whisper 转写（进 raw_text）
+    - ffmpeg 定时抽帧 → 帧路径列表进 images（Rust 负责逐帧 VLM 解读）
 
     核心参数：
     - frame_interval: 抽帧间隔（秒），默认 30
@@ -39,6 +42,7 @@ class VideoParser:
         width = int(video_stream.get("width", 0)) if video_stream else 0
         height = int(video_stream.get("height", 0)) if video_stream else 0
         has_audio = audio_stream is not None
+        frame_paths = []
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # 2. 提取音频 → Whisper 转写
@@ -53,7 +57,7 @@ class VideoParser:
                 audio_result = await audio_parser.parse(audio_path)
                 audio_text = audio_result.raw_text
 
-            # 3. 定时抽帧 → VLM 解读
+            # 3. 定时抽帧 → 帧路径进 images（VLM 描述由 Rust 完成）
             if duration > self.MAX_DURATION_FOR_FULL:
                 # 只解析前5分钟和后5分钟
                 timestamps = (
@@ -63,7 +67,6 @@ class VideoParser:
             else:
                 timestamps = list(range(0, int(duration), frame_interval))
 
-            frame_descriptions = []
             for t in timestamps:
                 frame_path = os.path.join(tmpdir, f"frame_{t:06d}.jpg")
                 try:
@@ -72,33 +75,21 @@ class VideoParser:
                     ).run(quiet=True, overwrite_output=True, capture_stderr=True)
 
                     if os.path.exists(frame_path):
-                        desc = await describe_image(frame_path)
-                        frame_descriptions.append(f"[{t}s] {desc}")
+                        frame_paths.append(frame_path)
                 except Exception as e:
-                    frame_descriptions.append(f"[{t}s] 帧提取失败: {e}")
-
-            # 4. 合并文本
-            if audio_text and frame_descriptions:
-                combined = (
-                    f"【音频文稿】\n{audio_text}\n\n"
-                    f"【关键帧解读】\n" + "\n".join(frame_descriptions)
-                )
-            elif audio_text:
-                combined = audio_text
-            elif frame_descriptions:
-                combined = "【关键帧解读】\n" + "\n".join(frame_descriptions)
-            else:
-                combined = ""
+                    print(f"[VideoParser] 帧提取失败 [{t}s]: {e}")
 
         return ParseResult(
             file_name=file_path.rsplit("/", 1)[-1],
             file_type="video",
-            raw_text=combined,
+            raw_text=audio_text,
+            images=frame_paths,
             metadata={
                 "duration_sec": round(duration),
                 "resolution": f"{width}x{height}",
                 "has_audio": has_audio,
-                "frames_analyzed": len(frame_descriptions),
+                "frames_extracted": len(frame_paths),
+                "frame_interval_sec": frame_interval,
                 "parse_duration_ms": int((time.time() - start) * 1000),
             },
         )

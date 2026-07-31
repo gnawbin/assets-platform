@@ -2,14 +2,28 @@
 
 import os
 import tempfile
+
+# 必须在导入 main 之前设置认证 token（config.py 在 import 时读取环境变量）
+os.environ["DOC_PARSER_TOKEN"] = "test-token-123456"
+
 from fastapi.testclient import TestClient
 from main import app
 
 client = TestClient(app)
 
+AUTH_HEADERS = {"X-API-Token": os.environ["DOC_PARSER_TOKEN"]}
 
-def test_health():
-    """健康检查"""
+
+def _post_parse(file_path: str):
+    """带认证头的 /parse 请求"""
+    return client.post("/parse", json={"file_path": file_path}, headers=AUTH_HEADERS)
+
+
+# ═══════════════════ 认证测试 ═══════════════════
+
+
+def test_health_no_auth():
+    """/health 应豁免认证"""
     resp = client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
@@ -17,28 +31,48 @@ def test_health():
     assert data["version"] == "1.0.0"
 
 
+def test_auth_missing_token():
+    """未携带 token → 401"""
+    resp = client.post("/parse", json={"file_path": "/tmp/a.pdf"})
+    assert resp.status_code == 401
+    assert resp.json()["error_code"] == "UNAUTHORIZED"
+
+
+def test_auth_wrong_token():
+    """token 错误 → 403"""
+    resp = client.post(
+        "/parse",
+        json={"file_path": "/tmp/a.pdf"},
+        headers={"X-API-Token": "wrong-token"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error_code"] == "FORBIDDEN"
+
+
 def test_formats():
     """格式列表"""
-    resp = client.get("/formats")
+    resp = client.get("/formats", headers=AUTH_HEADERS)
     assert resp.status_code == 200
     data = resp.json()
     assert "pdf" in data
+    assert "document" in data
     assert "image" in data
     assert "audio" in data
     assert "video" in data
     assert "jpg" in data["image"]
+    assert "docx" in data["document"]
 
 
 def test_unsupported_format():
     """不支持的文件类型"""
-    resp = client.post("/parse", json={"file_path": "/tmp/test.exe"})
+    resp = _post_parse("/tmp/test.exe")
     assert resp.status_code == 400
     assert "不支持的文件类型" in resp.json()["detail"]
 
 
 def test_file_not_found():
     """文件不存在"""
-    resp = client.post("/parse", json={"file_path": "/nonexistent/file.pdf"})
+    resp = _post_parse("/nonexistent/file.pdf")
     assert resp.status_code == 400
     assert "文件不存在" in resp.json()["detail"]
 
@@ -53,6 +87,7 @@ def test_batch_mixed():
                 {"file_path": "/tmp/photo.jpg", "options": {}},
             ]
         },
+        headers=AUTH_HEADERS,
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -63,7 +98,7 @@ def test_batch_mixed():
 
 def test_empty_file_path():
     """空 file_path"""
-    resp = client.post("/parse", json={"file_path": ""})
+    resp = _post_parse("")
     assert resp.status_code == 400
 
 
@@ -78,11 +113,13 @@ def test_pdf_parse_small():
         tmp_path = f.name
 
     try:
-        resp = client.post("/parse", json={"file_path": tmp_path})
+        resp = _post_parse(tmp_path)
         assert resp.status_code == 200
         data = resp.json()
         assert data["file_type"] == "pdf"
         assert data["raw_text"] is not None
+        assert "images" in data  # 响应包含 images 字段（PDF 默认空列表）
+        assert data["images"] == []
     finally:
         os.unlink(tmp_path)
 

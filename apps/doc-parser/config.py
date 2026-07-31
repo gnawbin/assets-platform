@@ -12,17 +12,10 @@ load_dotenv()
 PARSER_HOST = os.getenv("PARSER_HOST", "127.0.0.1")
 PARSER_PORT = int(os.getenv("PARSER_PORT", "8321"))
 
-# ─── VLM 模式 ───────────────────────────────────────
-# ollama: 本地 Ollama
-# cloud:  云端 API（经 Rust llm_gateway_service 中转）
-VLM_MODE = os.getenv("VLM_MODE", "ollama")
-
-# Ollama 配置
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_VLM_MODEL = os.getenv("OLLAMA_VLM_MODEL", "llava")  # 或 llama3.2-vision
-
-# Rust 后端 LLM 网关地址（云端 VLM 模式用）
-RUST_GATEWAY_URL = os.getenv("RUST_GATEWAY_URL", "http://127.0.0.1:1420")
+# ─── 认证 ───────────────────────────────────────────
+# Tauri 启动 doc-parser 时注入的动态密钥（不要写死在 .env）
+# 见 docs/知识库模块/文档解析与RAG记忆链路设计方案.md 第 11 章
+API_TOKEN = os.getenv("DOC_PARSER_TOKEN", "")
 
 # ─── Whisper ────────────────────────────────────────
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")  # tiny/base/small/medium/large
