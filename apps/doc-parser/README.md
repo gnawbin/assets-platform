@@ -8,7 +8,7 @@
 
 ```bash
 # 1. 安装依赖
-pip install -r requirements.txt
+pip install -e .
 
 # 2. 复制配置
 cp .env.example .env
@@ -34,7 +34,7 @@ curl http://127.0.0.1:8321/health
 doc-parser/
 ├── main.py              # FastAPI 入口
 ├── config.py            # 环境配置
-├── requirements.txt     # 依赖清单
+├── pyproject.toml       # 依赖清单
 ├── models/              # 数据模型
 ├── parsers/             # 解析器（PDF/图片/音频/视频）
 ├── vlm/                 # VLM 客户端（Ollama + 云端）

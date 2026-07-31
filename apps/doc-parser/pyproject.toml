@@ -1,0 +1,31 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=68.0"]
+
+[project]
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "pdfplumber>=0.11.0", # PDF 解析
+  "pytesseract>=0.3.10", # OCR（扫描件 PDF 需要）
+  "pdf2image>=1.17.0",
+  "Pillow>=11.0.0", # 图片处理
+  "openai-whisper>=20250625", # 语音转写
+  "ffmpeg-python>=0.2.0", # 视频处理
+  "httpx>=0.28.0", # HTTP 客户端（VLM 云端模式）
+  "python-dotenv>=1.0.0", # 配置
+  "pydantic>=2.9.0",
+]
+description = "多模态文档解析服务：PDF/图片/音频/视频 → 纯文本"
+name = "doc-parser"
+requires-python = ">=3.10"
+version = "0.1.0"
+
+[project.optional-dependencies]
+test = [
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.4.0",
+]
+
+[tool.setuptools]
+packages = ["models", "parsers", "utils", "vlm"]
