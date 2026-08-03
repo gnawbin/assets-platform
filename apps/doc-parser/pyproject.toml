@@ -16,6 +16,9 @@ dependencies = [
   "ffmpeg-python>=0.2.0", # 视频处理
   "python-dotenv>=1.0.0", # 配置
   "pydantic>=2.9.0",
+  "sqlalchemy[asyncio]>=2.0.0", # SQLAlchemy ORM（PostgreSQL 持久化）
+  "asyncpg>=0.30.0", # asyncpg 驱动（SQLAlchemy async 执行引擎）
+  "surrealdb>=0.3.2", # SurrealDB Python SDK（向量检索）
 ]
 description = "多模态文档解析服务：PDF/Word/Excel/图片/音频/视频 → 纯文本"
 name = "doc-parser"
@@ -29,4 +32,4 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["models", "parsers", "utils"]
+packages = ["models", "parsers", "utils", "controllers", "services"]

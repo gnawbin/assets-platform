@@ -1,5 +1,8 @@
 README.md
 pyproject.toml
+controllers/__init__.py
+controllers/parse_controller.py
+controllers/system_controller.py
 doc_parser.egg-info/PKG-INFO
 doc_parser.egg-info/SOURCES.txt
 doc_parser.egg-info/dependency_links.txt
@@ -9,13 +12,13 @@ models/__init__.py
 models/parse_result.py
 parsers/__init__.py
 parsers/audio_parser.py
+parsers/docs_parser.py
 parsers/image_parser.py
 parsers/pdf_parser.py
 parsers/video_parser.py
+services/__init__.py
+services/parse_service.py
 tests/test_api.py
+tests/test_parse_service.py
 utils/__init__.py
 utils/ocr.py
-vlm/__init__.py
-vlm/base.py
-vlm/cloud_client.py
-vlm/ollama_client.py
