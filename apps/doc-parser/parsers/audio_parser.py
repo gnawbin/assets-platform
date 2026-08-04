@@ -38,6 +38,19 @@ class AudioParser:
             verbose=False,
         )
 
+        # 提取带时间戳的断句片段（供视频混合文本/切片回溯使用）
+        segments = []
+        for seg in result.get("segments", []):
+            text = seg.get("text", "").strip()
+            if text:
+                segments.append(
+                    {
+                        "start": float(seg.get("start", 0)),
+                        "end": float(seg.get("end", 0)),
+                        "text": text,
+                    }
+                )
+
         return ParseResult(
             file_name=file_path.rsplit("/", 1)[-1],
             file_type="audio",
@@ -46,6 +59,7 @@ class AudioParser:
                 "duration_sec": round(result.get("duration", 0)),
                 "language": result.get("language", "unknown"),
                 "segments_count": len(result.get("segments", [])),
+                "segments": segments,
                 "whisper_model": model_name,
                 "parse_duration_ms": int((time.time() - start) * 1000),
             },

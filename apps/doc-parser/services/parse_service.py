@@ -13,6 +13,9 @@ from parsers.image_parser import ImageParser
 from parsers.audio_parser import AudioParser
 from parsers.video_parser import VideoParser
 from parsers.docs_parser import DocsParser
+from services.text_chunker import chunk_video_text
+from services.vector_store import vector_store
+import config
 
 
 class ParseService:
@@ -53,7 +56,15 @@ class ParseService:
         return file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
 
     async def detect_and_parse(self, file_path: str, options: dict | None = None) -> ParseResult:
-        """根据文件扩展名选择解析器"""
+        """根据文件扩展名选择解析器
+
+        - 普通文件：仅解析
+        - 视频：解析后自动执行 切片 → Embedding → SurrealDB 入库（幂等去重）
+          options 可含：
+          - skip_index: True 时仅解析不向量化（默认 False）
+          - video_id:   外部指定业务视频 ID（默认使用文件 SHA-256）
+          - permission_level: 入库权限等级（默认 private）
+        """
         options = options or {}
         ext = self._get_file_ext(file_path)
         file_type = self.EXT_TO_TYPE.get(ext)
@@ -76,9 +87,64 @@ class ParseService:
         elif file_type == "audio":
             return await self.audio_parser.parse(file_path, options)
         elif file_type == "video":
-            return await self.video_parser.parse(file_path, options)
+            result = await self.video_parser.parse(file_path, options)
+            return await self._index_video(result, file_path, options)
 
         raise HTTPException(status_code=500, detail=f"解析器未实现: {file_type}")
+
+    async def _index_video(
+        self, result: ParseResult, file_path: str, options: dict
+    ) -> ParseResult:
+        """视频解析后切片 → Embedding → SurrealDB 入库
+
+        - 幂等：同一 video_id 已入库则跳过（设计 5.3）
+        - 回填 metadata["chunks_indexed"]；已入库时为 0（标记复用现有记忆）
+        """
+        if options.get("skip_index", False):
+            return result
+
+        video_id = options.get("video_id") or result.metadata.get("video_id")
+        if not video_id:
+            return result
+
+        segments = result.metadata.get("segments", [])
+        if not segments:
+            return result
+
+        # 优先复用向量库索引检查（避免重复解析）
+        try:
+            if await vector_store.exists(video_id):
+                result.metadata["chunks_indexed"] = 0
+                result.metadata["indexed"] = True
+                result.metadata["deduplicated"] = True
+                return result
+        except Exception as e:
+            print(f"[ParseService] 向量库幂等检查失败: {e}")
+
+        # 切片
+        chunks = chunk_video_text(
+            video_id=video_id,
+            file_name=result.file_name,
+            segments=segments,
+            window_sec=options.get("chunk_window_sec", config.CHUNK_WINDOW_SEC),
+            max_chars=options.get("chunk_max_chars", config.CHUNK_MAX_CHARS),
+            duration_sec=result.metadata.get("duration_sec", 0),
+        )
+        if not chunks:
+            return result
+
+        # 入库
+        try:
+            await vector_store.ensure_schema()
+            written = await vector_store.add_chunks(chunks)
+            result.metadata["chunks_indexed"] = written
+            result.metadata["indexed"] = True
+            result.metadata["deduplicated"] = written == 0
+        except Exception as e:
+            print(f"[ParseService] 视频向量化入库失败: {e}")
+            result.metadata["index_error"] = str(e)
+
+        return result
 
     async def parse_batch(
         self, files: list[tuple[str, dict | None]]

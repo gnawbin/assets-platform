@@ -1,0 +1,19 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.1, pluggy-1.6.0 -- /home/ubuntu/conda/envs/aiagent/bin/python
+cachedir: .pytest_cache
+rootdir: /home/ubuntu/project/assets-platform/apps/doc-parser
+configfile: pyproject.toml
+plugins: asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+tests/test_video_parse.py::TestVideoParse::test_video_file_exists PASSED [ 50%]
+tests/test_video_parse.py::TestVideoParse::test_video_parse_to_text PASSED [100%]
+
+=============================== warnings summary ===============================
+tests/test_video_parse.py::TestVideoParse::test_video_parse_to_text
+  /home/ubuntu/conda/envs/aiagent/lib/python3.12/site-packages/whisper/transcribe.py:132: UserWarning: FP16 is not supported on CPU; using FP32 instead
+    warnings.warn("FP16 is not supported on CPU; using FP32 instead")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=================== 2 passed, 1 warning in 172.00s (0:02:52) ===================

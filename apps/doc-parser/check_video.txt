@@ -1,0 +1,4 @@
+VIDEO_EXISTS: True
+VIDEO_SIZE: 13131625
+imageio_ffmpeg: /home/ubuntu/conda/envs/aiagent/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2 
+which_ffmpeg: None

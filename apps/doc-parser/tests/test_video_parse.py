@@ -4,8 +4,8 @@
     python -m pytest tests/test_video_parse.py -v
 
 说明：
-- 调用 doc-parser 的 VideoParser（ffmpeg 提取音频 → Whisper 转写）
-- 转写文本保存到 tests/output/1-1_工业机器人控制软件非实时系统组成.txt
+- 调用 doc-parser 的 VideoParser（ffmpeg 提取音频 → Whisper 转写 + 帧 OCR）
+- 混合文本保存到 tests/output/1-1_工业机器人控制软件非实时系统组成.txt
 """
 
 import os
@@ -15,7 +15,7 @@ import pytest
 from parsers.video_parser import VideoParser
 
 # 目标视频文件（绝对路径）
-VIDEO_FILE = r"D:\文档\005029-机器人课程\3、机器人控制软件非实时系统组成与实现\1-1 工业机器人控制软件非实时系统组成.mp4"
+VIDEO_FILE = r"/mnt/c/project/ceshi.mp4"
 
 # 转写文本输出文件名（保存到 tests/output/ 下）
 OUTPUT_FILE = "1-1_工业机器人控制软件非实时系统组成.txt"
@@ -57,12 +57,21 @@ class TestVideoParse:
         )
         assert result.metadata.get("has_audio") is True
         assert result.metadata.get("duration_sec", 0) > 0
+
+        # 全量转文本增强断言：video_id（SHA-256）+ 带时间戳 segments
+        assert result.metadata.get("video_id"), "metadata 应包含 video_id（SHA-256）"
+        segments = result.metadata.get("segments", [])
+        assert len(segments) > 0, "metadata 应包含带时间戳的 segments"
+        types = {s["type"] for s in segments}
+        assert "voice" in types, "语音转写段应存在"
         print(
             f"\n视频时长: {result.metadata['duration_sec']}s | "
             f"帧数: {result.metadata.get('frames_extracted', 0)} | "
+            f"OCR 帧数: {result.metadata.get('ocr_frames', 0)} | "
+            f"文本段数: {len(segments)} | "
             f"解析耗时: {result.metadata.get('parse_duration_ms', 0)}ms"
         )
-        print(f"转写文本预览（前 300 字）:\n{result.raw_text.strip()[:300]}")
+        print(f"混合文本预览（前 300 字）:\n{result.raw_text.strip()[:300]}")
 
         # 3. 保存转写文本（便于直接查看完整结果）
         os.makedirs(_output_dir(), exist_ok=True)

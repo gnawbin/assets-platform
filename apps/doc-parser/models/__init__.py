@@ -5,6 +5,10 @@ from .parse_result import (
     BatchParseRequest,
     BatchParseResult,
     HealthResponse,
+    SearchRequest,
+    SearchResultItem,
+    AskRequest,
+    AskResponse,
 )
 
 __all__ = [
@@ -13,4 +17,8 @@ __all__ = [
     "BatchParseRequest",
     "BatchParseResult",
     "HealthResponse",
+    "SearchRequest",
+    "SearchResultItem",
+    "AskRequest",
+    "AskResponse",
 ]
