@@ -30,6 +30,8 @@ FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "30"))
 # 与 Rust 端向量维度保持一致（bge-small-zh = 512，bge-base-zh = 768）
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "512"))
+# HF 下载端点（国内网络可设 https://hf-mirror.com，留空走官方）
+HF_ENDPOINT = os.getenv("HF_ENDPOINT", "")
 
 # ─── 文本切片 ───────────────────────────────────────
 # 时间窗口切分（秒），与 FRAME_INTERVAL_SEC 对齐

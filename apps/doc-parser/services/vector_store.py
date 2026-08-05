@@ -88,10 +88,14 @@ class VectorStore:
     # ─── 连接管理 ─────────────────────────────────────
 
     async def _connect(self):
-        """建立 SurrealDB 连接并完成认证/选库（由调用方关闭）"""
-        from surrealdb import Surreal
+        """建立 SurrealDB 连接并完成认证/选库（由调用方关闭）
 
-        client = Surreal(self.url)
+        surrealdb 2.0：AsyncSurreal(url) 返回异步连接（支持 __aenter__）；
+        Surreal(url) 返回阻塞同步连接。必须用 AsyncSurreal 才能在 async 场景使用。
+        """
+        from surrealdb import AsyncSurreal
+
+        client = AsyncSurreal(self.url)
         await client.__aenter__()
 
         # 嵌入式（file://mem://）通常无需认证；远程 ws 需要
@@ -112,31 +116,29 @@ class VectorStore:
     # ─── Schema ───────────────────────────────────────
 
     async def ensure_schema(self) -> None:
-        """建表 + 建向量索引（幂等，重复调用安全）"""
+        """建表 + 建向量索引（幂等，重复调用安全）
+
+        surrealdb 2.0 语法：DEFINE TABLE（非 CREATE TABLE）；
+        索引：COLUMNS embedding MTREE DIMENSION n（无 DIST TYPE，2.0 不支持）。
+        """
         client = await self._connect()
         try:
-            # 建表（幂等）
-            await client.query(f"CREATE TABLE {self.table}")
+            # 建表（幂等；DEFINE TABLE 重复执行报已存在，忽略）
+            try:
+                await client.query(f"DEFINE TABLE {self.table}")
+            except Exception as e:
+                print(f"[VectorStore] 建表跳过（可能已存在）: {e}")
             # 建向量索引（幂等：已存在则忽略）
-            for index_sql in self._index_sqls():
-                try:
-                    await client.query(index_sql)
-                except Exception as e:
-                    # 已有索引或语法差异时忽略
-                    print(f"[VectorStore] 索引创建跳过（可能已存在）: {e}")
+            index_sql = (
+                f"DEFINE INDEX idx_embedding ON {self.table} "
+                f"COLUMNS embedding MTREE DIMENSION {self.dim}"
+            )
+            try:
+                await client.query(index_sql)
+            except Exception as e:
+                print(f"[VectorStore] 索引创建跳过（可能已存在）: {e}")
         finally:
             await client.__aexit__(None, None, None)
-
-    def _index_sqls(self) -> list[str]:
-        """向量索引 SQL（MTREE + cosine；DIST TYPE 语法失败时回退）"""
-        base = (
-            f"DEFINE INDEX idx_embedding ON {self.table} "
-            f"COLUMNS embedding MTREE DIMENSION {self.dim}"
-        )
-        return [
-            f"{base} DIST TYPE COSINE",
-            base,  # 兼容旧版 SurrealDB（无 DIST 支持）
-        ]
 
     # ─── 幂等去重 ─────────────────────────────────────
 
@@ -211,7 +213,7 @@ class VectorStore:
         """向量检索相关切片
 
         返回：[{video_id, chunk_index, start_sec, end_sec, type, content, score}]
-        score = 1 - cosine_distance（越大越相关）
+        score = vector::similarity::cosine 相似度（0~1，越大越相关）
         """
         query_vector = await EmbeddingService.embed_one(query)
 
@@ -231,16 +233,15 @@ class VectorStore:
 
             sql = (
                 f"SELECT id, video_id, chunk_index, start_sec, end_sec, type, content, file_name, "
-                f"vector::distance::cosine(embedding, $query) AS distance "
+                f"vector::similarity::cosine(embedding, $query) AS score "
                 f"FROM {self.table} WHERE {where} "
-                f"ORDER BY distance ASC LIMIT $top_k"
+                f"ORDER BY score DESC LIMIT $top_k"
             )
             rows = await client.query(sql, binds)
             records = self._first_result(rows)
 
             results = []
             for r in records:
-                dist = float(r.get("distance", 1.0))
                 results.append(
                     {
                         "video_id": r.get("video_id"),
@@ -250,7 +251,7 @@ class VectorStore:
                         "type": r.get("type"),
                         "content": r.get("content"),
                         "file_name": r.get("file_name"),
-                        "score": round(1.0 - dist, 4),
+                        "score": round(float(r.get("score", 0.0)), 4),
                     }
                 )
             return results
@@ -276,7 +277,8 @@ class VectorStore:
     def _first_result(rows) -> list[dict]:
         """解析 SurrealDB query 返回：取第一条结果集
 
-        兼容 v2.x（list[Response]，每项含 result）与旧版（嵌套 list）。
+        surrealdb 2.0：query() 已解包，直接返回 list[dict]（无 Response 包装）。
+        兼容旧版（list[Response] 含 result key 或嵌套 list）。
         """
         if isinstance(rows, list):
             first = rows[0] if rows else None

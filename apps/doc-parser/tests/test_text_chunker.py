@@ -39,8 +39,9 @@ class TestTextChunker:
 
         # chunk_index 连续编号
         assert [c.chunk_index for c in chunks] == [0, 1]
-        # 时间戳前缀存在
-        assert "[10-40 voice]" in chunks[0].text or "[00-30" in chunks[0].text or "语音" in chunks[0].text
+        # 时间戳前缀存在（mm:ss 格式）
+        assert "[00:10-00:40 voice]" in chunks[0].text
+        assert "[00:15-00:45 ocr]" in chunks[0].text
 
     def test_type_classification(self):
         """类型分类：全 voice → voice；全 ocr → ocr"""
