@@ -16,7 +16,7 @@ import config
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from controllers import parse_router, system_router, rag_router
+from controllers import parse_router, system_router, rag_router, workflow_router
 
 app = FastAPI(
     title="doc-parser",
@@ -59,6 +59,7 @@ async def auth_middleware(request: Request, call_next):
 app.include_router(parse_router)
 app.include_router(system_router)
 app.include_router(rag_router)
+app.include_router(workflow_router)
 
 
 # ═══════════════════ 全局异常处理 ═══════════════════

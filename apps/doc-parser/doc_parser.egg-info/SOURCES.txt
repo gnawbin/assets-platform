@@ -2,7 +2,9 @@ README.md
 pyproject.toml
 controllers/__init__.py
 controllers/parse_controller.py
+controllers/rag_controller.py
 controllers/system_controller.py
+controllers/workflow_controller.py
 doc_parser.egg-info/PKG-INFO
 doc_parser.egg-info/SOURCES.txt
 doc_parser.egg-info/dependency_links.txt
@@ -10,6 +12,7 @@ doc_parser.egg-info/requires.txt
 doc_parser.egg-info/top_level.txt
 models/__init__.py
 models/parse_result.py
+models/workflow_models.py
 parsers/__init__.py
 parsers/audio_parser.py
 parsers/docs_parser.py
@@ -18,7 +21,14 @@ parsers/pdf_parser.py
 parsers/video_parser.py
 services/__init__.py
 services/parse_service.py
+services/text_chunker.py
+services/vector_store.py
+services/workflow_executor.py
 tests/test_api.py
 tests/test_parse_service.py
+tests/test_text_chunker.py
+tests/test_vector_store.py
+tests/test_video_parse.py
+tests/test_workflow_executor.py
 utils/__init__.py
 utils/ocr.py

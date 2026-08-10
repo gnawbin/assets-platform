@@ -52,3 +52,4 @@ SURREALDB_TABLE = os.getenv("SURREALDB_TABLE", "video_knowledge")
 # ─── LLM（/ask RAG 问答生成）─────────────────────────
 VLM_MODE = os.getenv("VLM_MODE", "ollama")  # ollama / cloud
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")  # 工作流 LLM 节点默认模型

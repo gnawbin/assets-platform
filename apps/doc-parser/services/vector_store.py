@@ -31,6 +31,11 @@ class EmbeddingService:
         from sentence_transformers import SentenceTransformer
 
         if cls._model is None or cls._model_name != config.EMBEDDING_MODEL:
+            # 支持 HF 镜像端点（国内网络）：加载前设置 HF_ENDPOINT
+            if config.HF_ENDPOINT:
+                import os
+
+                os.environ["HF_ENDPOINT"] = config.HF_ENDPOINT
             cls._model = SentenceTransformer(config.EMBEDDING_MODEL)
             cls._model_name = config.EMBEDDING_MODEL
         return cls._model
