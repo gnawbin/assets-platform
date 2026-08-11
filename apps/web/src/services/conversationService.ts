@@ -8,6 +8,20 @@ import { api } from '@/utils/api';
 
 // ======================== 类型定义 ========================
 
+/** 聊天附件（多模态输入） */
+export interface ChatAttachment {
+    /** 附件类型：image / video / audio / document */
+    type: 'image' | 'video' | 'audio' | 'document';
+    /** 文件名 */
+    name: string;
+    /** 图片的 base64 data URL（type=image 时） */
+    dataUrl?: string;
+    /** S3 文件 URL（video/audio/document 时） */
+    url?: string;
+    /** MIME 类型 */
+    mime?: string;
+}
+
 export interface ConversationResponse {
     convId: string;
     answer: string;
@@ -39,6 +53,8 @@ export interface MessageResponse {
     metadata?: {
         model?: string;
         durationMs?: number;
+        /** 多模态附件（历史消息回看渲染） */
+        attachments?: ChatAttachment[];
     };
     createdAt: string;
 }
@@ -65,6 +81,8 @@ export function createConversation(params: {
     bindTreeNodeId?: string;
     providerId?: string;
     modelId?: string;
+    /** 多模态附件列表 */
+    attachments?: ChatAttachment[];
 }): Promise<ConversationResponse> {
     return api.post('create_conversation', params);
 }
@@ -76,6 +94,8 @@ export function sendMessage(params: {
     question: string;
     providerId?: string;
     modelId?: string;
+    /** 多模态附件列表 */
+    attachments?: ChatAttachment[];
 }): Promise<ConversationResponse> {
     return api.post('send_message', params);
 }

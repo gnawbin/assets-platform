@@ -269,6 +269,45 @@ impl S3Client {
         Ok(url.uri().to_string())
     }
 
+    /// 下载对象到本地文件（供 doc-parser 等需要本地文件路径的场景）
+    ///
+    /// 返回下载后的本地文件路径（`target_dir` 下的原文件名）。
+    pub async fn download_object(
+        &self,
+        bucket: &str,
+        key: &str,
+        target_dir: &std::path::Path,
+    ) -> Result<std::path::PathBuf, S3Error> {
+        let resp = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| S3Error::AwsError(aws_sdk_s3::Error::from(e)))?;
+
+        let file_name = std::path::Path::new(key)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("download.bin");
+        let local_path = target_dir.join(file_name);
+
+        let bytes = resp
+            .body
+            .collect()
+            .await
+            .map_err(|e| S3Error::OperationFailed(format!("读取 S3 对象失败: {}", e)))?
+            .into_bytes();
+
+        std::fs::create_dir_all(target_dir)
+            .map_err(|e| S3Error::OperationFailed(format!("创建目录失败: {}", e)))?;
+        std::fs::write(&local_path, &bytes)
+            .map_err(|e| S3Error::OperationFailed(format!("写入本地文件失败: {}", e)))?;
+
+        Ok(local_path)
+    }
+
     /// 删除对象
     pub async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), S3Error> {
         self.client

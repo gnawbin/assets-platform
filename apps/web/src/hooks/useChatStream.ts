@@ -2,16 +2,16 @@
  * SSE 流式对话 Hook
  *
  * 通过 HTTP SSE 端点实现逐字输出效果。
- * 当前为预备组件，未绑定到 UI 中。
  * 使用方式：
  *   const chatStream = useChatStream();
- *   chatStream.send({ userId, question, convId });
+ *   chatStream.send({ userId, question, convId, attachments });
  *
- * 后端端点：GET /api/chat/stream?user_id=xxx&question=xxx&conv_id=xxx
+ * 后端端点：POST /api/chat/stream（JSON body，支持附件）
  * 后端地址由 NEXT_PUBLIC_API_BASE_URL 环境变量控制，默认 http://localhost:3001
  */
 
 import { useState, useRef, useCallback } from 'react';
+import type { ChatAttachment } from '@/services/conversationService';
 
 export interface StreamResult {
     convId?: string;
@@ -43,7 +43,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001'
  * });
  *
  * // 发送问题（不等待，逐字回调）
- * chatStream.send({ userId: '123', question: '什么是折旧？' });
+ * chatStream.send({ userId: '123', question: '什么是折旧？', attachments: [...] });
  * ```
  */
 export function useChatStream(callbacks?: StreamCallbacks) {
@@ -51,7 +51,12 @@ export function useChatStream(callbacks?: StreamCallbacks) {
     const abortRef = useRef<AbortController | null>(null);
 
     const send = useCallback(
-        async (params: { userId: string; question: string; convId?: string }) => {
+        async (params: {
+            userId: string;
+            question: string;
+            convId?: string;
+            attachments?: ChatAttachment[];
+        }) => {
             // 取消之前的流
             if (abortRef.current) {
                 abortRef.current.abort();
@@ -62,21 +67,20 @@ export function useChatStream(callbacks?: StreamCallbacks) {
             setStreaming(true);
 
             try {
-                // 构建 SSE URL
-                const queryParams = new URLSearchParams({
-                    user_id: params.userId,
-                    question: params.question,
-                });
-                if (params.convId) {
-                    queryParams.set('conv_id', params.convId);
-                }
-
-                const url = `${BASE_URL}/api/chat/stream?${queryParams.toString()}`;
+                const url = `${BASE_URL}/api/chat/stream`;
                 const response = await fetch(url, {
+                    method: 'POST',
                     signal: controller.signal,
                     headers: {
                         Accept: 'text/event-stream',
+                        'Content-Type': 'application/json',
                     },
+                    body: JSON.stringify({
+                        user_id: params.userId,
+                        question: params.question,
+                        conv_id: params.convId || null,
+                        attachments: params.attachments || [],
+                    }),
                 });
 
                 if (!response.ok) {
@@ -169,5 +173,6 @@ export function useChatStream(callbacks?: StreamCallbacks) {
 
     return { send, cancel, streaming };
 }
+
 
 

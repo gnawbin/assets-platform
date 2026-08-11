@@ -1,25 +1,30 @@
 //! 智能问答 HTTP API 路由
 //!
-//! 提供 SSE 流式输出端点 /api/chat/stream
+//! 提供 SSE 流式输出端点 POST /api/chat/stream
 //! 保留现有 Tauri invoke 的非流式对话作为默认方案。
 
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::IntoResponse;
-use futures::stream::Stream;
+use axum::Json;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::service::conversation_service::ConversationService;
+use crate::service::conversation_service::{
+    AttachmentParam, ConversationService,
+};
 
-/// SSE 查询参数
+/// SSE 流式对话请求体
 #[derive(Debug, Deserialize)]
-pub struct ChatStreamQuery {
+pub struct ChatStreamRequest {
     pub user_id: String,
     pub question: String,
     pub conv_id: Option<String>,
+    /// 附件列表（图片走 dataUrl，视频/音频/文档走 S3 url）
+    #[serde(default)]
+    pub attachments: Vec<AttachmentParam>,
 }
 
 /// SSE 流式对话状态
@@ -29,7 +34,8 @@ pub struct ChatRouterState {
 
 /// SSE 流式对话端点
 ///
-/// GET /api/chat/stream?user_id=xxx&question=xxx&conv_id=xxx
+/// POST /api/chat/stream
+/// body: { "user_id": "xxx", "question": "xxx", "conv_id": "xxx", "attachments": [...] }
 ///
 /// 返回 SSE 事件流：
 /// event: token → { "text": "..." }
@@ -37,7 +43,7 @@ pub struct ChatRouterState {
 /// event: error → { "message": "..." }
 pub async fn chat_stream(
     State(state): State<Arc<ChatRouterState>>,
-    Query(params): Query<ChatStreamQuery>,
+    Json(params): Json<ChatStreamRequest>,
 ) -> impl IntoResponse {
     let user_id: i64 = match params.user_id.parse() {
         Ok(id) => id,
@@ -51,11 +57,12 @@ pub async fn chat_stream(
         }
     };
 
-    let (sse_tx, mut sse_rx) = mpsc::channel::<String>(64);
+    let (sse_tx, sse_rx) = mpsc::channel::<String>(64);
 
     let llm_router = state.llm_router.clone();
     let question = params.question.clone();
     let conv_id = params.conv_id.clone();
+    let attachments = params.attachments.clone();
 
     // 后台任务执行 RAG + LLM 调用
     tokio::spawn(async move {
@@ -78,7 +85,7 @@ pub async fn chat_stream(
             }
         });
 
-        if let Some(existing_conv_id) = conv_id {
+        let run = if let Some(existing_conv_id) = conv_id {
             let conv_id_int: i64 = match existing_conv_id.parse() {
                 Ok(id) => id,
                 Err(e) => {
@@ -93,68 +100,70 @@ pub async fn chat_stream(
                 }
             };
 
-            match ConversationService::continue_conversation_stream(
-                conv_id_int,
-                user_id,
-                &question,
-                &llm_router,
-                string_tx,
-            )
-            .await
-            {
-                Ok(resp) => {
-                    let _ = sse_tx
-                        .send(format!(
-                            "event: done\ndata: {}\n\n",
-                            serde_json::json!({
-                                "convId": resp.conv_id,
-                                "citedAssets": resp.cited_assets,
-                                "usage": resp.usage,
-                            })
-                            .to_string()
-                        ))
-                        .await;
-                }
-                Err(e) => {
-                    let _ = sse_tx
-                        .send(format!(
-                            "event: error\ndata: {}\n\n",
-                            serde_json::json!({"message": e}).to_string()
-                        ))
-                        .await;
-                }
+            if attachments.is_empty() {
+                ConversationService::continue_conversation_stream(
+                    conv_id_int,
+                    user_id,
+                    &question,
+                    &llm_router,
+                    string_tx,
+                )
+                .await
+            } else {
+                ConversationService::continue_conversation_with_attachments_stream(
+                    conv_id_int,
+                    user_id,
+                    &question,
+                    &llm_router,
+                    string_tx,
+                    &attachments,
+                )
+                .await
             }
         } else {
-            match ConversationService::create_conversation_and_answer_stream(
-                user_id,
-                &question,
-                None,
-                &llm_router,
-                string_tx,
-            )
-            .await
-            {
-                Ok(resp) => {
-                    let _ = sse_tx
-                        .send(format!(
-                            "event: done\ndata: {}\n\n",
-                            serde_json::json!({
-                                "convId": resp.conv_id,
-                                "citedAssets": resp.cited_assets,
-                                "usage": resp.usage,
-                            })
-                            .to_string()
-                        ))
-                        .await;
-                }
-                Err(e) => {
-                    let _ = sse_tx
-                        .send(format!(
-                            "event: error\ndata: {}\n\n",
-                            serde_json::json!({"message": e}).to_string()
-                        ))
-                        .await;
-                }
+            if attachments.is_empty() {
+                ConversationService::create_conversation_and_answer_stream(
+                    user_id,
+                    &question,
+                    None,
+                    &llm_router,
+                    string_tx,
+                )
+                .await
+            } else {
+                ConversationService::create_conversation_and_answer_with_attachments_stream(
+                    user_id,
+                    &question,
+                    None,
+                    &llm_router,
+                    string_tx,
+                    &attachments,
+                )
+                .await
+            }
+        };
+
+        match run {
+            Ok(resp) => {
+                let _ = sse_tx
+                    .send(format!(
+                        "event: done\ndata: {}\n\n",
+                        serde_json::json!({
+                            "convId": resp.conv_id,
+                            "citedAssets": resp.cited_assets,
+                            "usage": resp.usage,
+                        })
+                        .to_string()
+                    ))
+                    .await;
+            }
+            Err(e) => {
+                let _ = sse_tx
+                    .send(format!(
+                        "event: error\ndata: {}\n\n",
+                        serde_json::json!({"message": e}).to_string()
+                    ))
+                    .await;
             }
         }
     });

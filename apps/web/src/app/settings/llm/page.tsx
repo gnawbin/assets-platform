@@ -152,7 +152,7 @@ export default function LlmConfigPage() {
         t === 'chat' ? 'blue' : t === 'embedding' ? 'teal' : 'violet';
 
     const modelTypeLabel = (t: string) =>
-        t === 'chat' ? '对话' : t === 'embedding' ? '向量' : t;
+        t === 'chat' ? '对话' : t === 'embedding' ? '向量' : t === 'vision' ? '视觉' : t;
 
     if (loading) return <Layout><Group justify="center" py="xl"><Loader /></Group></Layout>;
 
@@ -288,6 +288,7 @@ export default function LlmConfigPage() {
                     <Select label="模型类型" required data={[
                         { value: 'chat', label: '对话 (chat)' },
                         { value: 'embedding', label: '向量 (embedding)' },
+                        { value: 'vision', label: '视觉 (vision)' },
                     ]} value={modelForm.modelType}
                         onChange={(v) => setModelForm({ ...modelForm, modelType: v || 'chat' })} />
                     <NumberInput label="上下文窗口" value={modelForm.contextWindow}

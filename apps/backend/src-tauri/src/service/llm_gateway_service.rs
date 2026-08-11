@@ -268,6 +268,36 @@ impl LLMRouter {
                     );
                 }
             }
+
+            // 3. 加载 vision（视觉/多模态）模型
+            let vision_model: Option<String> = sqlx::query_scalar(
+                sqlx::AssertSqlSafe(format!(
+                    "SELECT model_code FROM {}llm_model WHERE provider_id = $1 AND model_type = 'vision' AND enable = true AND deleted = 0 ORDER BY id LIMIT 1",
+                    prefix
+                ))
+            )
+            .bind(p.id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(|e| format!("查询 vision 模型失败: {}", e))?;
+
+            match create_adapter_with_model(&p, vision_model.as_deref()) {
+                Ok(adapter) => {
+                    weighted.push(WeightedProvider {
+                        provider_id: p.id,
+                        provider_code: p.provider_code.clone(),
+                        adapter: std::sync::Arc::new(adapter),
+                        weight,
+                        model_type: "vision".to_string(),
+                    });
+                }
+                Err(e) => {
+                    error!(
+                        "跳过 Provider {} vision ({}): {}",
+                        p.id, p.provider_code, e
+                    );
+                }
+            }
         }
 
         let mut lb = self.load_balancer.lock().unwrap();
@@ -328,6 +358,112 @@ impl LLMRouter {
             // 未指定则走自动故障转移
             self.chat(request).await
         }
+    }
+
+    /// 使用指定 provider 的指定模型类型调用 Chat（内部方法，不锁熔断器）
+    async fn chat_with_provider_type(
+        &self,
+        request: LLMChatRequest,
+        provider_id: i64,
+        model_type: &str,
+    ) -> Result<LLMChatResponse, String> {
+        let adapter = {
+            let lb = self.load_balancer.lock().unwrap();
+            lb.providers
+                .iter()
+                .find(|p| p.provider_id == provider_id && p.model_type == model_type)
+                .map(|p| p.adapter.clone())
+        };
+
+        let adapter = match adapter {
+            Some(a) => a,
+            None => {
+                return Err(format!(
+                    "Provider {} 未注册 {} 类型模型",
+                    provider_id, model_type
+                ))
+            }
+        };
+
+        let result = adapter.chat(request).await;
+
+        let mut lb = self.load_balancer.lock().unwrap();
+        match &result {
+            Ok(_) => lb.record_success(provider_id),
+            Err(_) => lb.record_failure(provider_id),
+        }
+
+        result
+    }
+
+    /// 使用 vision（视觉/多模态）模型调用 Chat
+    ///
+    /// - provider_id 指定时：优先使用该厂商注册的 vision 模型；
+    /// - provider_id 未指定：从所有 vision 模型中自动选择（故障转移）；
+    /// - 无 vision 模型时返回清晰错误，引导在 LLM 厂商配置中添加视觉模型。
+    pub async fn chat_with_vision(
+        &self,
+        request: LLMChatRequest,
+        provider_id: Option<i64>,
+    ) -> Result<LLMChatResponse, String> {
+        // 检查熔断器
+        {
+            let cb = self.circuit_breaker.lock().unwrap();
+            if !cb.is_allowed() {
+                return Err("LLM 服务暂时不可用（熔断器开启）".to_string());
+            }
+        }
+
+        // 收集所有注册了 vision 模型的 provider
+        let vision_ids: Vec<i64> = {
+            let lb = self.load_balancer.lock().unwrap();
+            lb.providers
+                .iter()
+                .filter(|p| p.model_type == "vision")
+                .map(|p| p.provider_id)
+                .collect()
+        };
+
+        if vision_ids.is_empty() {
+            return Err(
+                "未配置视觉模型，无法处理图片/视频。请在 LLM 厂商配置中添加 vision 类型模型（如 qwen-vl / gpt-4o / glm-4v / llava）"
+                    .to_string(),
+            );
+        }
+
+        // 指定了 provider 时，优先使用该厂商的 vision 模型
+        let candidates: Vec<i64> = if let Some(pid) = provider_id {
+            if vision_ids.contains(&pid) {
+                vec![pid]
+            } else {
+                return Err(format!(
+                    "所选厂商 {} 未配置视觉模型，请在 LLM 厂商配置中添加 vision 类型模型",
+                    pid
+                ));
+            }
+        } else {
+            vision_ids
+        };
+
+        let mut last_error = String::new();
+        for &vid in &candidates {
+            match self.chat_with_provider_type(request.clone(), vid, "vision").await {
+                Ok(resp) => {
+                    info!("vision Provider {} 调用成功", vid);
+                    let mut cb = self.circuit_breaker.lock().unwrap();
+                    cb.record_success();
+                    return Ok(resp);
+                }
+                Err(e) => {
+                    error!("vision Provider {} 调用失败: {}", vid, e);
+                    last_error = e;
+                    let mut cb = self.circuit_breaker.lock().unwrap();
+                    cb.record_failure();
+                }
+            }
+        }
+
+        Err(format!("所有视觉模型 Provider 都不可用: {}", last_error))
     }
 
     /// 调用 Chat（支持多 Provider 自动故障转移）
@@ -523,9 +659,16 @@ pub mod adapters {
                 .messages
                 .iter()
                 .map(|m| {
+                    // 多模态消息：content_parts 存在时透传 content 数组（image_url），否则走纯文本
+                    let content = if let Some(parts) = &m.content_parts {
+                        serde_json::to_value(parts)
+                            .unwrap_or_else(|_| serde_json::json!(m.content))
+                    } else {
+                        serde_json::json!(m.content)
+                    };
                     serde_json::json!({
                         "role": m.role,
-                        "content": m.content
+                        "content": content
                     })
                 })
                 .collect();

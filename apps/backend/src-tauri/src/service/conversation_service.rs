@@ -5,7 +5,8 @@
 
 use crate::database;
 use crate::database::models::{
-    ChatMessage, ChunkResult, Conversation, LLMChatRequest, Message, RetrieveParams,
+    ChatMessage, ChunkResult, ContentPart, Conversation, ImageUrl, LLMChatRequest, Message,
+    RetrieveParams,
 };
 use crate::service::llm_gateway_service::LLMRouter;
 use crate::service::rag_service::RAGRetriever;
@@ -34,6 +35,56 @@ pub struct TokenUsageInfo {
     pub output_tokens: i32,
     pub total_tokens: i32,
     pub cost: f64,
+}
+
+/// 聊天附件参数（前端传入）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentParam {
+    /// 附件类型：image / video / audio / document
+    pub r#type: String,
+    /// 文件名
+    pub name: String,
+    /// 图片的 base64 data URL（type=image 时）
+    pub data_url: Option<String>,
+    /// S3 文件 URL（video/audio/document 时）
+    pub url: Option<String>,
+    /// MIME 类型
+    pub mime: Option<String>,
+}
+
+// ======================== 附件限制常量 ========================
+
+/// 单条消息附件总数上限
+const MAX_ATTACHMENTS_PER_MESSAGE: usize = 5;
+/// 单条消息图片上限
+const MAX_IMAGES_PER_MESSAGE: usize = 5;
+/// 视频/音频解析出的关键帧上限（防 token 爆炸）
+const MAX_VIDEO_FRAMES: usize = 6;
+/// 图片 data URL 长度上限（约 10MB 原始图的 base64）
+const MAX_IMAGE_DATA_URL_LEN: usize = 14 * 1024 * 1024;
+
+/// 临时解析目录 guard（Drop 时自动清理）
+struct ParseJobDir(std::path::PathBuf);
+
+impl ParseJobDir {
+    fn new() -> Result<Self, String> {
+        let dir = std::env::temp_dir()
+            .join("assets-chat-parser")
+            .join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
+        Ok(Self(dir))
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for ParseJobDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// 对话系统 Service
@@ -109,10 +160,12 @@ impl ConversationService {
                 ChatMessage {
                     role: "system".to_string(),
                     content: system_prompt.to_string(),
+                    content_parts: None,
                 },
                 ChatMessage {
                     role: "user".to_string(),
                     content: user_message.to_string(),
+                    content_parts: None,
                 },
             ],
             model: model_name, // 用户选择的模型名，None 则由 Router 默认
@@ -125,6 +178,236 @@ impl ConversationService {
 
         let response = router.chat_with_provider_id(request, provider_id).await?;
         Ok(response.content)
+    }
+
+    /// 调用 LLM 生成多模态回答（content_parts 携带图片，走 vision 模型）
+    async fn generate_answer_with_llm_multimodal(
+        router: &LLMRouter,
+        system_prompt: &str,
+        user_message: &str,
+        content_parts: Vec<ContentPart>,
+        provider_id: Option<i64>,
+        _model_name: Option<String>,
+    ) -> Result<String, String> {
+        // 用户消息：文本 + 图片内容块
+        let mut user_parts: Vec<ContentPart> = Vec::new();
+        if !user_message.trim().is_empty() {
+            user_parts.push(ContentPart::Text {
+                r#type: "text".to_string(),
+                text: user_message.to_string(),
+            });
+        }
+        user_parts.extend(content_parts);
+
+        let request = LLMChatRequest {
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt.to_string(),
+                    content_parts: None,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: user_message.to_string(),
+                    content_parts: Some(user_parts),
+                },
+            ],
+            // 多模态必须使用 vision 模型，忽略用户选的 chat 模型名（由 Router 选 vision 模型）
+            model: None,
+            temperature: Some(0.7),
+            max_tokens: Some(2048),
+            stream: Some(false),
+            user_id: None,
+            conv_id: None,
+        };
+
+        let response = router.chat_with_vision(request, provider_id).await?;
+        Ok(response.content)
+    }
+
+    /// 根据文件扩展名猜测 MIME 类型
+    fn mime_from_extension(path: &str) -> String {
+        let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+        match ext.as_str() {
+            "jpg" | "jpeg" => "image/jpeg".to_string(),
+            "png" => "image/png".to_string(),
+            "gif" => "image/gif".to_string(),
+            "webp" => "image/webp".to_string(),
+            "bmp" => "image/bmp".to_string(),
+            "tiff" => "image/tiff".to_string(),
+            "mp4" => "video/mp4".to_string(),
+            "mp3" => "audio/mpeg".to_string(),
+            "wav" => "audio/wav".to_string(),
+            "pdf" => "application/pdf".to_string(),
+            "doc" | "docx" => "application/msword".to_string(),
+            "xls" | "xlsx" => "application/vnd.ms-excel".to_string(),
+            _ => "application/octet-stream".to_string(),
+        }
+    }
+
+    /// 读取本地文件并转为 base64 data URL（用于视觉模型 image_url）
+    fn file_to_data_url(path: &str) -> Result<String, String> {
+        let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败 {}: {}", path, e))?;
+        let mime = Self::mime_from_extension(path);
+        use base64::engine::general_purpose::STANDARD as B64_STANDARD;
+        use base64::Engine as _;
+        Ok(format!(
+            "data:{};base64,{}",
+            mime,
+            B64_STANDARD.encode(bytes)
+        ))
+    }
+
+    /// 从 S3 公开 URL 提取 (bucket, object_key)
+    ///
+    /// 上传完成返回的 file_url = `{public_base_url}/{object_key}`，
+    /// public_base_url = `{endpoint}/{bucket}`。
+    fn parse_s3_url(url: &str) -> Result<(String, String), String> {
+        let config = crate::storage::s3::S3Config::from_env()
+            .map_err(|e| format!("读取 S3 配置失败: {}", e))?;
+        let prefix = format!("{}/", config.public_base_url.trim_end_matches('/'));
+        if let Some(key) = url.strip_prefix(&prefix) {
+            if !key.is_empty() {
+                return Ok((config.bucket.clone(), key.to_string()));
+            }
+        }
+        // 兜底：按 URL 路径解析，去掉开头的 bucket 段
+        let path = url
+            .split("://")
+            .nth(1)
+            .map(|s| s.split('/').skip(1).collect::<Vec<_>>().join("/"))
+            .unwrap_or_default();
+        let parts: Vec<&str> = path.splitn(2, '/').collect();
+        if parts.len() == 2 && !parts[1].is_empty() {
+            return Ok((parts[0].to_string(), parts[1].to_string()));
+        }
+        Err(format!("无法从 URL 提取 S3 对象键: {}", url))
+    }
+
+    /// 从 S3 下载附件并调用 doc-parser 解析
+    ///
+    /// 返回 (解析文本, 关键帧 base64 data URL 列表)。临时目录在此函数内 RAII 清理，
+    /// 因此图片在返回前已转成 data URL，不依赖临时路径。
+    async fn parse_uploaded_file(url: &str) -> Result<(String, Vec<String>), String> {
+        let job_dir = ParseJobDir::new()?;
+
+        let (bucket, key) = Self::parse_s3_url(url)?;
+        let s3 = crate::storage::s3::S3Client::from_env()
+            .await
+            .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
+        let local_path = s3
+            .download_object(&bucket, &key, job_dir.path())
+            .await
+            .map_err(|e| format!("从 S3 下载附件失败: {}", e))?;
+
+        // 聊天场景仅解析，不向量化入库
+        let client = crate::service::doc_parser::DocParserClient::new();
+        let options = serde_json::json!({
+            "skip_index": true,
+        });
+        let result = client
+            .parse_file(local_path.to_str().unwrap_or(""), &options)
+            .await?;
+
+        // 在临时目录存活期间把关键帧转成 data URL
+        let mut frame_data_urls = Vec::new();
+        for img in result.images.iter().take(MAX_VIDEO_FRAMES) {
+            match Self::file_to_data_url(img) {
+                Ok(data_url) => frame_data_urls.push(data_url),
+                Err(e) => error!("读取关键帧失败 {}: {}", img, e),
+            }
+        }
+
+        Ok((result.raw_text, frame_data_urls))
+    }
+
+    /// 处理附件 → (文本上下文, 图片 ContentParts, 附件元数据 JSON)
+    async fn process_attachments(
+        attachments: &[AttachmentParam],
+    ) -> Result<(String, Vec<ContentPart>, Vec<serde_json::Value>), String> {
+        if attachments.is_empty() {
+            return Ok((String::new(), Vec::new(), Vec::new()));
+        }
+        if attachments.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+            return Err(format!(
+                "单条消息最多支持 {} 个附件",
+                MAX_ATTACHMENTS_PER_MESSAGE
+            ));
+        }
+
+        let mut text_context = String::new();
+        let mut content_parts: Vec<ContentPart> = Vec::new();
+        let mut meta_attachments: Vec<serde_json::Value> = Vec::new();
+        let mut image_count = 0usize;
+
+        for att in attachments {
+            match att.r#type.as_str() {
+                "image" => {
+                    image_count += 1;
+                    if image_count > MAX_IMAGES_PER_MESSAGE {
+                        return Err(format!(
+                            "单条消息最多支持 {} 张图片",
+                            MAX_IMAGES_PER_MESSAGE
+                        ));
+                    }
+                    let data_url = att
+                        .data_url
+                        .clone()
+                        .ok_or_else(|| format!("图片附件 {} 缺少 data_url", att.name))?;
+                    if data_url.len() > MAX_IMAGE_DATA_URL_LEN {
+                        return Err(format!("图片 {} 超过大小限制（10MB）", att.name));
+                    }
+                    content_parts.push(ContentPart::Image {
+                        r#type: "image_url".to_string(),
+                        image_url: ImageUrl {
+                            url: data_url.clone(),
+                        },
+                    });
+                    meta_attachments.push(serde_json::json!({
+                        "type": "image",
+                        "name": att.name,
+                        "dataUrl": data_url,
+                        "mime": att.mime,
+                    }));
+                }
+                "video" | "audio" | "document" => {
+                    let url = att
+                        .url
+                        .clone()
+                        .ok_or_else(|| format!("附件 {} 缺少 url", att.name))?;
+                    let (raw_text, frame_data_urls) = Self::parse_uploaded_file(&url).await?;
+
+                    if !raw_text.trim().is_empty() {
+                        text_context.push_str(&format!(
+                            "\n\n【附件：{}】\n{}",
+                            att.name,
+                            raw_text.trim()
+                        ));
+                    }
+                    // 视频关键帧 → 图片内容块（复用图片数量限制）
+                    for data_url in frame_data_urls {
+                        image_count += 1;
+                        if image_count > MAX_IMAGES_PER_MESSAGE {
+                            break;
+                        }
+                        content_parts.push(ContentPart::Image {
+                            r#type: "image_url".to_string(),
+                            image_url: ImageUrl { url: data_url },
+                        });
+                    }
+
+                    meta_attachments.push(serde_json::json!({
+                        "type": att.r#type,
+                        "name": att.name,
+                        "url": url,
+                        "mime": att.mime,
+                    }));
+                }
+                other => return Err(format!("不支持的附件类型: {}", other)),
+            }
+        }
+
+        Ok((text_context, content_parts, meta_attachments))
     }
 
     /// 执行 RAG 检索并生成回答（优先 LLM，失败降级）
@@ -172,6 +455,239 @@ impl ConversationService {
         };
 
         Ok((answer, cited_ids))
+    }
+
+    /// 附件感知的 RAG 检索 + LLM 生成
+    ///
+    /// 返回 (回答, 引用资产 IDs, 附件元数据)。
+    async fn retrieve_and_answer_with_attachments(
+        question: &str,
+        bind_tree_node_id: Option<i64>,
+        router: &LLMRouter,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
+        attachments: &[AttachmentParam],
+    ) -> Result<(String, Vec<i64>, Vec<serde_json::Value>), String> {
+        // 1. 处理附件 → 文本上下文 + 图片 content parts + 附件元数据
+        let (attach_text, content_parts, meta_attachments) =
+            Self::process_attachments(attachments).await?;
+
+        // 2. RAG 检索
+        let params = RetrieveParams {
+            question: question.to_string(),
+            bind_tree_node_id,
+            top_k: 5,
+            max_tokens: 2000,
+            okf_type_filter: None,
+            min_similarity: 0.0,
+        };
+        let chunks = RAGRetriever::retrieve(&params).await?;
+        let cited_ids: Vec<i64> = chunks.iter().map(|c| c.asset_id).collect();
+
+        // 3. 刷新 Provider 列表
+        if let Err(e) = router.refresh_providers().await {
+            error!("刷新 LLM Provider 列表失败: {}", e);
+        }
+
+        // 4. 构建 Prompt（RAG 上下文 + 附件解析文本）
+        let (system_prompt, mut user_msg) = Self::build_rag_prompt(question, &chunks);
+        if !attach_text.is_empty() {
+            user_msg = format!("{}\n\n{}", user_msg, attach_text);
+        }
+
+        // 5. 有图片 → 视觉模型；否则普通 chat
+        let answer = if !content_parts.is_empty() {
+            match Self::generate_answer_with_llm_multimodal(
+                router,
+                &system_prompt,
+                &user_msg,
+                content_parts,
+                provider_id,
+                model_name,
+            )
+            .await
+            {
+                Ok(content) => content,
+                Err(e) => {
+                    error!("视觉 LLM 调用失败，降级到 RAG 拼接模式: {}", e);
+                    let mut fallback = Self::build_rag_answer(question, &chunks);
+                    if !attach_text.is_empty() {
+                        fallback = format!("{}\n\n【附件内容】\n{}", fallback, attach_text);
+                    }
+                    fallback
+                }
+            }
+        } else {
+            match Self::generate_answer_with_llm(
+                router,
+                &system_prompt,
+                &user_msg,
+                provider_id,
+                model_name,
+            )
+            .await
+            {
+                Ok(content) => content,
+                Err(e) => {
+                    error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
+                    Self::build_rag_answer(question, &chunks)
+                }
+            }
+        };
+
+        Ok((answer, cited_ids, meta_attachments))
+    }
+
+    /// 创建新会话并回答（支持附件）
+    pub async fn create_conversation_and_answer_with_attachments(
+        user_id: i64,
+        question: &str,
+        bind_tree_node_id: Option<i64>,
+        router: &LLMRouter,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
+        attachments: &[AttachmentParam],
+    ) -> Result<ConversationResponse, String> {
+        // 1. 创建会话
+        let title = Self::generate_title(question);
+        let conv = Self::insert_conversation(user_id, &title, bind_tree_node_id).await?;
+
+        // 2. 保存用户消息（含附件元数据，供历史回看渲染）
+        let user_meta = if attachments.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({ "attachments": attachments }).to_string())
+        };
+        Self::insert_message(conv.id, "user", question, None, user_meta.as_deref(), 0, 0).await?;
+
+        // 3. RAG + 附件 + LLM
+        let (answer, cited_ids, meta_attachments) =
+            Self::retrieve_and_answer_with_attachments(
+                question,
+                bind_tree_node_id,
+                router,
+                provider_id,
+                model_name,
+                attachments,
+            )
+            .await?;
+
+        // 4. 引用信息
+        let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
+
+        // 5. 保存 AI 消息
+        let cited_str = cited_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let answer_len = answer.len();
+        let assistant_meta = if meta_attachments.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({ "attachments": meta_attachments }).to_string())
+        };
+        Self::insert_message(
+            conv.id,
+            "assistant",
+            &answer,
+            if cited_ids.is_empty() {
+                None
+            } else {
+                Some(&cited_str)
+            },
+            assistant_meta.as_deref(),
+            question.len() as i32,
+            answer_len as i32,
+        )
+        .await?;
+
+        Ok(ConversationResponse {
+            conv_id: conv.id.to_string(),
+            answer,
+            cited_assets,
+            usage: TokenUsageInfo {
+                input_tokens: question.len() as i32,
+                output_tokens: answer_len as i32,
+                total_tokens: (question.len() + answer_len) as i32,
+                cost: 0.0,
+            },
+        })
+    }
+
+    /// 继续已有会话（支持附件）
+    pub async fn continue_conversation_with_attachments(
+        conv_id: i64,
+        user_id: i64,
+        question: &str,
+        router: &LLMRouter,
+        provider_id: Option<i64>,
+        model_name: Option<String>,
+        attachments: &[AttachmentParam],
+    ) -> Result<ConversationResponse, String> {
+        // 验证会话所有权
+        let conv = Self::get_conversation_by_id(conv_id).await?;
+        if conv.user_id != user_id {
+            return Err("无权访问此会话".to_string());
+        }
+
+        // 保存用户消息（含附件元数据）
+        let user_meta = if attachments.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({ "attachments": attachments }).to_string())
+        };
+        Self::insert_message(conv_id, "user", question, None, user_meta.as_deref(), 0, 0).await?;
+
+        // RAG + 附件 + LLM
+        let bind_tree_node_id = conv.bind_knowledge_tree_id;
+        let (answer, cited_ids, _meta_attachments) =
+            Self::retrieve_and_answer_with_attachments(
+                question,
+                bind_tree_node_id,
+                router,
+                provider_id,
+                model_name,
+                attachments,
+            )
+            .await?;
+
+        let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
+
+        let cited_str = cited_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let input_tokens = question.len() as i32;
+        let output_tokens = answer.len() as i32;
+
+        Self::insert_message(
+            conv_id,
+            "assistant",
+            &answer,
+            if cited_ids.is_empty() {
+                None
+            } else {
+                Some(&cited_str)
+            },
+            None,
+            input_tokens,
+            output_tokens,
+        )
+        .await?;
+
+        Ok(ConversationResponse {
+            conv_id: conv_id.to_string(),
+            answer,
+            cited_assets,
+            usage: TokenUsageInfo {
+                input_tokens,
+                output_tokens,
+                total_tokens: input_tokens + output_tokens,
+                cost: 0.0,
+            },
+        })
     }
 
     /// 获取引用资产信息
@@ -722,4 +1238,220 @@ impl ConversationService {
             },
         })
     }
+    /// 附件感知的流式 RAG + LLM 生成（按行模拟流式）
+    async fn retrieve_and_answer_with_attachments_stream(
+        question: &str,
+        bind_tree_node_id: Option<i64>,
+        router: &LLMRouter,
+        tx: mpsc::Sender<String>,
+        attachments: &[AttachmentParam],
+    ) -> Result<(String, Vec<i64>), String> {
+        // 1. 处理附件 → 文本上下文 + 图片 content parts
+        let (attach_text, content_parts, _meta) = Self::process_attachments(attachments).await?;
+
+        // 2. RAG 检索
+        let params = RetrieveParams {
+            question: question.to_string(),
+            bind_tree_node_id,
+            top_k: 5,
+            max_tokens: 2000,
+            okf_type_filter: None,
+            min_similarity: 0.0,
+        };
+        let chunks = RAGRetriever::retrieve(&params).await?;
+        let cited_ids: Vec<i64> = chunks.iter().map(|c| c.asset_id).collect();
+
+        // 3. 刷新 Provider
+        let _ = router.refresh_providers().await;
+
+        // 4. 构建 Prompt
+        let (system_prompt, mut user_msg) = Self::build_rag_prompt(question, &chunks);
+        if !attach_text.is_empty() {
+            user_msg = format!("{}\n\n{}", user_msg, attach_text);
+        }
+
+        // 5. 调用 LLM（有图片→vision，否则 chat），失败降级
+        let answer = if !content_parts.is_empty() {
+            match Self::generate_answer_with_llm_multimodal(
+                router,
+                &system_prompt,
+                &user_msg,
+                content_parts,
+                None,
+                None,
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("视觉 LLM 调用失败，降级到 RAG 拼接模式: {}", e);
+                    let mut fallback = Self::build_rag_answer(question, &chunks);
+                    if !attach_text.is_empty() {
+                        fallback = format!("{}\n\n【附件内容】\n{}", fallback, attach_text);
+                    }
+                    fallback
+                }
+            }
+        } else {
+            match Self::generate_answer_with_llm(router, &system_prompt, &user_msg, None, None)
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
+                    Self::build_rag_answer(question, &chunks)
+                }
+            }
+        };
+
+        // 6. 逐行推送（模拟流式）
+        for line in answer.lines() {
+            if tx.send(format!("{}\n", line)).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        Ok((answer, cited_ids))
+    }
+
+    /// 创建新会话并回答（流式 SSE 版，支持附件）
+    pub async fn create_conversation_and_answer_with_attachments_stream(
+        user_id: i64,
+        question: &str,
+        bind_tree_node_id: Option<i64>,
+        router: &LLMRouter,
+        tx: mpsc::Sender<String>,
+        attachments: &[AttachmentParam],
+    ) -> Result<ConversationResponse, String> {
+        // 1. 创建会话
+        let title = Self::generate_title(question);
+        let conv = Self::insert_conversation(user_id, &title, bind_tree_node_id).await?;
+
+        // 2. 保存用户消息（含附件元数据）
+        let user_meta = if attachments.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({ "attachments": attachments }).to_string())
+        };
+        Self::insert_message(conv.id, "user", question, None, user_meta.as_deref(), 0, 0).await?;
+
+        // 3. 流式 RAG + 附件 + LLM
+        let (answer, cited_ids) = Self::retrieve_and_answer_with_attachments_stream(
+            question,
+            bind_tree_node_id,
+            router,
+            tx,
+            attachments,
+        )
+        .await?;
+
+        // 4. 引用信息
+        let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
+
+        // 5. 保存 AI 消息
+        let cited_str = cited_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let answer_len = answer.len();
+        Self::insert_message(
+            conv.id,
+            "assistant",
+            &answer,
+            if cited_ids.is_empty() {
+                None
+            } else {
+                Some(&cited_str)
+            },
+            None,
+            question.len() as i32,
+            answer_len as i32,
+        )
+        .await?;
+
+        Ok(ConversationResponse {
+            conv_id: conv.id.to_string(),
+            answer,
+            cited_assets,
+            usage: TokenUsageInfo {
+                input_tokens: question.len() as i32,
+                output_tokens: answer_len as i32,
+                total_tokens: (question.len() + answer_len) as i32,
+                cost: 0.0,
+            },
+        })
+    }
+
+    /// 继续已有会话（流式 SSE 版，支持附件）
+    pub async fn continue_conversation_with_attachments_stream(
+        conv_id: i64,
+        user_id: i64,
+        question: &str,
+        router: &LLMRouter,
+        tx: mpsc::Sender<String>,
+        attachments: &[AttachmentParam],
+    ) -> Result<ConversationResponse, String> {
+        // 验证会话所有权
+        let conv = Self::get_conversation_by_id(conv_id).await?;
+        if conv.user_id != user_id {
+            return Err("无权访问此会话".to_string());
+        }
+
+        // 保存用户消息（含附件元数据）
+        let user_meta = if attachments.is_empty() {
+            None
+        } else {
+            Some(serde_json::json!({ "attachments": attachments }).to_string())
+        };
+        Self::insert_message(conv_id, "user", question, None, user_meta.as_deref(), 0, 0).await?;
+
+        // 流式 RAG + 附件 + LLM
+        let bind_tree_node_id = conv.bind_knowledge_tree_id;
+        let (answer, cited_ids) = Self::retrieve_and_answer_with_attachments_stream(
+            question,
+            bind_tree_node_id,
+            router,
+            tx,
+            attachments,
+        )
+        .await?;
+
+        let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
+
+        let cited_str = cited_ids
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let answer_len = answer.len();
+        Self::insert_message(
+            conv_id,
+            "assistant",
+            &answer,
+            if cited_ids.is_empty() {
+                None
+            } else {
+                Some(&cited_str)
+            },
+            None,
+            question.len() as i32,
+            answer_len as i32,
+        )
+        .await?;
+
+        Ok(ConversationResponse {
+            conv_id: conv_id.to_string(),
+            answer,
+            cited_assets,
+            usage: TokenUsageInfo {
+                input_tokens: question.len() as i32,
+                output_tokens: answer_len as i32,
+                total_tokens: (question.len() + answer_len) as i32,
+                cost: 0.0,
+            },
+        })
+    }
+
 }

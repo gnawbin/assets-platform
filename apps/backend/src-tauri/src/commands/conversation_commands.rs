@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use crate::service::conversation_service::{ConversationResponse, ConversationService};
+use crate::service::conversation_service::{
+    AttachmentParam, ConversationResponse, ConversationService,
+};
 use crate::service::llm_gateway_service::LLMRouter;
 
 /// 创建新会话并发送第一条消息
@@ -10,6 +12,7 @@ use crate::service::llm_gateway_service::LLMRouter;
 pub async fn create_conversation(
     userId: String,
     question: String,
+    attachments: Option<Vec<AttachmentParam>>,
     bindTreeNodeId: Option<String>,
     providerId: Option<String>,
     modelName: Option<String>,
@@ -24,16 +27,30 @@ pub async fn create_conversation(
         _ => None,
     };
     let pid = providerId.and_then(|id| id.parse::<i64>().ok());
+    let atts = attachments.unwrap_or_default();
 
-    ConversationService::create_conversation_and_answer(
-        user_id,
-        &question,
-        bind_id,
-        router.inner(),
-        pid,
-        modelName,
-    )
-    .await
+    if atts.is_empty() {
+        ConversationService::create_conversation_and_answer(
+            user_id,
+            &question,
+            bind_id,
+            router.inner(),
+            pid,
+            modelName,
+        )
+        .await
+    } else {
+        ConversationService::create_conversation_and_answer_with_attachments(
+            user_id,
+            &question,
+            bind_id,
+            router.inner(),
+            pid,
+            modelName,
+            &atts,
+        )
+        .await
+    }
 }
 
 /// 继续已有会话
@@ -42,6 +59,7 @@ pub async fn send_message(
     convId: String,
     userId: String,
     question: String,
+    attachments: Option<Vec<AttachmentParam>>,
     providerId: Option<String>,
     modelName: Option<String>,
     router: tauri::State<'_, Arc<LLMRouter>>,
@@ -49,16 +67,30 @@ pub async fn send_message(
     let conv_id: i64 = convId.parse().map_err(|e| format!("无效的会话ID: {}", e))?;
     let user_id: i64 = userId.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
     let pid = providerId.and_then(|id| id.parse::<i64>().ok());
+    let atts = attachments.unwrap_or_default();
 
-    ConversationService::continue_conversation(
-        conv_id,
-        user_id,
-        &question,
-        router.inner(),
-        pid,
-        modelName,
-    )
-    .await
+    if atts.is_empty() {
+        ConversationService::continue_conversation(
+            conv_id,
+            user_id,
+            &question,
+            router.inner(),
+            pid,
+            modelName,
+        )
+        .await
+    } else {
+        ConversationService::continue_conversation_with_attachments(
+            conv_id,
+            user_id,
+            &question,
+            router.inner(),
+            pid,
+            modelName,
+            &atts,
+        )
+        .await
+    }
 }
 
 /// 获取会话列表

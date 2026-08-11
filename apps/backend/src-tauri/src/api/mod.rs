@@ -89,9 +89,20 @@ pub async fn start_http_server(
             .with_state(state)
     };
 
+    // 初始化智能问答 SSE 流式路由（LLM Router 全局共享）
+    let chat_router = {
+        let llm_router = llm_router
+            .ok_or_else(|| anyhow::anyhow!("LLM Router 未初始化，无法注册 /api/chat/stream"))?;
+        let state = std::sync::Arc::new(chat_routes::ChatRouterState { llm_router });
+        Router::new()
+            .route("/api/chat/stream", post(chat_routes::chat_stream))
+            .with_state(state)
+    };
+
     // 构建路由
     let app = create_router(pool)
         .merge(upload_router)
+        .merge(chat_router)
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 

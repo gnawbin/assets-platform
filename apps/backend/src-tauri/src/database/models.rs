@@ -1034,6 +1034,29 @@ pub struct TokenUsage {
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// 多模态内容片段（如图片），存在时优先于 content 使用；向后兼容纯文本
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_parts: Option<Vec<ContentPart>>,
+}
+
+/// 多模态内容片段（OpenAI 兼容格式）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ContentPart {
+    Text {
+        r#type: String,
+        text: String,
+    },
+    Image {
+        r#type: String,
+        image_url: ImageUrl,
+    },
+}
+
+/// 图片 URL（OpenAI 兼容 image_url 格式，支持 data URL base64）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageUrl {
+    pub url: String,
 }
 
 /// LLM Chat 请求

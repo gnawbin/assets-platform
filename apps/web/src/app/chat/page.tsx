@@ -12,7 +12,7 @@ import {
 import {
     createConversation, sendMessage, getConversations,
     getConversationMessages, deleteConversation,
-    type ConversationResponse, type ConversationSummary, type AssetInfo,
+    type ConversationResponse, type ConversationSummary, type AssetInfo, type ChatAttachment,
 } from '@/services/conversationService';
 import {
     getLlmProviders, getLlmModels, getUserLLmSetting, saveUserLLmSetting,
@@ -21,6 +21,9 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { notifications } from '@mantine/notifications';
 import MessageBubble from '@/components/Chat/MessageBubble';
+import ChatAttachmentInput, {
+    type ChatAttachmentInputHandle,
+} from '@/components/Chat/ChatAttachmentInput';
 
 export default function ChatPage() {
     const { user } = useAuthStore();
@@ -30,6 +33,7 @@ export default function ChatPage() {
         role: 'user' | 'assistant'; content: string;
         citedAssets?: AssetInfo[]; referenceText?: string;
         metadata?: { model?: string; durationMs?: number; };
+        attachments?: ChatAttachment[];
     }>>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
@@ -37,6 +41,10 @@ export default function ChatPage() {
     const [error, setError] = useState<string | null>(null);
     const [isNewConversation, setIsNewConversation] = useState(false);
     const viewport = useRef<HTMLDivElement>(null);
+
+    // 多模态附件
+    const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+    const attachmentInputRef = useRef<ChatAttachmentInputHandle>(null);
 
     // 厂商/模型选择
     const [providers, setProviders] = useState<LlmProvider[]>([]);
@@ -127,6 +135,7 @@ export default function ChatPage() {
                 citedAssets: m.citedAssets,
                 referenceText: m.referenceText,
                 metadata: m.metadata,
+                attachments: m.metadata?.attachments,
             })));
         } catch { setMessages([]); }
     }, []);
@@ -141,6 +150,8 @@ export default function ChatPage() {
         setCurrentConvId(null);
         setMessages([]);
         setInput('');
+        setAttachments([]);
+        attachmentInputRef.current?.clear();
         setIsNewConversation(true);
     };
 
@@ -150,13 +161,17 @@ export default function ChatPage() {
         setInput('');
         setSending(true);
 
-        setMessages(prev => [...prev, { role: 'user', content: question }]);
+        const msgAttachments = attachments.length > 0 ? [...attachments] : undefined;
+        setMessages(prev => [...prev, {
+            role: 'user', content: question, attachments: msgAttachments,
+        }]);
 
         try {
             let resp: ConversationResponse;
             const extraParams = {
                 providerId: selectedProviderId ?? undefined,
                 modelName: getSelectedModelName(),
+                attachments: msgAttachments,
             };
             if (currentConvId) {
                 resp = await sendMessage({
@@ -182,6 +197,10 @@ export default function ChatPage() {
                 citedAssets: resp.citedAssets,
                 metadata: { durationMs: 0 },
             }]);
+
+            // 发送成功后清空附件
+            setAttachments([]);
+            attachmentInputRef.current?.clear();
 
             setTimeout(() => viewport.current?.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' }), 100);
         } catch (err: any) {
@@ -302,7 +321,7 @@ export default function ChatPage() {
                                         <MessageBubble key={i}
                                             role={msg.role} content={msg.content}
                                             citedAssets={msg.citedAssets} referenceText={msg.referenceText}
-                                            metadata={msg.metadata}
+                                            metadata={msg.metadata} attachments={msg.attachments}
                                         />
                                     ))}
                                     {sending && (
@@ -313,8 +332,14 @@ export default function ChatPage() {
                                     )}
                                 </ScrollArea>
                                 <Group gap="sm">
+                                    <ChatAttachmentInput
+                                        ref={attachmentInputRef}
+                                        disabled={sending}
+                                        attachments={attachments}
+                                        onChange={setAttachments}
+                                    />
                                     <TextInput
-                                        placeholder="输入问题..."
+                                        placeholder="输入问题...（可上传图片/视频/文件）"
                                         value={input}
                                         onChange={(e) => setInput(e.target.value)}
                                         onKeyDown={handleKeyDown}
