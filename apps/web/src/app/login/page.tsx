@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  Anchor,
   Container,
   Paper,
   Title,
@@ -15,7 +16,8 @@ import {
   Center,
   Box,
 } from '@mantine/core';
-import { IconAlertCircle, IconLogin } from '@tabler/icons-react';
+import Link from 'next/link';
+import { IconAlertCircle, IconLogin, IconUserPlus } from '@tabler/icons-react';
 import { useAuthStore } from '@/store/authStore';
 import { login as loginApi } from '@/services/authService';
 
@@ -111,6 +113,13 @@ const LoginPage: React.FC = () => {
             <Button fullWidth size="md" onClick={handleLogin} loading={loading}>
               登 录
             </Button>
+
+            <Text ta="center" size="sm">
+              还没有账号？{' '}
+              <Anchor component={Link} href="/register">
+                立即注册
+              </Anchor>
+            </Text>
           </Stack>
         </Paper>
       </Container>

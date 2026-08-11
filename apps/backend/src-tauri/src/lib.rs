@@ -7,6 +7,9 @@ mod storage;
 mod utils;
 mod workflow;
 
+use std::sync::Arc;
+use tauri::Manager;
+
 /// 加载 .env TOML 配置文件，将值设置为环境变量
 fn load_env() {
     // 尝试多个路径查找 .env.toml 文件
@@ -107,7 +110,7 @@ pub fn run() {
                 engine::skill_registry::SkillRegistry::new(),
             )),
         ))
-        .setup(|_app| {
+        .setup(|app| {
             // 初始化 OpenTelemetry（需要 Tokio 运行时上下文）
             tauri::async_runtime::block_on(async {
                 if let Err(e) = utils::logging::init_otel() {
@@ -142,13 +145,25 @@ pub fn run() {
                 }
             });
 
+            // 初始化 LLM Router
+            let llm_router = Arc::new(service::llm_gateway_service::LLMRouter::new());
+            tauri::async_runtime::block_on(async {
+                if let Err(e) = llm_router.refresh_providers().await {
+                    tracing::warn!("LLM Provider 加载失败（可能需要稍后手动刷新）: {}", e);
+                } else {
+                    tracing::info!("LLM Router 初始化完成");
+                }
+            });
+            app.manage(llm_router.clone());
+
             // 在后台启动 HTTP API 服务（与 Tauri 共用 Tokio 运行时）
+            let llm_router_clone = llm_router.clone();
             match database::get_pool() {
                 Ok(pool) => {
                     tracing::info!("准备启动 HTTP API 服务...");
                     tauri::async_runtime::spawn(async move {
                         tracing::info!("正在启动 HTTP API 服务...");
-                        if let Err(e) = api::start_http_server(pool).await {
+                        if let Err(e) = api::start_http_server(pool, Some(llm_router_clone)).await {
                             tracing::error!("HTTP API 服务异常退出: {:?}", e);
                         } else {
                             tracing::info!("HTTP API 服务已停止");
@@ -282,6 +297,10 @@ pub fn run() {
             commands::llm_provider_commands::update_llm_provider,
             commands::llm_provider_commands::delete_llm_provider,
             commands::llm_provider_commands::get_llm_models,
+            commands::llm_provider_commands::create_llm_model,
+            commands::llm_provider_commands::update_llm_model,
+            commands::llm_provider_commands::delete_llm_model,
+            commands::llm_provider_commands::fetch_llm_models,
             commands::llm_provider_commands::get_user_llm_setting,
             commands::llm_provider_commands::save_user_llm_setting,
             // Zen Engine - Skill 管理

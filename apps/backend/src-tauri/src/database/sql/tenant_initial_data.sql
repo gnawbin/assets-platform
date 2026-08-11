@@ -1,5 +1,5 @@
 -- ==============================
--- 租户初始数据（执行前替换 {schema} 为实际 schema 名）
+-- 组织结构初始数据（执行前替换 {schema} 为实际 schema 名）
 -- ==============================
 
 -- 1. 默认角色（写入 public.sys_role）
@@ -339,6 +339,14 @@ INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weigh
 SELECT 'ollama', 'Ollama 本地', 'http://localhost:11434', 3, true
 WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'ollama');
 
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'deepseek', 'DeepSeek', 'https://api.deepseek.com', 6, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'deepseek');
+
+INSERT INTO {schema}.llm_provider (provider_code, provider_name, base_url, weight, is_local)
+SELECT 'zhipu', '智谱 AI', 'https://open.bigmodel.cn/api/paas/v4', 4, false
+WHERE NOT EXISTS (SELECT 1 FROM {schema}.llm_provider WHERE provider_code = 'zhipu');
+
 -- ==============================
 -- LLM 模型种子数据（关联到 openai provider）
 -- ==============================
@@ -359,3 +367,29 @@ SELECT p.id, 'text-embedding-3-small', 'Text Embedding 3 Small', 'embedding', 0.
 FROM {schema}.llm_provider p
 WHERE p.provider_code = 'openai'
   AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'text-embedding-3-small');
+
+-- DeepSeek 模型
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, context_window, price_input, price_output)
+SELECT p.id, 'deepseek-v4-flash', 'DeepSeek-V4-Flash', 'chat', 65536, 0.0001, 0.0004
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'deepseek'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'deepseek-v4-flash');
+
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, context_window, price_input, price_output)
+SELECT p.id, 'deepseek-v4-pro', 'DeepSeek-V4-Pro', 'chat', 65536, 0.0005, 0.002
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'deepseek'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'deepseek-v4-pro');
+
+-- 智谱 AI 模型
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, context_window, price_input, price_output)
+SELECT p.id, 'glm-4-plus', 'GLM-4-Plus', 'chat', 131072, 0.0004, 0.001
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'zhipu'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'glm-4-plus');
+
+INSERT INTO {schema}.llm_model (provider_id, model_code, model_name, model_type, context_window, price_input, price_output)
+SELECT p.id, 'glm-4-air', 'GLM-4-Air', 'chat', 131072, 0.0001, 0.0004
+FROM {schema}.llm_provider p
+WHERE p.provider_code = 'zhipu'
+  AND NOT EXISTS (SELECT 1 FROM {schema}.llm_model WHERE provider_id = p.id AND model_code = 'glm-4-air');

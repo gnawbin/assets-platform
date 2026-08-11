@@ -17,7 +17,7 @@ WITH
 
 ALTER TABLE public.sys_tenant ALTER COLUMN schema_name DROP NOT NULL;
 
-COMMENT ON COLUMN public.sys_tenant.parent_id IS '父租户ID';
+COMMENT ON COLUMN public.sys_tenant.parent_id IS '父组织ID';
 
 COMMENT ON COLUMN public.sys_tenant.is_leaf IS '是否末级节点（末级才有 schema）';
 
@@ -55,7 +55,7 @@ COMMENT ON COLUMN public.sys_role.role_name IS '角色名称';
 
 COMMENT ON COLUMN public.sys_role.is_super_admin IS '是否超级管理员角色';
 
-COMMENT ON COLUMN public.sys_role.tenant_id IS '所属租户ID（超级管理员角色为空）';
+COMMENT ON COLUMN public.sys_role.tenant_id IS '所属组织ID（超级管理员角色为空）';
 
 -- 新增 public.sys_user_role 表（用户角色关联从租户 schema 移到 public）
 CREATE TABLE IF NOT EXISTS public.sys_user_role (

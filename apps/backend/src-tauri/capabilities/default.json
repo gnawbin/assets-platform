@@ -1,0 +1,15 @@
+{
+    "identifier": "default",
+    "description": "默认权限",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "opener:default",
+        "dialog:default",
+        "process:default",
+        "updater:default",
+        "fs:default"
+    ]
+}

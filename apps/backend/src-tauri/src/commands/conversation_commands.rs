@@ -1,6 +1,9 @@
 //! 对话系统 Tauri Command
 
+use std::sync::Arc;
+
 use crate::service::conversation_service::{ConversationResponse, ConversationService};
+use crate::service::llm_gateway_service::LLMRouter;
 
 /// 创建新会话并发送第一条消息
 #[tauri::command]
@@ -8,6 +11,9 @@ pub async fn create_conversation(
     userId: String,
     question: String,
     bindTreeNodeId: Option<String>,
+    providerId: Option<String>,
+    modelName: Option<String>,
+    router: tauri::State<'_, Arc<LLMRouter>>,
 ) -> Result<ConversationResponse, String> {
     let user_id: i64 = userId.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
     let bind_id = match bindTreeNodeId {
@@ -17,8 +23,17 @@ pub async fn create_conversation(
         ),
         _ => None,
     };
+    let pid = providerId.and_then(|id| id.parse::<i64>().ok());
 
-    ConversationService::create_conversation_and_answer(user_id, &question, bind_id).await
+    ConversationService::create_conversation_and_answer(
+        user_id,
+        &question,
+        bind_id,
+        router.inner(),
+        pid,
+        modelName,
+    )
+    .await
 }
 
 /// 继续已有会话
@@ -27,11 +42,23 @@ pub async fn send_message(
     convId: String,
     userId: String,
     question: String,
+    providerId: Option<String>,
+    modelName: Option<String>,
+    router: tauri::State<'_, Arc<LLMRouter>>,
 ) -> Result<ConversationResponse, String> {
     let conv_id: i64 = convId.parse().map_err(|e| format!("无效的会话ID: {}", e))?;
     let user_id: i64 = userId.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
+    let pid = providerId.and_then(|id| id.parse::<i64>().ok());
 
-    ConversationService::continue_conversation(conv_id, user_id, &question).await
+    ConversationService::continue_conversation(
+        conv_id,
+        user_id,
+        &question,
+        router.inner(),
+        pid,
+        modelName,
+    )
+    .await
 }
 
 /// 获取会话列表

@@ -23,8 +23,8 @@ import {
   IconListCheck,
   IconChartBar,
   IconSettings,
+  IconHierarchy,
   IconChevronDown,
-  IconBrain,
 } from '@tabler/icons-react';
 
 import { getUserMenus, type MenuItem } from '@/services/menuService';
@@ -41,7 +41,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   IconListCheck: <IconListCheck size={18} />,
   IconChartBar: <IconChartBar size={18} />,
   IconSettings: <IconSettings size={18} />,
-  IconBrain: <IconBrain size={18} />,
+  IconHierarchy: <IconHierarchy size={18} />,
 };
 
 
@@ -133,22 +133,11 @@ const NavItem: React.FC<NavItemProps> = ({ item }) => {
           {ItemContent}
         </UnstyledButton>
         <Collapse expanded={opened}>
-          {item.children!.map((child) => {
-            const isLinkActive = pathname === child.path;
-            return (
-              <NavLink
-                key={child.label}
-                label={child.label}
-                active={isLinkActive}
-                onClick={() => child.path && router.push(child.path)}
-                style={{
-                  paddingLeft: 50,
-                  borderRadius: 8,
-                  margin: '2px 0',
-                }}
-              />
-            );
-          })}
+          {item.children!.map((child) => (
+            <Box key={child.label} style={{ paddingLeft: 16 }}>
+              <NavItem item={child} />
+            </Box>
+          ))}
         </Collapse>
       </>
     );
@@ -247,10 +236,10 @@ const Sidebar: React.FC = () => {
               <Text c="red" size="sm" ta="center" py="xl">
                 {error}
               </Text>
-            ) : menuItems.length === 0 ? (
-              <Text c="dimmed" size="sm" ta="center" py="xl">
-                暂无菜单
-              </Text>
+            ) : menuItems.length === 0 && !loading ? (
+              <>
+                <NavItem item={{ label: 'AI 工作流', path: '/knowledge/workflow', icon: 'IconHierarchy' }} />
+              </>
             ) : (
               menuItems.map((item, index) => (
                 <NavItem key={item.label + index} item={item} />
@@ -267,7 +256,7 @@ const Sidebar: React.FC = () => {
             IT设备资产管理系统
           </Text>
           <Text size="sm" fw={500}>
-            v0.0.8
+            v0.0.9
           </Text>
         </Box>
       </ScrollArea>

@@ -2,7 +2,7 @@
 -- public schema 公共表
 -- ==============================
 
--- 1. 租户配置表（树状结构）
+-- 1. 组织结构配置表（树状结构）
 CREATE TABLE IF NOT EXISTS public.sys_tenant (
     id BIGINT PRIMARY KEY,
     tenant_name VARCHAR(100) NOT NULL,
@@ -18,11 +18,11 @@ CREATE TABLE IF NOT EXISTS public.sys_tenant (
         TIME ZONE
 );
 
-COMMENT ON TABLE public.sys_tenant IS '租户配置表（树状结构）';
+COMMENT ON TABLE public.sys_tenant IS '组织结构配置表（树状结构）';
 
-COMMENT ON COLUMN public.sys_tenant.tenant_name IS '租户名称';
+COMMENT ON COLUMN public.sys_tenant.tenant_name IS '组织结构名称';
 
-COMMENT ON COLUMN public.sys_tenant.parent_id IS '父租户ID';
+COMMENT ON COLUMN public.sys_tenant.parent_id IS '父组织ID';
 
 COMMENT ON COLUMN public.sys_tenant.is_leaf IS '是否末级节点（末级才有 schema）';
 
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS public.sys_user (
 
 COMMENT ON TABLE public.sys_user IS '全局登录用户表';
 
-COMMENT ON COLUMN public.sys_user.tenant_id IS '所属租户ID';
+COMMENT ON COLUMN public.sys_user.tenant_id IS '所属组织ID';
 
 COMMENT ON COLUMN public.sys_user.email IS '邮箱';
 
@@ -142,7 +142,7 @@ COMMENT ON COLUMN public.sys_role.role_name IS '角色名称';
 
 COMMENT ON COLUMN public.sys_role.is_super_admin IS '是否超级管理员角色';
 
-COMMENT ON COLUMN public.sys_role.tenant_id IS '所属租户ID（超级管理员角色为空）';
+COMMENT ON COLUMN public.sys_role.tenant_id IS '所属组织ID（超级管理员角色为空）';
 
 -- 5. 用户角色关联表
 CREATE TABLE IF NOT EXISTS public.sys_user_role (
@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS public.sys_role_menu (
 
 COMMENT ON TABLE public.sys_role_menu IS '角色菜单关联表';
 
--- 7. 全局部门表（多租户共享，通过 tenant_id 区分）
+-- 7. 全局部门表（多组织共享，通过 tenant_id 区分）
 CREATE TABLE IF NOT EXISTS public.sys_department (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES public.sys_tenant (id),
@@ -198,9 +198,9 @@ CREATE TABLE IF NOT EXISTS public.sys_department (
         deleted SMALLINT
 );
 
-COMMENT ON TABLE public.sys_department IS '全局部门表（多租户共享）';
+COMMENT ON TABLE public.sys_department IS '全局部门表（多组织共享）';
 
-COMMENT ON COLUMN public.sys_department.tenant_id IS '所属租户ID';
+COMMENT ON COLUMN public.sys_department.tenant_id IS '所属组织ID';
 
 COMMENT ON COLUMN public.sys_department.department_name IS '部门名称';
 
@@ -243,7 +243,7 @@ COMMENT ON COLUMN public.sys_user_register.approve_time IS '审核时间';
 
 COMMENT ON COLUMN public.sys_user_register.approve_remark IS '审核备注';
 
--- 8. 用户-租户关联表（多对多）
+-- 8. 用户-组织关联表（多对多）
 CREATE TABLE IF NOT EXISTS public.sys_user_tenant (
     id BIGINT PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES public.sys_user (id) ON DELETE CASCADE,
@@ -255,11 +255,11 @@ CREATE TABLE IF NOT EXISTS public.sys_user_tenant (
         UNIQUE (user_id, tenant_id)
 );
 
-COMMENT ON TABLE public.sys_user_tenant IS '用户-租户关联表（多对多）';
+COMMENT ON TABLE public.sys_user_tenant IS '用户-组织关联表（多对多）';
 
 COMMENT ON COLUMN public.sys_user_tenant.user_id IS '用户ID';
 
-COMMENT ON COLUMN public.sys_user_tenant.tenant_id IS '租户ID';
+COMMENT ON COLUMN public.sys_user_tenant.tenant_id IS '组织ID';
 
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_username ON public.sys_user (username);

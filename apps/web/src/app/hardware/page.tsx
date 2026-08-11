@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Layout from '@/components/Layout';
 import {
   Title,
@@ -43,6 +43,10 @@ import {
   type HardwareAssetView,
   type HardwareAssetInput,
 } from '@/services/hardwareService';
+import { getDepartments, type Department } from '@/services/departmentService';
+import { getUsers, type User } from '@/services/userService';
+import CategoryTreeSelector from '@/components/CategoryTreeSelector';
+import DepartmentTreeSelector from '@/components/DepartmentTreeSelector';
 
 // 状态映射
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
@@ -56,6 +60,8 @@ const STATUS_MAP: Record<number, { label: string; color: string }> = {
 const HardwarePage: React.FC = () => {
   const [assets, setAssets] = useState<HardwareAssetView[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [searchText, setSearchText] = useState('');
 
   // 使用 useApi 管理数据获取
@@ -88,6 +94,25 @@ const HardwarePage: React.FC = () => {
   const [formUsedQuantity, setFormUsedQuantity] = useState<number>(0);
   const [formExpireDate, setFormExpireDate] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  // 部门/用户
+  const [formDepartmentId, setFormDepartmentId] = useState<string[]>([]);
+  const [formUserId, setFormUserId] = useState<string[]>([]);
+
+  // 根据选择的部门过滤用户（包含所有选中部门及子部门）
+  const filteredUsers = useMemo(() => {
+    if (formDepartmentId.length === 0) return users;
+    // 查找所有选中部门及其子部门 ID
+    const deptIds = new Set<string>();
+    const findChildDepts = (parentId: string) => {
+      deptIds.add(parentId);
+      const children = departments.filter((d) => d.parent_id === parentId || d.parent_id === `${parentId}`);
+      for (const child of children) {
+        findChildDepts(child.id);
+      }
+    };
+    formDepartmentId.forEach((id) => findChildDepts(id));
+    return users.filter((u) => u.department_id && deptIds.has(u.department_id));
+  }, [users, departments, formDepartmentId]);
   // 硬件扩展字段
   const [formSn, setFormSn] = useState('');
   const [formMacAddress, setFormMacAddress] = useState('');
@@ -117,14 +142,34 @@ const HardwarePage: React.FC = () => {
   useEffect(() => {
     fetchAssets();
     fetchCategories();
+    fetchDepartments();
+    fetchUsers();
   }, []);
 
   const fetchCategories = async () => {
     try {
       const data = await getCategories();
-      setCategories(data.filter((c) => c.asset_type === 'fixed' || c.asset_type === 'hardware'));
+      setCategories(data);
     } catch (err) {
       console.error('获取分类列表失败:', err);
+    }
+  };
+
+  const fetchDepartments = async () => {
+    try {
+      const data = await getDepartments();
+      setDepartments(data);
+    } catch (err) {
+      console.error('获取部门列表失败:', err);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const data = await getUsers();
+      setUsers(data);
+    } catch (err) {
+      console.error('获取用户列表失败:', err);
     }
   };
 
@@ -170,6 +215,8 @@ const HardwarePage: React.FC = () => {
     setFormUsedQuantity(asset.used_quantity || 0);
     setFormExpireDate(asset.expire_date || '');
     setFormDescription(asset.description || '');
+    setFormDepartmentId(asset.department_id ? [asset.department_id] : []);
+    setFormUserId(asset.user_id ? [asset.user_id] : []);
     setFormSn(asset.sn || '');
     setFormMacAddress(asset.mac_address || '');
     setFormLocation(asset.location || '');
@@ -195,6 +242,8 @@ const HardwarePage: React.FC = () => {
     setFormUsedQuantity(0);
     setFormExpireDate('');
     setFormDescription('');
+    setFormDepartmentId([]);
+    setFormUserId([]);
     setFormSn('');
     setFormMacAddress('');
     setFormLocation('');
@@ -212,8 +261,8 @@ const HardwarePage: React.FC = () => {
     asset_name: formAssetName.trim(),
     manufacturer: formManufacturer.trim() || null,
     model: formModel.trim() || null,
-    department_id: null,
-    user_id: null,
+    department_id: formDepartmentId[0] || null,
+    user_id: formUserId[0] || null,
     status: parseInt(formStatus),
     purchase_date: formPurchaseDate || null,
     purchase_price: formPurchasePrice || null,
@@ -290,6 +339,20 @@ const HardwarePage: React.FC = () => {
     setDetailModalOpen(true);
   };
 
+  // 获取部门名称
+  const getDepartmentName = (id: string | null): string => {
+    if (!id) return '-';
+    const dept = departments.find((d) => String(d.id) === id);
+    return dept ? dept.department_name : `部门#${id}`;
+  };
+
+  // 获取用户名称
+  const getUserName = (id: string | null): string => {
+    if (!id) return '-';
+    const user = users.find((u) => String(u.id) === id);
+    return user ? user.real_name || user.username : `用户#${id}`;
+  };
+
   return (
     <Layout>
       <Stack gap="lg">
@@ -352,6 +415,8 @@ const HardwarePage: React.FC = () => {
                   <Table.Th>资产编号</Table.Th>
                   <Table.Th>资产名称</Table.Th>
                   <Table.Th>分类</Table.Th>
+                  <Table.Th>使用部门</Table.Th>
+                  <Table.Th>使用人</Table.Th>
                   <Table.Th>品牌/型号</Table.Th>
                   <Table.Th>序列号</Table.Th>
                   <Table.Th>状态</Table.Th>
@@ -383,6 +448,12 @@ const HardwarePage: React.FC = () => {
                         <Text size="sm">
                           {getCategoryName(asset.category_id)}
                         </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{getDepartmentName(asset.department_id)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{getUserName(asset.user_id)}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm">
@@ -460,17 +531,14 @@ const HardwarePage: React.FC = () => {
               />
             </Grid.Col>
             <Grid.Col span={6}>
-              <Select
+              <CategoryTreeSelector
                 label="资产分类"
                 placeholder="请选择分类"
                 required
-                data={categories.map((c) => ({
-                  value: String(c.id),
-                  label: c.category_name,
-                }))}
+                assetType="fixed"
+                categories={categories}
                 value={formCategoryId}
-                onChange={(val) => setFormCategoryId(val || '')}
-                searchable
+                onChange={(val) => setFormCategoryId(val)}
               />
             </Grid.Col>
           </Grid>
@@ -565,6 +633,38 @@ const HardwarePage: React.FC = () => {
                 placeholder="请输入存放位置"
                 value={formLocation}
                 onChange={(e) => setFormLocation(e.target.value)}
+              />
+            </Grid.Col>
+          </Grid>
+
+          {/* 部门 & 用户 */}
+          <Grid>
+            <Grid.Col span={6}>
+              <DepartmentTreeSelector
+                label="使用部门"
+                placeholder="请选择部门"
+                departments={departments}
+                value={formDepartmentId}
+                onChange={(val) => {
+                  setFormDepartmentId(val);
+                  // 部门切换时清空用户选择
+                  setFormUserId([]);
+                }}
+              />
+            </Grid.Col>
+            <Grid.Col span={6}>
+              <Select
+                label="使用人"
+                placeholder={formDepartmentId.length > 0 ? '请选择用户' : '请先选择部门'}
+                data={filteredUsers.map((u) => ({
+                  value: String(u.id),
+                  label: `${u.real_name || u.username}${u.department_id ? ` (${getDepartmentName(u.department_id)})` : ''}`,
+                }))}
+                value={formUserId[0] || ''}
+                onChange={(val) => setFormUserId(val ? [val] : [])}
+                searchable
+                clearable
+                disabled={formDepartmentId.length === 0}
               />
             </Grid.Col>
           </Grid>
@@ -729,6 +829,18 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm">
                     {getCategoryName(detailAsset.category_id)}
                   </Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    使用部门
+                  </Text>
+                  <Text size="sm">{getDepartmentName(detailAsset.department_id)}</Text>
+                </Group>
+                <Group>
+                  <Text size="sm" c="dimmed" w={100}>
+                    使用人
+                  </Text>
+                  <Text size="sm">{getUserName(detailAsset.user_id)}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>

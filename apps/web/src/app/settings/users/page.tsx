@@ -109,7 +109,7 @@ const UsersPage: React.FC = () => {
   const [resetPwdUser, setResetPwdUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
 
-  // 分配租户弹窗
+  // 分配组织结构弹窗
   const [tenantModalOpen, setTenantModalOpen] = useState(false);
   const [tenantModalUser, setTenantModalUser] = useState<User | null>(null);
   const [selectedTenantIds, setSelectedTenantIds] = useState<string[]>([]);
@@ -374,42 +374,39 @@ const UsersPage: React.FC = () => {
     }
   };
 
-  // 打开分配租户弹窗
+  // 打开分配组织结构弹窗
   const openTenantModal = async (user: User) => {
     setTenantModalUser(user);
     setTenantModalOpen(true);
     setTenantModalLoading(true);
 
     try {
-      // 获取所有启用的租户列表
+      // 获取所有启用的组织结构列表
       const allTenants = await getTenants();
       setTenants(allTenants);
-      // 获取用户当前已分配的租户（user.id 已经是后端传来的原始 bigint，直接传给服务函数会再转成字符串）
+      // 获取用户当前已分配的组织
       const userTenants = await getUserTenants(user.id);
       setSelectedTenantIds(userTenants.map((t: Tenant) => t.id));
     } catch (err) {
-      console.error('获取租户数据失败:', err);
-      notifyError('获取租户数据失败');
+      console.error('获取组织结构数据失败:', err);
+      notifyError('获取组织结构数据失败');
     } finally {
       setTenantModalLoading(false);
     }
   };
 
-  // 保存分配租户
+  // 保存分配组织结构
   const handleAssignTenants = async () => {
     if (!tenantModalUser || !currentUser) return;
     try {
-      // 使用原生的用户ID值（从后端传来的大整数可能已超出 JS number 精度，
-      // 直接作为 number 传入 tenantService 会再转成 String）
-      // 此处使用显式 String() 转换以匹配后端 i64_to_string 序列化格式
       await doAssignUserTenants(tenantModalUser.id, selectedTenantIds, currentUser.id);
       setTenantModalOpen(false);
       setTenantModalUser(null);
       setSelectedTenantIds([]);
-      notifySuccess('租户分配成功');
+      notifySuccess('组织结构分配成功');
     } catch (err) {
-      console.error('分配租户失败:', err);
-      notifyError('分配租户失败', typeof err === 'string' ? err : undefined);
+      console.error('分配组织结构失败:', err);
+      notifyError('分配组织结构失败', typeof err === 'string' ? err : undefined);
     }
   };
 
@@ -563,7 +560,7 @@ const UsersPage: React.FC = () => {
                             onClick={() => openTenantModal(user)}
                             disabled={user.is_super_admin}
                           >
-                            分配租户
+                            分配组织结构
                           </Button>
                           <Button
                             size="xs"
@@ -929,11 +926,11 @@ const UsersPage: React.FC = () => {
         </Stack>
       </Modal>
 
-      {/* 分配租户弹窗 */}
+      {/* 分配组织结构弹窗 */}
       <Modal
         opened={tenantModalOpen}
         onClose={() => setTenantModalOpen(false)}
-        title={`分配租户 - ${tenantModalUser?.real_name || ''}`}
+        title={`分配组织结构 - ${tenantModalUser?.real_name || ''}`}
         size="md"
       >
         <Stack gap="md">
@@ -944,11 +941,11 @@ const UsersPage: React.FC = () => {
           ) : (
             <>
               <Text size="sm" c="dimmed">
-                请选择该用户可以访问的租户：
+                请选择该用户可以访问的组织：
               </Text>
               {tenants.length === 0 ? (
                 <Text ta="center" c="dimmed" py="md">
-                  暂无可用租户
+                  暂无可用组织
                 </Text>
               ) : (
                 <Stack gap="xs">

@@ -80,7 +80,7 @@ const PermissionsPage: React.FC = () => {
     }
   }, [fetchedRoles]);
 
-  // 加载租户列表
+  // 加载组织结构列表
   useEffect(() => {
     getTenants().then(setTenants).catch(console.error);
   }, []);
@@ -160,7 +160,7 @@ const PermissionsPage: React.FC = () => {
       return;
     }
     if (!newRoleTenantId) {
-      notifyError('验证失败', '请选择所属机构');
+      notifyError('验证失败', '请选择所属组织结构');
       return;
     }
     try {
@@ -183,7 +183,7 @@ const PermissionsPage: React.FC = () => {
     }
   };
 
-  // 获取租户名称
+  // 获取组织结构名称
   const getTenantName = (tenantId: string | null) => {
     if (!tenantId) return '-';
     const tenant = tenants.find((t) => String(t.id) === tenantId);
@@ -273,9 +273,9 @@ const PermissionsPage: React.FC = () => {
             style={{ flex: 1 }}
           />
           <Select
-            placeholder="全部机构"
+            placeholder="全部组织结构"
             data={[
-              { value: '', label: '全部机构' },
+              { value: '', label: '全部组织结构' },
               ...tenants.map((t) => ({ value: String(t.id), label: t.tenant_name })),
             ]}
             value={filterTenantId}
@@ -304,7 +304,7 @@ const PermissionsPage: React.FC = () => {
                   <Table.Th>角色标识</Table.Th>
                   <Table.Th>描述</Table.Th>
                   <Table.Th>超级管理员</Table.Th>
-                  <Table.Th>所属机构</Table.Th>
+                  <Table.Th>所属组织结构</Table.Th>
                   <Table.Th style={{ width: 200 }}>操作</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -462,8 +462,8 @@ const PermissionsPage: React.FC = () => {
             onChange={(e) => setNewRoleDesc(e.target.value)}
           />
           <Select
-            label="所属机构"
-            placeholder="选择所属机构"
+            label="所属组织结构"
+            placeholder="选择所属组织结构"
             data={tenants.map((t) => ({ value: String(t.id), label: t.tenant_name }))}
             value={newRoleTenantId}
             onChange={(value) => setNewRoleTenantId(value)}

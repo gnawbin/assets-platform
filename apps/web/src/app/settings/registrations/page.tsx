@@ -79,8 +79,8 @@ const RegistrationsPage: React.FC = () => {
         try {
             await approveRegistration(
                 selected.id,
-                user?.id || 0,
-                Number(selectedTenantId),
+                String(user?.id ?? ''),
+                selectedTenantId,
                 approveRemark || undefined
             );
             notifications.show({ title: '审核通过', message: '注册申请已通过', color: 'green' });
@@ -99,7 +99,7 @@ const RegistrationsPage: React.FC = () => {
         if (!selected) return;
         setSubmitting(true);
         try {
-            await rejectRegistration(selected.id, user?.id || 0, rejectRemark || undefined);
+            await rejectRegistration(selected.id, String(user?.id ?? ''), rejectRemark || undefined);
             notifications.show({ title: '已驳回', message: '注册申请已驳回', color: 'orange' });
             closeReject();
             setRejectRemark('');
@@ -226,8 +226,8 @@ const RegistrationsPage: React.FC = () => {
                             确认通过 <strong>{selected?.username}</strong> 的注册申请？
                         </Text>
                         <Select
-                            label="分配租户"
-                            placeholder="选择租户"
+                            label="分配组织结构"
+                            placeholder="选择组织结构"
                             data={tenants.map((t) => ({ value: String(t.id), label: t.tenant_name }))}
                             value={selectedTenantId}
                             onChange={setSelectedTenantId}

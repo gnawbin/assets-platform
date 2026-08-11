@@ -69,7 +69,7 @@ const TenantsPage: React.FC = () => {
         execute: fetchTenants,
     } = useApi(getTenants);
 
-    // 选中的租户
+    // 选中的组织结构
     const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
     // 新增/编辑弹窗
@@ -135,9 +135,9 @@ const TenantsPage: React.FC = () => {
         setTreeData(roots);
     };
 
-    // 获取父租户名称
+    // 获取父级组织结构名称
     const getParentName = (parentId: string | null): string => {
-        if (!parentId) return '（顶级租户）';
+        if (!parentId) return '（顶级组织结构）';
         const parent = tenants.find((t) => t.id === parentId);
         return parent ? parent.tenant_name : '（未知）';
     };
@@ -165,16 +165,16 @@ const TenantsPage: React.FC = () => {
         setFormModalOpen(true);
     };
 
-    // 保存租户
+    // 保存组织结构
     const handleSave = async () => {
         if (!formName.trim()) {
-            notifyError('验证失败', '请输入租户名称');
+            notifyError('验证失败', '请输入组织结构名称');
             return;
         }
 
         // 末级节点需要 schema 名称
         if (formIsLeaf && !formSchemaName.trim()) {
-            notifyError('验证失败', '末级租户必须指定 Schema 名称');
+            notifyError('验证失败', '末级组织结构必须指定 Schema 名称');
             return;
         }
 
@@ -195,7 +195,7 @@ const TenantsPage: React.FC = () => {
                     schemaName: formIsLeaf ? formSchemaName.trim() : null,
                     enable: formEnable,
                 });
-                notifySuccess('租户添加成功');
+                notifySuccess('组织结构添加成功');
             } else {
                 if (!selectedTenant) return;
                 await doUpdateTenant({
@@ -203,13 +203,13 @@ const TenantsPage: React.FC = () => {
                     tenantName: formName.trim(),
                     enable: formEnable,
                 });
-                notifySuccess('租户更新成功');
+                notifySuccess('组织结构更新成功');
             }
             setFormModalOpen(false);
             fetchTenants();
         } catch (err) {
-            console.error('保存租户失败:', err);
-            notifyError('保存租户失败', typeof err === 'string' ? err : undefined);
+            console.error('保存组织结构失败:', err);
+            notifyError('保存组织结构失败', typeof err === 'string' ? err : undefined);
         }
     };
 
@@ -222,18 +222,18 @@ const TenantsPage: React.FC = () => {
     const handleDelete = async () => {
         if (!selectedTenant) return;
         if (selectedTenant.id === '1') {
-            notifyError('操作失败', '不能删除默认租户');
+            notifyError('操作失败', '不能删除默认组织结构');
             return;
         }
         try {
             await doDeleteTenant(selectedTenant.id);
             setDeleteModalOpen(false);
             setSelectedTenant(null);
-            notifySuccess('租户已禁用');
+            notifySuccess('组织结构已禁用');
             fetchTenants();
         } catch (err) {
-            console.error('禁用租户失败:', err);
-            notifyError('禁用租户失败', typeof err === 'string' ? err : undefined);
+            console.error('禁用组织结构失败:', err);
+            notifyError('禁用组织结构失败', typeof err === 'string' ? err : undefined);
         }
     };
 
@@ -335,8 +335,8 @@ const TenantsPage: React.FC = () => {
             <Stack gap="lg">
                 <Group justify="space-between">
                     <div>
-                        <Title order={2}>租户管理</Title>
-                        <Text c="dimmed">管理多租户树状结构</Text>
+                        <Title order={2}>组织结构管理</Title>
+                        <Text c="dimmed">管理多组织树状结构</Text>
                     </div>
                     <Group>
                         <Button
@@ -351,7 +351,7 @@ const TenantsPage: React.FC = () => {
                             leftSection={<IconPlus size={16} />}
                             onClick={() => openAddModal(null)}
                         >
-                            新增根租户
+                            新增根组织结构
                         </Button>
                     </Group>
                 </Group>
@@ -363,14 +363,14 @@ const TenantsPage: React.FC = () => {
                 )}
 
                 <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-                    {/* 左侧：租户树 */}
+                    {/* 左侧：组织结构树 */}
                     <Card withBorder padding="lg" radius="md" h={600}>
                         <Group justify="space-between" mb="md">
                             <Text fw={600} size="sm">
-                                租户结构
+                                组织结构
                             </Text>
                             <Text size="xs" c="dimmed">
-                                {tenants.length} 个租户
+                                {tenants.length} 个组织
                             </Text>
                         </Group>
                         <Divider mb="md" />
@@ -380,7 +380,7 @@ const TenantsPage: React.FC = () => {
                             </Group>
                         ) : treeData.length === 0 ? (
                             <Text ta="center" c="dimmed" py="xl">
-                                暂无租户数据，请新增根租户
+                                暂无组织结构数据，请新增根组织结构
                             </Text>
                         ) : (
                             <ScrollArea h={500}>
@@ -389,23 +389,23 @@ const TenantsPage: React.FC = () => {
                         )}
                     </Card>
 
-                    {/* 右侧：租户详情 */}
+                    {/* 右侧：组织结构详情 */}
                     <Card withBorder padding="lg" radius="md" h={600}>
                         {selectedTenant ? (
                             <Stack gap="md">
                                 <Group justify="space-between">
                                     <Text fw={600} size="sm">
-                                        租户详情
+                                        组织结构详情
                                     </Text>
                                     <Group gap="xs">
-                                        <Tooltip label="新增子租户">
+                                        <Tooltip label="新增子组织">
                                             <Button
                                                 size="xs"
                                                 variant="light"
                                                 leftSection={<IconPlus size={14} />}
                                                 onClick={() => openAddModal(selectedTenant.id)}
                                             >
-                                                新增子租户
+                                                新增子组织
                                             </Button>
                                         </Tooltip>
                                         <Tooltip label="编辑">
@@ -435,7 +435,7 @@ const TenantsPage: React.FC = () => {
                                     <Stack gap="sm">
                                         <Group>
                                             <Text size="sm" c="dimmed" w={100}>
-                                                租户名称
+                                                组织结构名称
                                             </Text>
                                             <Text size="sm" fw={500}>
                                                 {selectedTenant.tenant_name}
@@ -490,29 +490,29 @@ const TenantsPage: React.FC = () => {
                         ) : (
                             <Stack align="center" justify="center" h="100%" gap="md">
                                 <IconBuildingStore size={48} color="var(--mantine-color-gray-4)" />
-                                <Text c="dimmed">请从左侧选择一个租户查看详情</Text>
+                                <Text c="dimmed">请从左侧选择一个组织结构查看详情</Text>
                             </Stack>
                         )}
                     </Card>
                 </SimpleGrid>
             </Stack>
 
-            {/* 新增/编辑租户弹窗 */}
+            {/* 新增/编辑组织结构弹窗 */}
             <Modal
                 opened={formModalOpen}
                 onClose={() => setFormModalOpen(false)}
-                title={formMode === 'add' ? '新增租户' : '编辑租户'}
+                title={formMode === 'add' ? '新增组织结构' : '编辑组织结构'}
                 size="md"
             >
                 <Stack gap="md">
                     {formMode === 'add' && formParentId && (
                         <Text size="sm" c="dimmed">
-                            父级租户：{getParentName(formParentId)}
+                            父级组织结构：{getParentName(formParentId)}
                         </Text>
                     )}
                     <TextInput
-                        label="租户名称"
-                        placeholder="请输入租户名称"
+                        label="组织结构名称"
+                        placeholder="请输入组织结构名称"
                         required
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
@@ -579,15 +579,15 @@ const TenantsPage: React.FC = () => {
             <Modal
                 opened={deleteModalOpen}
                 onClose={() => setDeleteModalOpen(false)}
-                title="确认禁用租户"
+                title="确认禁用组织结构"
                 size="sm"
             >
                 <Stack gap="md">
                     <Text>
-                        确定要禁用租户 <strong>{selectedTenant?.tenant_name}</strong> 吗？
+                        确定要禁用组织结构 <strong>{selectedTenant?.tenant_name}</strong> 吗？
                     </Text>
                     <Text size="sm" c="dimmed">
-                        禁用后，该租户下的所有用户将无法登录系统。您可以通过编辑重新启用。
+                        禁用后，该组织下的所有用户将无法登录系统。您可以通过编辑重新启用。
                     </Text>
                     <Group justify="flex-end" mt="md">
                         <Button variant="default" onClick={() => setDeleteModalOpen(false)}>

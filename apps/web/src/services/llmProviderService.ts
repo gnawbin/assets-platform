@@ -85,6 +85,44 @@ export function getLlmModels(providerId?: string): Promise<LlmModel[]> {
     return api.get('get_llm_models', providerId ? { providerId } : undefined);
 }
 
+/** 创建模型 */
+export function createLlmModel(params: {
+    providerId: string;
+    modelCode: string;
+    modelName: string;
+    modelType: string;
+    contextWindow?: number;
+    temperatureDefault?: number;
+    maxTokensDefault?: number;
+    enable?: boolean;
+}): Promise<LlmModel> {
+    return api.post('create_llm_model', params);
+}
+
+/** 更新模型 */
+export function updateLlmModel(params: {
+    id: string;
+    modelCode?: string;
+    modelName?: string;
+    modelType?: string;
+    contextWindow?: number;
+    temperatureDefault?: number;
+    maxTokensDefault?: number;
+    enable?: boolean;
+}): Promise<LlmModel> {
+    return api.put('update_llm_model', params);
+}
+
+/** 删除模型 */
+export function deleteLlmModel(id: string): Promise<void> {
+    return api.delete('delete_llm_model', { id });
+}
+
+/** 从 OpenAI 接口拉取模型列表 */
+export function fetchLlmModels(providerId: string): Promise<LlmModel[]> {
+    return api.post('fetch_llm_models', { providerId });
+}
+
 /** 获取用户模型偏好 */
 export function getUserLLmSetting(userId: string): Promise<UserLLmSetting | null> {
     return api.get('get_user_llm_setting', { userId });

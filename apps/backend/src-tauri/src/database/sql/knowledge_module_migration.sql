@@ -4,7 +4,7 @@
 -- 适用版本：基于 Git commit abdfd18
 -- 执行位置：
 --   public 表执行在 public 命名空间
---   {schema} 表需替换为实际租户 schema 名
+--   {schema} 表需替换为实际组织 schema 名
 -- ==============================
 
 -- ==============================
@@ -159,7 +159,8 @@ CREATE TABLE IF NOT EXISTS public.sys_tag (
 -- ==============================
 
 -- 新用户注册时自动创建 user_llm_setting
-CREATE OR REPLACE FUNCTION public.init_user_llm_setting(schema_name TEXT)
+-- 注意：触发器函数不能声明参数，schema 通过 NEW.tenant_id 动态查询
+CREATE OR REPLACE FUNCTION public.init_user_llm_setting()
 RETURNS TRIGGER AS $$
 DECLARE
     v_provider_id BIGINT;
@@ -167,7 +168,14 @@ DECLARE
     v_embed_model_id BIGINT;
     v_schema TEXT;
 BEGIN
-    v_schema := quote_ident(schema_name);
+    -- 根据新增用户的 tenant_id 动态获取对应的组织 schema
+    SELECT quote_ident(schema_name) INTO v_schema
+    FROM public.sys_tenant
+    WHERE id = NEW.tenant_id;
+
+    IF v_schema IS NULL THEN
+        RETURN NEW;
+    END IF;
 
     EXECUTE format('SELECT id FROM %I.llm_provider WHERE enable = true AND deleted = 0 ORDER BY weight DESC LIMIT 1', v_schema)
         INTO v_provider_id;
