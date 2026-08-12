@@ -276,7 +276,7 @@ impl UploadManager {
                     .unwrap_or("application/octet-stream"),
             )
             .await
-            .map_err(|e| format!("创建 S3 分片上传失败: {}", e))?;
+            .map_err(|e| format!("创建 S3 分片上传失败: {}", e.full_message()))?;
 
         // 生成 Presigned URLs
         let presigned_urls = self

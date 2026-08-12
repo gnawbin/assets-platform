@@ -78,6 +78,27 @@ pub enum S3Error {
     AwsError(#[from] aws_sdk_s3::Error),
 }
 
+impl S3Error {
+    /// 获取完整错误信息（递归展开 AWS SDK 的 source 链）
+    ///
+    /// AWS SDK 顶层 Display 可能只是 "unhandled error"，
+    /// 真正的错误原因（如 InvalidAccessKeyId）藏在 source() 链中。
+    pub fn full_message(&self) -> String {
+        let (head, mut source) = match self {
+            S3Error::AwsError(e) => (e.to_string(), std::error::Error::source(e)),
+            other => return other.to_string(),
+        };
+
+        let mut msg = head;
+        while let Some(err) = source {
+            msg.push_str(" -> ");
+            msg.push_str(&err.to_string());
+            source = err.source();
+        }
+        msg
+    }
+}
+
 // ======================== S3 客户端 ========================
 
 /// S3 客户端，封装所有 S3 协议操作
