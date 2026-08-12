@@ -98,6 +98,10 @@ pub fn run() {
     // 应用启动时加载 .env 环境变量
     load_env();
 
+    // 自动启动 doc-parser 侧车（Python FastAPI，用于多模态文件/视频解析）
+    // 端口已在运行时跳过；返回的 Child 句柄保持到应用退出
+    let _doc_parser_child = service::doc_parser::start_doc_parser();
+
     // 初始化 tracing 日志系统
     if let Err(e) = utils::logging::init_tracing() {
         eprintln!("日志系统初始化失败: {}", e);

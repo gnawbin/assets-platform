@@ -112,3 +112,125 @@ impl DocParserClient {
         }
     }
 }
+
+// ======================== 侧车进程管理 ========================
+
+/// 启动 doc-parser 侧车服务（Python FastAPI，`uvicorn`）
+///
+/// 由 Tauri 应用启动时自动拉起，监听 `127.0.0.1:8321`。
+///
+/// 配置（`.env.toml` 的 `[doc_parser]` 段，经 `load_env()` 转为环境变量）：
+/// - `DOC_PARSER_ENABLED`: 是否启用（默认 true）
+/// - `DOC_PARSER_PYTHON`: Python 解释器路径（默认 `aiagent` conda 环境，等价 `conda activate aiagent`）
+/// - `DOC_PARSER_HOST` / `DOC_PARSER_PORT`: 监听地址（默认 `127.0.0.1:8321`）
+///
+/// 行为：
+/// - 目标端口已被监听（服务已在运行）→ 跳过启动；
+/// - 生成随机 `DOC_PARSER_TOKEN`（UUID v4）注入自身进程与子进程，
+///   保证 `DocParserClient` 与 doc-parser 使用同一认证令牌；
+/// - 将 Python 所在目录注入子进程 `PATH`，确保 `ffmpeg` / `ffprobe` 可用；
+/// - 日志输出到 `/tmp/doc-parser.log`。
+pub fn start_doc_parser() -> Option<std::process::Child> {
+    // 1. 是否启用
+    if std::env::var("DOC_PARSER_ENABLED")
+        .map(|v| v == "false" || v == "0")
+        .unwrap_or(false)
+    {
+        tracing::info!("[doc-parser] 已通过 DOC_PARSER_ENABLED 配置禁用，跳过启动");
+        return None;
+    }
+
+    let host = std::env::var("DOC_PARSER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port: u16 = std::env::var("DOC_PARSER_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8321);
+
+    // 2. 端口已被占用 → 服务已在运行，跳过（避免端口冲突 / 重复拉起）
+    if std::net::TcpStream::connect((host.as_str(), port)).is_ok() {
+        tracing::info!("[doc-parser] 检测到 {}:{} 已在运行，跳过启动", host, port);
+        return None;
+    }
+
+    // 3. 定位 doc-parser 目录（CARGO_MANIFEST_DIR = apps/backend/src-tauri）
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let parser_dir = manifest_dir
+        .parent() // apps/backend
+        .and_then(|p| p.parent()) // apps
+        .map(|p| p.join("doc-parser"))?;
+    if !parser_dir.join("main.py").exists() {
+        tracing::warn!(
+            "[doc-parser] {} 下未找到 main.py，跳过启动",
+            parser_dir.display()
+        );
+        return None;
+    }
+
+    // 4. Python 解释器（优先配置，默认 aiagent conda 环境）
+    let python = std::env::var("DOC_PARSER_PYTHON")
+        .unwrap_or_else(|_| "/home/ubuntu/conda/envs/aiagent/bin/python".to_string());
+
+    // 5. 生成动态认证 token，注入自身进程（DocParserClient 读取）与子进程
+    let token = uuid::Uuid::new_v4().to_string();
+    std::env::set_var("DOC_PARSER_TOKEN", &token);
+
+    // 6. PATH 注入 Python 所在目录（保证 ffmpeg/ffprobe 与 uvicorn 依赖可用）
+    let python_path = std::path::Path::new(&python);
+    let env_bin = python_path.parent().map(|p| p.to_path_buf());
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = match &env_bin {
+        Some(bin) => format!("{}:{}", bin.display(), current_path),
+        None => current_path,
+    };
+
+    // 7. 日志重定向到 /tmp/doc-parser.log
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/doc-parser.log")
+        .ok();
+
+    // 8. spawn uvicorn
+    let mut cmd = std::process::Command::new(&python);
+    cmd.arg("-m")
+        .arg("uvicorn")
+        .arg("main:app")
+        .arg("--host")
+        .arg(&host)
+        .arg("--port")
+        .arg(port.to_string())
+        .current_dir(&parser_dir)
+        .env("DOC_PARSER_TOKEN", &token)
+        .env("PARSER_HOST", &host)
+        .env("PARSER_PORT", port.to_string())
+        .env("PATH", &new_path);
+
+    if let Some(f) = &log_file {
+        if let Ok(dup) = f.try_clone() {
+            cmd.stdout(std::process::Stdio::from(dup));
+        }
+        if let Ok(dup) = f.try_clone() {
+            cmd.stderr(std::process::Stdio::from(dup));
+        }
+    } else {
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+    }
+
+    match cmd.spawn() {
+        Ok(child) => {
+            tracing::info!(
+                "[doc-parser] 已启动 (PID: {}): {} -m uvicorn main:app --host {} --port {}",
+                child.id(),
+                python,
+                host,
+                port
+            );
+            Some(child)
+        }
+        Err(e) => {
+            tracing::error!("[doc-parser] 启动失败: {}", e);
+            None
+        }
+    }
+}
