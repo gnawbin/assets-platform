@@ -17,7 +17,6 @@ fn persistence_stub() -> ! {
 }
 
 /// 创建工作流实例并启动审批流程
-#[tauri::command]
 pub async fn wf_create_workflow(
     def_id: String,
     biz_type: String,
@@ -29,7 +28,6 @@ pub async fn wf_create_workflow(
 }
 
 /// 审批操作：通过/驳回
-#[tauri::command]
 pub async fn wf_approve_step(
     workflow_id: String,
     action: String, // "approve" | "reject"
@@ -40,7 +38,6 @@ pub async fn wf_approve_step(
 }
 
 /// 查询审批状态
-#[tauri::command]
 pub async fn wf_get_workflow_status(
     biz_type: String,
     biz_id: i64,

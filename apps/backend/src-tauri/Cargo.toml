@@ -42,6 +42,7 @@ assets-engine = { path = "crates/assets-engine" }
 assets-service = { path = "crates/assets-service" }
 assets-storage = { path = "crates/assets-storage" }
 assets-utils = { path = "crates/assets-utils" }
+assets-workflow = { path = "crates/assets-workflow" }
 
 # 序列化
 serde = { version = "1.0.229", default-features = false, features = [
@@ -77,11 +78,6 @@ tokio = { version = "1.53.1", default-features = false, features = [
   "signal",
   "sync",
 ] }
-async-trait = "0.1.91"
-
-# 工作流引擎
-wfe-core = { version = "1.10.0", features = ["test-support"] }
-wfe-yaml = "1.10.0"
 
 # 配置（lib.rs 加载 .env.toml）
 toml = "1.1.3+spec-1.1.0"

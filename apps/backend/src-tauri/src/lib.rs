@@ -1,5 +1,4 @@
 mod commands;
-mod workflow;
 
 use std::sync::Arc;
 use tauri::Manager;
