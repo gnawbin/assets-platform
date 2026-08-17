@@ -2,8 +2,8 @@
 //!
 //! 对应 lib.rs 中的 get_departments / insert_department / update_department / delete_department
 
-use crate::database::models::Department;
-use crate::service;
+use assets_database::models::Department;
+use assets_service;
 
 /// 获取所有部门列表
 #[tauri::command]
@@ -14,7 +14,7 @@ pub async fn get_departments(tenant_id: Option<String>) -> Result<Vec<Department
                 .map_err(|e| format!("无效的租户ID: {}", e))
         })
         .transpose()?;
-    service::department_service::get_departments(tenant_id).await
+    assets_service::department_service::get_departments(tenant_id).await
 }
 
 /// 新增部门
@@ -36,7 +36,7 @@ pub async fn insert_department(
         .ok_or_else(|| "缺少租户ID参数".to_string())?
         .parse()
         .map_err(|e| format!("无效的租户ID: {}", e))?;
-    service::department_service::insert_department(
+    assets_service::department_service::insert_department(
         &department_name,
         parent_id,
         description.as_deref(),
@@ -62,7 +62,7 @@ pub async fn update_department(
                 .map_err(|e| format!("无效的父部门ID: {}", e))
         })
         .transpose()?;
-    service::department_service::update_department(
+    assets_service::department_service::update_department(
         id,
         &department_name,
         parent_id,
@@ -76,5 +76,5 @@ pub async fn update_department(
 #[tauri::command]
 pub async fn delete_department(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的部门ID: {}", e))?;
-    service::department_service::delete_department(id).await
+    assets_service::department_service::delete_department(id).await
 }

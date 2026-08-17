@@ -1,0 +1,36 @@
+[package]
+name = "assets-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+assets-database = { path = "../assets-database" }
+assets-engine = { path = "../assets-engine" }
+assets-service = { path = "../assets-service" }
+assets-storage = { path = "../assets-storage" }
+axum = { version = "0.8.9", features = ["macros"] }
+tower-http = { version = "0.7.0", features = ["cors", "trace"] }
+tokio = { version = "1.53.1", default-features = false, features = [
+  "rt-multi-thread",
+  "rt",
+  "macros",
+  "time",
+  "fs",
+  "net",
+  "signal",
+  "sync",
+] }
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
+sqlx = { version = "0.9.0", default-features = false, features = [
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+  "macros",
+  "chrono",
+  "rust_decimal",
+] }
+tracing = "0.1.44"
+anyhow = "1.0.104"
+jsonwebtoken = { version = "11.0.0", default-features = false, features = ["aws_lc_rs"] }
+futures = "0.3.33"

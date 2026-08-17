@@ -1,10 +1,4 @@
-mod api;
 mod commands;
-mod database;
-mod engine;
-mod service;
-mod storage;
-mod utils;
 mod workflow;
 
 use std::sync::Arc;
@@ -100,10 +94,10 @@ pub fn run() {
 
     // 自动启动 doc-parser 侧车（Python FastAPI，用于多模态文件/视频解析）
     // 端口已在运行时跳过；返回的 Child 句柄保持到应用退出
-    let _doc_parser_child = service::doc_parser::start_doc_parser();
+    let _doc_parser_child = assets_service::doc_parser::start_doc_parser();
 
     // 初始化 tracing 日志系统
-    if let Err(e) = utils::logging::init_tracing() {
+    if let Err(e) = assets_utils::logging::init_tracing() {
         eprintln!("日志系统初始化失败: {}", e);
     }
 
@@ -111,24 +105,24 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(commands::skill_commands::SkillRegistryState(
             std::sync::Arc::new(tokio::sync::Mutex::new(
-                engine::skill_registry::SkillRegistry::new(),
+                assets_engine::skill_registry::SkillRegistry::new(),
             )),
         ))
         .setup(|app| {
             // 初始化 OpenTelemetry（需要 Tokio 运行时上下文）
             tauri::async_runtime::block_on(async {
-                if let Err(e) = utils::logging::init_otel() {
+                if let Err(e) = assets_utils::logging::init_otel() {
                     tracing::warn!("OpenTelemetry 初始化失败: {}", e);
                 }
             });
 
             // 应用启动时自动初始化数据库
             tauri::async_runtime::block_on(async {
-                match database::init_database().await {
+                match assets_database::init_database().await {
                     Ok(()) => {
                         tracing::info!("数据库初始化完成");
                         // 初始化默认租户 schema（Tauri 模式下 GLOBAL_SCHEMA 的默认值）
-                        if let Ok(pool) = database::get_pool() {
+                        if let Ok(pool) = assets_database::get_pool() {
                             let schema: Option<String> = sqlx::query_scalar(
                                 "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true"
                             )
@@ -137,7 +131,7 @@ pub fn run() {
                             .ok()
                             .flatten();
                             if let Some(sn) = schema {
-                                database::set_global_schema(sn);
+                                assets_database::set_global_schema(sn);
                                 tracing::info!("已设置默认租户 schema");
                             }
                         }
@@ -150,7 +144,7 @@ pub fn run() {
             });
 
             // 初始化 LLM Router
-            let llm_router = Arc::new(service::llm_gateway_service::LLMRouter::new());
+            let llm_router = Arc::new(assets_service::llm_gateway_service::LLMRouter::new());
             tauri::async_runtime::block_on(async {
                 if let Err(e) = llm_router.refresh_providers().await {
                     tracing::warn!("LLM Provider 加载失败（可能需要稍后手动刷新）: {}", e);
@@ -162,12 +156,12 @@ pub fn run() {
 
             // 在后台启动 HTTP API 服务（与 Tauri 共用 Tokio 运行时）
             let llm_router_clone = llm_router.clone();
-            match database::get_pool() {
+            match assets_database::get_pool() {
                 Ok(pool) => {
                     tracing::info!("准备启动 HTTP API 服务...");
                     tauri::async_runtime::spawn(async move {
                         tracing::info!("正在启动 HTTP API 服务...");
-                        if let Err(e) = api::start_http_server(pool, Some(llm_router_clone)).await {
+                        if let Err(e) = assets_api::start_http_server(pool, Some(llm_router_clone)).await {
                             tracing::error!("HTTP API 服务异常退出: {:?}", e);
                         } else {
                             tracing::info!("HTTP API 服务已停止");

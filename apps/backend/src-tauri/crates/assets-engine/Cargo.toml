@@ -1,0 +1,20 @@
+[package]
+name = "assets-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+tokio = { version = "1.53.1", default-features = false, features = [
+  "rt-multi-thread",
+  "rt",
+  "macros",
+  "time",
+  "fs",
+  "net",
+  "signal",
+  "sync",
+] }
+tracing = "0.1.44"

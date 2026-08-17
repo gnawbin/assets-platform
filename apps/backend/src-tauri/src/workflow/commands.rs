@@ -10,7 +10,7 @@ use wfe_core::models::{Event, ExecutionPointer, WorkflowInstance};
 use wfe_core::traits::{EventRepository, WorkflowRepository};
 
 use super::definitions::get_definition;
-use crate::database;
+use assets_database;
 
 fn persistence_stub() -> ! {
     panic!("wfe-postgres removed until sqlx 0.9 support is available");
@@ -45,8 +45,8 @@ pub async fn wf_get_workflow_status(
     biz_type: String,
     biz_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
-    let prefix = database::schema_prefix();
+    let pool = assets_database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
+    let prefix = assets_database::schema_prefix();
 
     // 查询工作流实例
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(

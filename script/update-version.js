@@ -97,7 +97,7 @@ function checkGitStatus() {
  */
 function commitAndPushChanges(version) {
   console.log('📝 添加修改的文件到暂存区...');
-  execSync('git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock src/components/Sidebar.tsx src-tauri/src/database/sql/public_initial_data.sql src-tauri/src/database/sql/knowledge_module_migration.sql', { cwd: projectRoot, encoding: 'utf8' });
+  execSync('git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock src/components/Sidebar.tsx src-tauri/crates/assets-database/src/sql/public_initial_data.sql src-tauri/crates/assets-database/src/sql/knowledge_module_migration.sql', { cwd: projectRoot, encoding: 'utf8' });
   console.log('✅ 已添加修改的文件到暂存区');
 
   const commitMessage = `chore: bump version to v${version}`;

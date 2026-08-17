@@ -1,7 +1,7 @@
 //! LLM 厂商/模型 Tauri Command
 
-use crate::database::models::{LlmModel, LlmProvider, UserLLmSetting};
-use crate::service::llm_provider_service;
+use assets_database::models::{LlmModel, LlmProvider, UserLLmSetting};
+use assets_service::llm_provider_service;
 
 /// 获取厂商列表
 #[tauri::command]
@@ -29,7 +29,7 @@ pub async fn create_llm_provider(
 ) -> Result<LlmProvider, String> {
     // 加密 API Key
     let encrypted_key = match &apiKey {
-        Some(key) if !key.is_empty() => match crate::utils::crypto::encrypt_api_key(key) {
+        Some(key) if !key.is_empty() => match assets_utils::crypto::encrypt_api_key(key) {
             Ok(ek) => Some(ek),
             Err(_) => apiKey.clone(),
         },
@@ -77,7 +77,7 @@ pub async fn update_llm_provider(
 
     // 加密新 Key
     let key = match &apiKey {
-        Some(k) if !k.is_empty() => match crate::utils::crypto::encrypt_api_key(k) {
+        Some(k) if !k.is_empty() => match assets_utils::crypto::encrypt_api_key(k) {
             Ok(ek) => Some(ek),
             Err(_) => Some(k.clone()),
         },

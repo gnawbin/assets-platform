@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
 [package]
 authors = ["gengyuwangbin"]
 description = "资产平台APP"
@@ -14,62 +18,46 @@ name = "assets-platform"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = {version = "2.5.6", default-features = false, features = [] }# 关闭默认特性
+tauri-build = { version = "2.5.6", default-features = false, features = [] } # 关闭默认特性
 
 [dependencies]
 tracing = "0.1.44"
-tracing-subscriber = {version = "0.3.23", features = ["env-filter", "json"] }
 
-# 加这两行
-getrandom = {version = "0.4.3", features = ["std"] }
-surrealdb = "3.2.3"
-thiserror = "2.0.19"
-# OTel 核心
-# 注意：opentelemetry-* 各包版本需保持兼容，当前使用 0.32.x 系列
-# 升级时请参考 https://opentelemetry.io/docs/languages/rust/instrumentation/
-# 确保 opentelemetry / opentelemetry_sdk / opentelemetry-otlp / tracing-opentelemetry / opentelemetry-appender-tracing 版本匹配
-argon2 = "0.5.3" # 最强密码哈希
-opentelemetry = {version = "0.32.0", features = ["trace", "metrics", "logs"] } 
-opentelemetry-appender-tracing = "0.32.0" # 日志桥接
-opentelemetry-otlp = {version = "0.32.0", features = [
-  "grpc-tonic",
-  "http-proto",
-  "trace",
-  "logs",
-  "metrics",
-] } 
-opentelemetry_sdk = {version = "0.32.1", features = [
-  "rt-tokio",
-  "trace",
-  "metrics",
-  "logs",
-] } 
-password-hash = {version = "0.6.1", features = ["rand_core"] }# 哈希工具                                                             
-rand = {version = "0.10.2", features = ["std_rng"] } 
-rand_core = "0.10.1" # 提供 RngCore 等核心随机数 trait
-tracing-opentelemetry = "0.33.0" # tracing ↔ OTel 桥接
+# 加这一行（surrealdb / rand 兼容）
+getrandom = { version = "0.4.3", features = ["std"] }
+
 # Tauri 核心（最小特性集）
-tauri = {version = "2.11.5", default-features = false, features = ["wry"] }
+tauri = { version = "2.11.5", default-features = false, features = ["wry"] }
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-fs = "2.5.1"
-tauri-plugin-opener = {version = "2.5.4", default-features = false}
+tauri-plugin-opener = { version = "2.5.4", default-features = false }
 tauri-plugin-process = "2.3.0"
 tauri-plugin-shell = "2.3.5"
 tauri-plugin-updater = "2.10.1"
+
+# 内部业务 crate（crates/*）
+assets-api = { path = "crates/assets-api" }
+assets-database = { path = "crates/assets-database" }
+assets-engine = { path = "crates/assets-engine" }
+assets-service = { path = "crates/assets-service" }
+assets-storage = { path = "crates/assets-storage" }
+assets-utils = { path = "crates/assets-utils" }
+
 # 序列化
-serde = {version = "1.0.229", default-features = false, features = [
+serde = { version = "1.0.229", default-features = false, features = [
   "derive",
   "alloc",
 ] }
-serde_json = {version = "1.0.151", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
 
-# JWT
-jsonwebtoken = {version = "11.0.0", default-features = false, features = [
+# JWT（命令层）
+jsonwebtoken = { version = "11.0.0", default-features = false, features = [
   "aws_lc_rs",
 ] }
 
-# 数据库（仅 PostgreSQL）
-sqlx = {version = "0.9.0", default-features = false, features = [
+# 数据库（命令层 / 工作流）
+sqlx = { version = "0.9.0", default-features = false, features = [
   "postgres",
   "runtime-tokio",
   "tls-rustls",
@@ -79,7 +67,7 @@ sqlx = {version = "0.9.0", default-features = false, features = [
 ] }
 
 # 异步运行时（只开必须的特性，不要 full）
-tokio = {version = "1.53.1", default-features = false, features = [
+tokio = { version = "1.53.1", default-features = false, features = [
   "rt-multi-thread",
   "rt",
   "macros",
@@ -87,36 +75,19 @@ tokio = {version = "1.53.1", default-features = false, features = [
   "fs",
   "net",
   "signal",
+  "sync",
 ] }
-
-# HTTP 服务框架（用于前后端分离时的 REST API）
-axum = {version = "0.8.9", features = ["macros"] }
-tower-http = {version = "0.7.0", features = ["cors", "trace"] }
-
-uuid = {version = "1.24.0", features = ["v4"] }
-# HTTP 客户端
-reqwest = {version = "0.13.4", features = [
-  "json",
-  "rustls",
-], default-features = false}
-# 异步流处理
 async-trait = "0.1.91"
-futures = "0.3.33"
-wfe-core = {version = "1.10.0", features = ["test-support"] }
+
+# 工作流引擎
+wfe-core = { version = "1.10.0", features = ["test-support"] }
 wfe-yaml = "1.10.0"
-# URL 解析
-url = "2.0"
-# 目录路径
-dirs = "6.0.0"
-# 懒加载静态变量
-lazy_static = "1.5.0"
-# 明确指定兼容版本
-base64 = "0.23.0"
-# 正则表达式
-regex = "1.13.1"
-# Cron表达式解析
-cron = "0.17.0"
-winapi = {version = "0.3", features = [
+
+# 配置（lib.rs 加载 .env.toml）
+toml = "1.1.3+spec-1.1.0"
+
+# Windows 平台兼容
+winapi = { version = "0.3", features = [
   "memoryapi",
   "debugapi",
   "sysinfoapi",
@@ -124,45 +95,11 @@ winapi = {version = "0.3", features = [
   "errhandlingapi",
 ] }
 
-hex = "0.4"
-# Decimal type for NUMERIC database fields
-rust_decimal = "1.42.1"
-
-# AES encryption for API keys
-aes-gcm = "0.11.0"
-
-# AWS S3 SDK
-aws-config = {version = "1.10.1", default-features = false, features = ["rustls"] }
-aws-credential-types = "1.3.0"
-aws-sdk-s3 = {version = "1.140.0", default-features = false, features = ["rustls"] }
-aws-smithy-async = {version = "1.3.0", features = ["rt-tokio"] }
-
-# OpenAPI 文档支持（用于 proc-macro 解析）
-utoipa = {version = "5", features = ["axum_extras"] }
-
-# 工具库
-anyhow = "1.0.104"
-chrono = {version = "0.4", default-features = false, features = ["serde"] }
-config = {version = "0.15.25", default-features = false}
-dashmap = "6.1.0"
-once_cell = "1.21.4"
-opa-wasm = "0.3.1"
-toml = "1.1.3+spec-1.1.0"
-
-twitter_snowflake = "1.0.3"
-# 图像基础（必选）
+[dev-dependencies]
+# 集成测试专用（tests/ 目录）
+surrealdb = "3.2.3"
 image = "0.25"
-# PDF解析 高性能首选
 pdf_oxide = "0.3.76"
-# OCR文字识别
-rusty-tesseract = "1.1"
-# 音视频分离、抽帧
-ffmpeg-light = "0.2"
-# 语音转写whisper
-whisper-rs = "0.16.0"
-# VLM原型开发，本地多模态（快速落地）
-ollama-rs = "0.3.6"
-nats="0.26.0"
 
 # Release模式优化配置
 [profile.release]
@@ -196,6 +133,3 @@ opt-level = 2
 # 优化生产构建的依赖项
 [profile.release.package."*"]
 opt-level = 2
-
-# Remove patch to use default version
-[patch.crates-io]
