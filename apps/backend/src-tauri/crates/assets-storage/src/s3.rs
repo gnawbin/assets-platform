@@ -12,6 +12,37 @@ use aws_sdk_s3::types::CompletedPart;
 use aws_sdk_s3::Client as S3NativeClient;
 use serde::{Deserialize, Serialize};
 
+// ======================== 发送重试 ========================
+
+/// S3 请求发送重试宏
+///
+/// RustFS 等 S3 兼容存储存在间歇性"连接被提前关闭"问题（瞬态 DispatchFailure），
+/// 自动重试可自愈；其余错误（鉴权失败、4xx/5xx 业务错误）立即返回。
+macro_rules! send_with_retry {
+    ($attempts:expr, $send_expr:expr) => {{
+        let mut remaining = $attempts;
+        loop {
+            match $send_expr.await {
+                Ok(v) => break Ok(v),
+                Err(e) => {
+                    let is_transient = matches!(&e, aws_sdk_s3::error::SdkError::DispatchFailure(_));
+                    if remaining <= 1 || !is_transient {
+                        break Err(S3Error::AwsError(aws_sdk_s3::Error::from(e)));
+                    }
+                    remaining -= 1;
+                    let delay = std::time::Duration::from_millis(150 * (1 << ($attempts - remaining)));
+                    tracing::warn!(
+                        "S3 请求瞬态失败，{}ms 后重试: {}",
+                        delay.as_millis(),
+                        e
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }};
+}
+
 // ======================== S3 配置 ========================
 
 /// S3 存储配置
@@ -28,12 +59,12 @@ pub struct S3Config {
 impl Default for S3Config {
     fn default() -> Self {
         Self {
-            endpoint: "http://localhost:9000".to_string(),
+            endpoint: "http://127.0.0.1:9000".to_string(),
             region: "us-east-1".to_string(),
             access_key: "minioadmin".to_string(),
             secret_key: "minioadmin".to_string(),
             bucket: "assets-platform".to_string(),
-            public_base_url: "http://localhost:9000/assets-platform".to_string(),
+            public_base_url: "http://127.0.0.1:9000/assets-platform".to_string(),
         }
     }
 }
@@ -130,6 +161,8 @@ impl S3Client {
             .behavior_version(BehaviorVersion::latest())
             .region(Region::new(config.region.clone()))
             .endpoint_url(&config.endpoint)
+            // S3 兼容存储（MinIO/RustFS）要求路径风格寻址，避免虚拟主机风格兼容问题
+            .force_path_style(true)
             .credentials_provider(credentials)
             .build();
 
@@ -152,15 +185,15 @@ impl S3Client {
         key: &str,
         mime_type: &str,
     ) -> Result<String, S3Error> {
-        let resp = self
-            .client
-            .create_multipart_upload()
-            .bucket(bucket)
-            .key(key)
-            .content_type(mime_type)
-            .send()
-            .await
-            .map_err(|e| S3Error::AwsError(aws_sdk_s3::Error::from(e)))?;
+        let resp = send_with_retry!(
+            3,
+            self.client
+                .create_multipart_upload()
+                .bucket(bucket)
+                .key(key)
+                .content_type(mime_type)
+                .send()
+        )?;
 
         resp.upload_id
             .ok_or_else(|| S3Error::OperationFailed("S3 未返回 upload_id".to_string()))
@@ -223,20 +256,20 @@ impl S3Client {
         upload_id: &str,
         parts: &[CompletedPart],
     ) -> Result<String, S3Error> {
-        let resp = self
-            .client
-            .complete_multipart_upload()
-            .bucket(bucket)
-            .key(key)
-            .upload_id(upload_id)
-            .multipart_upload(
-                aws_sdk_s3::types::CompletedMultipartUpload::builder()
-                    .set_parts(Some(parts.to_vec()))
-                    .build(),
-            )
-            .send()
-            .await
-            .map_err(|e| S3Error::AwsError(aws_sdk_s3::Error::from(e)))?;
+        let resp = send_with_retry!(
+            3,
+            self.client
+                .complete_multipart_upload()
+                .bucket(bucket)
+                .key(key)
+                .upload_id(upload_id)
+                .multipart_upload(
+                    aws_sdk_s3::types::CompletedMultipartUpload::builder()
+                        .set_parts(Some(parts.to_vec()))
+                        .build(),
+                )
+                .send()
+        )?;
 
         Ok(resp.e_tag.unwrap_or_default())
     }
@@ -248,14 +281,15 @@ impl S3Client {
         key: &str,
         upload_id: &str,
     ) -> Result<(), S3Error> {
-        self.client
-            .abort_multipart_upload()
-            .bucket(bucket)
-            .key(key)
-            .upload_id(upload_id)
-            .send()
-            .await
-            .map_err(|e| S3Error::AwsError(aws_sdk_s3::Error::from(e)))?;
+        send_with_retry!(
+            3,
+            self.client
+                .abort_multipart_upload()
+                .bucket(bucket)
+                .key(key)
+                .upload_id(upload_id)
+                .send()
+        )?;
 
         Ok(())
     }
