@@ -123,6 +123,8 @@ impl DocParserClient {
 /// - `DOC_PARSER_ENABLED`: 是否启用（默认 true）
 /// - `DOC_PARSER_PYTHON`: Python 解释器路径（默认 `aiagent` conda 环境，等价 `conda activate aiagent`）
 /// - `DOC_PARSER_HOST` / `DOC_PARSER_PORT`: 监听地址（默认 `127.0.0.1:8321`）
+/// - `DOC_PARSER_DIR`: doc-parser 代码目录（可选；默认沿本 crate 祖先路径查找
+///   第一个包含 `doc-parser/main.py` 的目录）
 ///
 /// 行为：
 /// - 目标端口已被监听（服务已在运行）→ 跳过启动；
@@ -152,12 +154,29 @@ pub fn start_doc_parser() -> Option<std::process::Child> {
         return None;
     }
 
-    // 3. 定位 doc-parser 目录（CARGO_MANIFEST_DIR = apps/backend/src-tauri）
+    // 3. 定位 doc-parser 目录
+    //    优先使用 DOC_PARSER_DIR 环境变量；否则从 CARGO_MANIFEST_DIR 沿祖先路径
+    //    向上查找第一个包含 doc-parser/main.py 的目录。
+    //    注意：本函数位于 workspace 成员 crate（crates/assets-service）内，
+    //    CARGO_MANIFEST_DIR 为 .../src-tauri/crates/assets-service，
+    //    不能按固定层级推导仓库根目录，故采用逐级向上查找。
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let parser_dir = manifest_dir
-        .parent() // apps/backend
-        .and_then(|p| p.parent()) // apps
-        .map(|p| p.join("doc-parser"))?;
+    let Some(parser_dir) = std::env::var("DOC_PARSER_DIR")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            manifest_dir
+                .ancestors()
+                .map(|p| p.join("doc-parser"))
+                .find(|p| p.join("main.py").exists())
+        })
+    else {
+        tracing::warn!(
+            "[doc-parser] 未定位到 doc-parser 目录（CARGO_MANIFEST_DIR={}），跳过启动",
+            manifest_dir.display()
+        );
+        return None;
+    };
     if !parser_dir.join("main.py").exists() {
         tracing::warn!(
             "[doc-parser] {} 下未找到 main.py，跳过启动",
