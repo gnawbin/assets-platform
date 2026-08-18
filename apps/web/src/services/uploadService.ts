@@ -172,11 +172,11 @@ class TauriUploadAdapter implements UploadAdapter {
 class HttpUploadAdapter implements UploadAdapter {
   private baseUrl: string;
 
-  constructor() {
+  constructor(baseUrl?: string) {
     const envBaseUrl = typeof process !== 'undefined'
       ? process.env?.NEXT_PUBLIC_API_BASE_URL
       : undefined;
-    this.baseUrl = envBaseUrl || 'http://localhost:3001/api';
+    this.baseUrl = baseUrl || envBaseUrl || 'http://localhost:3001/api';
   }
 
   async init(
@@ -306,17 +306,29 @@ export class UploadService {
   private baseUrl: string;
 
   /**
-   * @param mode 可选，强制指定模式。不传则按优先级自动选择：
-   *   1. 运行时检测 Tauri 环境
-   *   2. NEXT_PUBLIC_API_ADAPTER 环境变量
-   *   3. HTTP 兜底
+   * @param options 可选，支持三种方式：
+   *   - 不传：按优先级自动选择适配器（运行时检测 Tauri → NEXT_PUBLIC_API_ADAPTER → HTTP 兜底）
+   *   - 'tauri' | 'http'：强制指定适配器模式
+   *   - 字符串 baseUrl（如 '/api'）或 { mode?, baseUrl? }：自定义 HTTP API base URL
    */
-  constructor(mode?: UploadAdapterMode) {
+  constructor(options?: UploadAdapterMode | string | { mode?: UploadAdapterMode; baseUrl?: string }) {
+    let mode: UploadAdapterMode | undefined;
+    let baseUrl: string | undefined;
+
+    if (typeof options === 'object' && options !== null) {
+      mode = options.mode;
+      baseUrl = options.baseUrl;
+    } else if (options === 'tauri' || options === 'http') {
+      mode = options;
+    } else if (typeof options === 'string') {
+      baseUrl = options;
+    }
+
     const useTauri = shouldUseTauri(mode);
     this.adapter = useTauri
       ? new TauriUploadAdapter()
-      : new HttpUploadAdapter();
-    this.baseUrl = (() => {
+      : new HttpUploadAdapter(baseUrl);
+    this.baseUrl = baseUrl || (() => {
       const envBaseUrl = typeof process !== 'undefined'
         ? process.env?.NEXT_PUBLIC_API_BASE_URL
         : undefined;

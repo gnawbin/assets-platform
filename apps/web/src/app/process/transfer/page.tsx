@@ -34,13 +34,13 @@ import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 const TransferPage: React.FC = () => {
   const [transfers, setTransfers] = useState<AssetTransfer[]>([]);
   const [modalOpened, setModalOpened] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AssetTransferInput>({
-    asset_id: 0,
-    out_dept_id: 0,
-    in_dept_id: 0,
-    out_user_id: 0,
-    in_user_id: 0,
+    asset_id: '',
+    out_dept_id: '',
+    in_dept_id: '',
+    out_user_id: '',
+    in_user_id: '',
     transfer_date: '',
     reason: '',
     status: 0,
@@ -63,11 +63,11 @@ const TransferPage: React.FC = () => {
   const openCreateModal = () => {
     setEditingId(null);
     setForm({
-      asset_id: 0,
-      out_dept_id: 0,
-      in_dept_id: 0,
-      out_user_id: 0,
-      in_user_id: 0,
+      asset_id: '',
+      out_dept_id: '',
+      in_dept_id: '',
+      out_user_id: '',
+      in_user_id: '',
       transfer_date: new Date().toISOString().split('T')[0],
       reason: '',
       status: 0,
@@ -113,7 +113,7 @@ const TransferPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('确定删除此调拨记录？')) return;
     const result = await execDelete(id);
     if (result) {
@@ -228,7 +228,7 @@ const TransferPage: React.FC = () => {
               <AssetSelect
                 mode="single"
                 value={form.asset_id ? String(form.asset_id) : null}
-                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                onChange={(id) => setForm({ ...form, asset_id: id ?? '' })}
                 label="选择资产"
               />
             </div>
@@ -239,10 +239,10 @@ const TransferPage: React.FC = () => {
                 departmentId={form.out_dept_id ? String(form.out_dept_id) : null}
                 userId={form.out_user_id ? String(form.out_user_id) : null}
                 onDepartmentChange={(deptId) =>
-                  setForm({ ...form, out_dept_id: deptId ? parseInt(deptId) : 0 })
+                  setForm({ ...form, out_dept_id: deptId ?? '' })
                 }
                 onUserChange={(userId) =>
-                  setForm({ ...form, out_user_id: userId ? parseInt(userId) : 0 })
+                  setForm({ ...form, out_user_id: userId ?? '' })
                 }
                 userLabel="选择调出人"
               />
@@ -254,10 +254,10 @@ const TransferPage: React.FC = () => {
                 departmentId={form.in_dept_id ? String(form.in_dept_id) : null}
                 userId={form.in_user_id ? String(form.in_user_id) : null}
                 onDepartmentChange={(deptId) =>
-                  setForm({ ...form, in_dept_id: deptId ? parseInt(deptId) : 0 })
+                  setForm({ ...form, in_dept_id: deptId ?? '' })
                 }
                 onUserChange={(userId) =>
-                  setForm({ ...form, in_user_id: userId ? parseInt(userId) : 0 })
+                  setForm({ ...form, in_user_id: userId ?? '' })
                 }
                 userLabel="选择调入人"
               />

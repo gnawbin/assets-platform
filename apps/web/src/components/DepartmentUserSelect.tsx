@@ -86,8 +86,8 @@ const DepartmentUserSelect: React.FC<DepartmentUserSelectProps> = ({
             // ALL: 显示所有用户
             return users;
         }
-        const deptIdNum = Number(departmentId);
-        return users.filter((u) => u.department_id === deptIdNum);
+        // 部门 ID 在服务层以字符串返回（后端 i64_to_string 序列化）
+        return users.filter((u) => u.department_id === departmentId);
     }, [users, departmentId]);
 
     // 用户 Select 数据
@@ -99,7 +99,7 @@ const DepartmentUserSelect: React.FC<DepartmentUserSelectProps> = ({
     }, [filteredUsers, departments]);
 
     // 获取部门名称
-    function getDepartmentName(deptId: number): string {
+    function getDepartmentName(deptId: string): string {
         const dept = departments.find((d) => d.id === deptId);
         return dept ? dept.department_name : `部门#${deptId}`;
     }
@@ -189,7 +189,7 @@ const DepartmentUserSelect: React.FC<DepartmentUserSelectProps> = ({
                 />
                 <Text size="xs" c="dimmed">
                     {departmentId
-                        ? `当前部门: ${getDepartmentName(Number(departmentId))}`
+                        ? `当前部门: ${getDepartmentName(departmentId)}`
                         : '当前: 全部部门'}
                     {' | '}
                     共 {filteredUsers.length} 位用户

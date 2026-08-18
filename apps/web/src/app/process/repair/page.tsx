@@ -34,13 +34,13 @@ import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 const RepairPage: React.FC = () => {
     const [repairs, setRepairs] = useState<AssetRepair[]>([]);
     const [modalOpened, setModalOpened] = useState(false);
-    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<AssetRepairInput>({
-        asset_id: 0,
+        asset_id: '',
         fault_desc: '',
         repair_desc: '',
-        repair_user_id: 0,
-        repair_dept_id: 0,
+        repair_user_id: '',
+        repair_dept_id: '',
         repair_file_url: '',
         repair_type: 0,
         vendor: '',
@@ -68,11 +68,11 @@ const RepairPage: React.FC = () => {
     const openCreateModal = () => {
         setEditingId(null);
         setForm({
-            asset_id: 0,
+            asset_id: '',
             fault_desc: '',
             repair_desc: '',
-            repair_user_id: 0,
-            repair_dept_id: 0,
+            repair_user_id: '',
+            repair_dept_id: '',
             repair_file_url: '',
             repair_type: 0,
             vendor: '',
@@ -91,8 +91,8 @@ const RepairPage: React.FC = () => {
             asset_id: item.asset_id,
             fault_desc: item.fault_desc,
             repair_desc: item.repair_desc || '',
-            repair_user_id: item.repair_user_id || 0,
-            repair_dept_id: item.repair_dept_id || 0,
+            repair_user_id: item.repair_user_id || '',
+            repair_dept_id: item.repair_dept_id || '',
             repair_file_url: item.repair_file_url || '',
             repair_type: item.repair_type,
             vendor: item.vendor || '',
@@ -128,7 +128,7 @@ const RepairPage: React.FC = () => {
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!confirm('确定删除此维修记录？')) return;
         const result = await execDelete(id);
         if (result) {
@@ -237,7 +237,7 @@ const RepairPage: React.FC = () => {
                             <AssetSelect
                                 mode="single"
                                 value={form.asset_id ? String(form.asset_id) : null}
-                                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                                onChange={(id) => setForm({ ...form, asset_id: id ?? '' })}
                                 label="选择资产"
                             />
                         </div>
@@ -258,10 +258,10 @@ const RepairPage: React.FC = () => {
                                 departmentId={form.repair_dept_id ? String(form.repair_dept_id) : null}
                                 userId={form.repair_user_id ? String(form.repair_user_id) : null}
                                 onDepartmentChange={(deptId) =>
-                                    setForm({ ...form, repair_dept_id: deptId ? parseInt(deptId) : 0 })
+                                    setForm({ ...form, repair_dept_id: deptId ?? '' })
                                 }
                                 onUserChange={(userId) =>
-                                    setForm({ ...form, repair_user_id: userId ? parseInt(userId) : 0 })
+                                    setForm({ ...form, repair_user_id: userId ?? '' })
                                 }
                                 userLabel="选择维修人"
                             />

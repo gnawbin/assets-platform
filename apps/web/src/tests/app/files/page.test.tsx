@@ -78,7 +78,7 @@ jest.mock('@mantine/dropzone', () => {
         maxSize: number;
         multiple: boolean;
     }) => {
-        const ReactLocal = require('react');
+        const ReactLocal = require('react') as typeof React;
         const inputRef = ReactLocal.useRef<HTMLInputElement>(null);
         return ReactLocal.createElement(
             'div',

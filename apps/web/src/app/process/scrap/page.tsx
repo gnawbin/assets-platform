@@ -34,13 +34,13 @@ import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 const ScrapPage: React.FC = () => {
   const [scraps, setScraps] = useState<AssetScrap[]>([]);
   const [modalOpened, setModalOpened] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AssetScrapInput>({
-    asset_id: 0,
+    asset_id: '',
     reason: '',
     scrap_date: '',
     status: 0,
-    handle_user: 0,
+    handle_user: '',
   });
 
   const { loading, error, execute: fetchScraps } = useApi(getScraps);
@@ -60,11 +60,11 @@ const ScrapPage: React.FC = () => {
   const openCreateModal = () => {
     setEditingId(null);
     setForm({
-      asset_id: 0,
+      asset_id: '',
       reason: '',
       scrap_date: new Date().toISOString().split('T')[0],
       status: 0,
-      handle_user: 0,
+      handle_user: '',
     });
     setModalOpened(true);
   };
@@ -76,7 +76,7 @@ const ScrapPage: React.FC = () => {
       reason: item.reason,
       scrap_date: item.scrap_date,
       status: item.status,
-      handle_user: item.handle_user || 0,
+      handle_user: item.handle_user || '',
     });
     setModalOpened(true);
   };
@@ -104,7 +104,7 @@ const ScrapPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('确定删除此报废记录？')) return;
     const result = await execDelete(id);
     if (result) {
@@ -211,7 +211,7 @@ const ScrapPage: React.FC = () => {
               <AssetSelect
                 mode="single"
                 value={form.asset_id ? String(form.asset_id) : null}
-                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                onChange={(id) => setForm({ ...form, asset_id: id ?? '' })}
                 label="选择资产"
               />
             </div>
@@ -235,7 +235,7 @@ const ScrapPage: React.FC = () => {
                 userId={form.handle_user ? String(form.handle_user) : null}
                 onDepartmentChange={() => { }}
                 onUserChange={(userId) =>
-                  setForm({ ...form, handle_user: userId ? parseInt(userId) : 0 })
+                  setForm({ ...form, handle_user: userId ?? '' })
                 }
                 userLabel="选择处理人"
               />

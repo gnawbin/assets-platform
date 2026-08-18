@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "turbo run dev",
-    "dev:web": "turbo run dev --filter=9@assets/web...",
+    "dev:web": "turbo run dev --filter=@assets/web...",
     "dev:backend": "turbo run dev --filter=@assets/backend...",
     "build": "turbo run build",
     "build:web": "turbo run build --filter=@assets/web...",
