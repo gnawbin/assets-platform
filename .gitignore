@@ -11,7 +11,7 @@ apps/*/.turbo/
 pnpm-lock.yaml
 apps/*/pnpm-lock.yaml
 .vscode
-.env
+
 .env.local
 .env.toml
 
