@@ -31,6 +31,41 @@ def test_health_no_auth():
     assert data["version"] == "1.0.0"
 
 
+# ═══════════════════ Swagger 文档测试 ═══════════════════
+
+
+def test_swagger_docs_no_auth():
+    """Swagger UI / Redoc 页面应豁免认证（否则浏览器无法访问）"""
+    for path in ("/docs", "/redoc"):
+        resp = client.get(path)
+        assert resp.status_code == 200, f"{path} 应返回 200，实际 {resp.status_code}"
+        assert "text/html" in resp.headers.get("content-type", "")
+
+
+def test_openapi_no_auth():
+    """/openapi.json 应豁免认证且包含全部业务路径与安全声明"""
+    resp = client.get("/openapi.json")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["info"]["title"] == "doc-parser"
+    assert data["info"]["version"] == "1.0.0"
+    # 业务端点均在文档中
+    expected_paths = (
+        "/parse", "/parse/batch", "/health", "/formats",
+        "/search", "/ask", "/workflow/execute",
+    )
+    for path in expected_paths:
+        assert path in data["paths"], f"OpenAPI 缺少路径 {path}"
+    # Swagger Authorize 按钮所需的安全声明
+    schemes = data["components"]["securitySchemes"]
+    assert "X-API-Token" in schemes
+    scheme = schemes["X-API-Token"]
+    assert scheme["type"] == "apiKey"
+    assert scheme["in"] == "header"
+    assert scheme["name"] == "X-API-Token"
+    assert data["security"] == [{"X-API-Token": []}]
+
+
 def test_auth_missing_token():
     """未携带 token → 401"""
     resp = client.post("/parse", json={"file_path": "/tmp/a.pdf"})

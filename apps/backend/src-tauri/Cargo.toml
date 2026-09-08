@@ -7,7 +7,7 @@ authors = ["gengyuwangbin"]
 description = "资产平台APP"
 edition = "2021"
 name = "assets-platform"
-version = "0.0.9"
+version = "0.1.0"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -18,47 +18,47 @@ name = "assets-platform"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "2.5.6", default-features = false, features = [] } # 关闭默认特性
+tauri-build = {version = "2.5.6", default-features = false, features = [] }# 关闭默认特性
 
 [dependencies]
 tracing = "0.1.44"
 
 # 加这一行（surrealdb / rand 兼容）
-getrandom = { version = "0.4.3", features = ["std"] }
+getrandom = {version = "0.4.3", features = ["std"] }
 
 # Tauri 核心（最小特性集）
-tauri = { version = "2.11.5", default-features = false, features = ["wry"] }
-tauri-plugin-dialog = "2.7.2"
-tauri-plugin-fs = "2.5.1"
-tauri-plugin-opener = { version = "2.5.4", default-features = false }
+tauri = {version = "2.11.5", default-features = false, features = ["wry"] }
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-fs = "2.5.2"
+tauri-plugin-opener = {version = "2.5.5", default-features = false}
 tauri-plugin-process = "2.3.0"
-tauri-plugin-shell = "2.3.5"
-tauri-plugin-updater = "2.10.1"
+tauri-plugin-shell = "2.3.6"
+tauri-plugin-updater = "2.11.0"
 
 # 内部业务 crate（crates/*）
-assets-api = { path = "crates/assets-api" }
-assets-database = { path = "crates/assets-database" }
-assets-engine = { path = "crates/assets-engine" }
-assets-service = { path = "crates/assets-service" }
-assets-storage = { path = "crates/assets-storage" }
-assets-utils = { path = "crates/assets-utils" }
-assets-workflow = { path = "crates/assets-workflow" }
+assets-api = {path = "crates/assets-api"}
+assets-database = {path = "crates/assets-database"}
+assets-engine = {path = "crates/assets-engine"}
+assets-service = {path = "crates/assets-service"}
+assets-storage = {path = "crates/assets-storage"}
+assets-utils = {path = "crates/assets-utils"}
+assets-workflow = {path = "crates/assets-workflow"}
 
 # 序列化
-serde = { version = "1.0.229", default-features = false, features = [
+chrono = {version = "0.4", default-features = false, features = ["serde"] }
+serde = {version = "1.0.229", default-features = false, features = [
   "derive",
   "alloc",
 ] }
-serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
+serde_json = {version = "1.0.151", default-features = false, features = ["alloc"] }
 
 # JWT（命令层）
-jsonwebtoken = { version = "11.0.0", default-features = false, features = [
+jsonwebtoken = {version = "11.0.0", default-features = false, features = [
   "aws_lc_rs",
 ] }
 
 # 数据库（命令层 / 工作流）
-sqlx = { version = "0.9.0", default-features = false, features = [
+sqlx = {version = "0.9.0", default-features = false, features = [
   "postgres",
   "runtime-tokio",
   "tls-rustls",
@@ -68,7 +68,7 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 ] }
 
 # 异步运行时（只开必须的特性，不要 full）
-tokio = { version = "1.53.1", default-features = false, features = [
+tokio = {version = "1.53.1", default-features = false, features = [
   "rt-multi-thread",
   "rt",
   "macros",
@@ -80,10 +80,10 @@ tokio = { version = "1.53.1", default-features = false, features = [
 ] }
 
 # 配置（lib.rs 加载 .env.toml）
-toml = "1.1.3+spec-1.1.0"
+toml = "1.1.5+spec-1.1.0"
 
 # Windows 平台兼容
-winapi = { version = "0.3", features = [
+winapi = {version = "0.3", features = [
   "memoryapi",
   "debugapi",
   "sysinfoapi",
@@ -93,9 +93,9 @@ winapi = { version = "0.3", features = [
 
 [dev-dependencies]
 # 集成测试专用（tests/ 目录）
-surrealdb = "3.2.3"
 image = "0.25"
-pdf_oxide = "0.3.76"
+pdf_oxide = "0.3.77"
+surrealdb = "3.2.4"
 
 # Release模式优化配置
 [profile.release]

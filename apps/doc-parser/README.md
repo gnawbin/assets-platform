@@ -25,8 +25,20 @@ curl http://127.0.0.1:8321/health
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/parse` | 解析文件，返回纯文本 |
-| GET | `/health` | 健康检查 |
+| POST | `/parse/batch` | 批量解析多个文件 |
+| GET | `/health` | 健康检查（豁免认证） |
 | GET | `/formats` | 支持的文件格式 |
+| POST | `/search` | 向量检索视频切片（RAG） |
+| POST | `/ask` | 检索 + LLM 生成回答（RAG） |
+| POST | `/workflow/execute` | 执行 AI 工作流 |
+
+## API 文档（Swagger）
+
+启动服务后，浏览器访问 **http://127.0.0.1:8321/docs** 即可查看交互式 API 文档（Swagger UI，`/redoc` 为 ReDoc，`/openapi.json` 为 OpenAPI 规范）。
+
+> 文档页面豁免认证可直接打开；业务接口仍需 `X-API-Token`。
+> 本地调试：在 `.env` 中设置 `DOC_PARSER_TOKEN=<任意值>`（或启动时注入环境变量），
+> 然后在 Swagger 右上角 **Authorize** 填入同一 token，即可直接在页面里调试 `/parse` 等受保护接口。
 
 ## 项目结构
 
