@@ -1,0 +1,36 @@
+[package]
+name = "assets-database"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sqlx = { version = "0.9.0", default-features = false, features = [
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+  "macros",
+  "chrono",
+  "rust_decimal",
+] }
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+dashmap = "6.1.0"
+anyhow = "1.0.104"
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", default-features = false, features = [
+  "rt-multi-thread",
+  "rt",
+  "macros",
+  "time",
+  "fs",
+  "net",
+  "signal",
+  "sync",
+] }
+tracing = "0.1.44"
+argon2 = "0.5.3"
+# 代码经 argon2::password_hash 使用 rand_core 0.6 的 OsRng，
+# 需在 0.6 副本上显式启用 getrandom 特性
+rand_core = { version = "0.6", features = ["getrandom"] }
+rust_decimal = "1.42.1"

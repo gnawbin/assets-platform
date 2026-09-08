@@ -1,0 +1,27 @@
+[package]
+name = "assets-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"] }
+opentelemetry-appender-tracing = "0.32.0"
+opentelemetry-otlp = { version = "0.32.0", features = ["grpc-tonic", "http-proto", "trace", "logs", "metrics"] }
+opentelemetry_sdk = { version = "0.32.1", features = ["rt-tokio", "trace", "metrics", "logs"] }
+tracing-opentelemetry = "0.33.0"
+argon2 = "0.5.3"
+rand = { version = "0.10.2", features = ["std_rng"] }
+# 代码经 argon2::password_hash 使用 rand_core 0.6 的 OsRng，
+# 需在 0.6 副本上显式启用 getrandom 特性（拆分前由其他依赖间接启用）
+rand_core = { version = "0.6", features = ["getrandom"] }
+aes-gcm = "0.11.0"
+base64 = "0.23.0"
+twitter_snowflake = "1.0.3"
+anyhow = "1.0.104"
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+dirs = "6.0.0"
+once_cell = "1.21.4"
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }

@@ -2,8 +2,8 @@
 //!
 //! 对应 lib.rs 中的知识树相关命令
 
-use crate::database::models::{AssetKnowledge, KnowledgeTreeNode};
-use crate::service;
+use assets_database::models::{AssetKnowledge, KnowledgeTreeNode};
+use assets_service;
 use tracing::info;
 
 // ======================== 知识树节点 ========================
@@ -12,7 +12,7 @@ use tracing::info;
 #[tauri::command]
 pub async fn get_knowledge_tree() -> Result<Vec<KnowledgeTreeNode>, String> {
     info!("[DEBUG] get_knowledge_tree called");
-    service::knowledge_service::get_knowledge_tree().await
+    assets_service::knowledge_service::get_knowledge_tree().await
 }
 
 /// 新增知识树节点
@@ -25,7 +25,7 @@ pub async fn insert_knowledge_node(
     icon: Option<String>,
     sort_order: Option<i32>,
     currentUserId: Option<String>,
-) -> Result<crate::database::models::KnowledgeTree, String> {
+) -> Result<assets_database::models::KnowledgeTree, String> {
     info!("[DEBUG] insert_knowledge_node called: title={}", title);
 
     let kid = match knowledge_id {
@@ -44,7 +44,7 @@ pub async fn insert_knowledge_node(
     };
     let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1i64);
 
-    service::knowledge_service::insert_knowledge_node(
+    assets_service::knowledge_service::insert_knowledge_node(
         kid,
         pid,
         &node_type,
@@ -65,7 +65,7 @@ pub async fn update_knowledge_node(
     sort_order: Option<i32>,
     is_expanded: Option<bool>,
     currentUserId: Option<String>,
-) -> Result<crate::database::models::KnowledgeTree, String> {
+) -> Result<assets_database::models::KnowledgeTree, String> {
     info!("[DEBUG] update_knowledge_node called: id={}", id);
 
     let node_id: i64 = id.parse().map_err(|e| format!("无效的节点ID: {}", e))?;
@@ -73,7 +73,7 @@ pub async fn update_knowledge_node(
         .and_then(|uid| uid.parse().ok())
         .unwrap_or(1i64);
 
-    service::knowledge_service::update_knowledge_node(
+    assets_service::knowledge_service::update_knowledge_node(
         node_id,
         title.as_deref(),
         icon.as_deref(),
@@ -90,7 +90,7 @@ pub async fn delete_knowledge_node(id: String) -> Result<(), String> {
     info!("[DEBUG] delete_knowledge_node called: id={}", id);
 
     let node_id: i64 = id.parse().map_err(|e| format!("无效的节点ID: {}", e))?;
-    service::knowledge_service::delete_knowledge_node(node_id).await
+    assets_service::knowledge_service::delete_knowledge_node(node_id).await
 }
 
 /// 移动知识树节点
@@ -98,7 +98,7 @@ pub async fn delete_knowledge_node(id: String) -> Result<(), String> {
 pub async fn move_knowledge_node(
     id: String,
     new_parent_id: Option<String>,
-) -> Result<crate::database::models::KnowledgeTree, String> {
+) -> Result<assets_database::models::KnowledgeTree, String> {
     info!("[DEBUG] move_knowledge_node called: id={}", id);
 
     let node_id: i64 = id.parse().map_err(|e| format!("无效的节点ID: {}", e))?;
@@ -110,7 +110,7 @@ pub async fn move_knowledge_node(
         _ => None,
     };
 
-    service::knowledge_service::move_knowledge_node(node_id, npid).await
+    assets_service::knowledge_service::move_knowledge_node(node_id, npid).await
 }
 
 // ======================== 知识条目 ========================
@@ -131,7 +131,7 @@ pub async fn get_knowledge_list(
         _ => None,
     };
 
-    service::knowledge_service::get_knowledge_list(kid, keyword).await
+    assets_service::knowledge_service::get_knowledge_list(kid, keyword).await
 }
 
 /// 获取单条知识条目
@@ -140,7 +140,7 @@ pub async fn get_knowledge_by_id(id: String) -> Result<AssetKnowledge, String> {
     info!("[DEBUG] get_knowledge_by_id called: id={}", id);
 
     let kid: i64 = id.parse().map_err(|e| format!("无效的知识条目ID: {}", e))?;
-    service::knowledge_service::get_knowledge_by_id(kid).await
+    assets_service::knowledge_service::get_knowledge_by_id(kid).await
 }
 
 /// 新增知识条目
@@ -165,7 +165,7 @@ pub async fn insert_knowledge(
     };
     let user_id = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1i64);
 
-    service::knowledge_service::insert_knowledge(
+    assets_service::knowledge_service::insert_knowledge(
         aid,
         doc_source.as_deref().unwrap_or("manual"),
         knowledge_type.as_deref().unwrap_or("basic"),
@@ -194,7 +194,7 @@ pub async fn update_knowledge(
         .and_then(|uid| uid.parse().ok())
         .unwrap_or(1i64);
 
-    service::knowledge_service::update_knowledge(
+    assets_service::knowledge_service::update_knowledge(
         kid,
         title.as_deref(),
         content.as_deref(),
@@ -211,5 +211,5 @@ pub async fn delete_knowledge(id: String) -> Result<(), String> {
     info!("[DEBUG] delete_knowledge called: id={}", id);
 
     let kid: i64 = id.parse().map_err(|e| format!("无效的知识条目ID: {}", e))?;
-    service::knowledge_service::delete_knowledge(kid).await
+    assets_service::knowledge_service::delete_knowledge(kid).await
 }

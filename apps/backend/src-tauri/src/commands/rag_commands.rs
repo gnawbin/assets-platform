@@ -1,7 +1,7 @@
 //! RAG 相关 Tauri Command
 
-use crate::database::models::{ChunkResult, DocumentChunk};
-use crate::service::rag_service::RAGRetriever;
+use assets_database::models::{ChunkResult, DocumentChunk};
+use assets_service::rag_service::RAGRetriever;
 
 /// 对知识资产执行分片 + 向量化
 #[tauri::command]
@@ -43,7 +43,7 @@ pub async fn test_rag_retrieval(
         _ => None,
     };
 
-    let params = crate::database::models::RetrieveParams {
+    let params = assets_database::models::RetrieveParams {
         question,
         bind_tree_node_id: bind_id,
         top_k: topK.unwrap_or(5),

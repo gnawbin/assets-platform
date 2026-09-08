@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { Group, Paper, Avatar, Text, Badge, Anchor, Divider, Card } from '@mantine/core';
-import type { AssetInfo } from '@/services/conversationService';
+import type { AssetInfo, ChatAttachment } from '@/services/conversationService';
 
 interface MessageBubbleProps {
     role: 'user' | 'assistant';
@@ -9,6 +9,8 @@ interface MessageBubbleProps {
     citedAssets?: AssetInfo[];
     referenceText?: string;
     metadata?: { model?: string; durationMs?: number; };
+    /** 多模态附件（用户消息渲染） */
+    attachments?: ChatAttachment[];
 }
 
 const OKF_TYPE_LABELS: Record<string, string> = {
@@ -43,7 +45,7 @@ const CitationPanel: React.FC<{ citedAssets: AssetInfo[]; referenceText?: string
 );
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({
-    role, content, citedAssets, referenceText, metadata,
+    role, content, citedAssets, referenceText, metadata, attachments,
 }) => {
     const isUser = role === 'user';
 
@@ -54,6 +56,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 maxWidth: '70%',
                 backgroundColor: isUser ? 'var(--mantine-color-blue-light)' : 'white',
             }}>
+                {isUser && attachments && attachments.length > 0 && (
+                    <Group gap="xs" mb="xs">
+                        {attachments.map((att, i) => (
+                            <AttachmentView key={`${att.name}-${i}`} att={att} />
+                        ))}
+                    </Group>
+                )}
                 <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>{content}</Text>
                 {citedAssets && citedAssets.length > 0 && (
                     <CitationPanel citedAssets={citedAssets} referenceText={referenceText} />
@@ -66,6 +75,36 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             </Paper>
             {isUser && <Avatar color="blue" radius="xl">👤</Avatar>}
         </Group>
+    );
+};
+
+/** 附件视图：图片缩略图 / 视频播放 / 音频播放 / 文件卡片 */
+const AttachmentView: React.FC<{ att: ChatAttachment }> = ({ att }) => {
+    const src = att.dataUrl || att.url;
+    if (!src) return null;
+
+    if (att.type === 'image') {
+        return (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+                src={src}
+                alt={att.name}
+                style={{ maxHeight: 160, maxWidth: 220, borderRadius: 8, objectFit: 'cover', border: '1px solid #dee2e6' }}
+            />
+        );
+    }
+    if (att.type === 'video') {
+        return <video src={src} controls style={{ maxWidth: 280, maxHeight: 180, borderRadius: 8 }} />;
+    }
+    if (att.type === 'audio') {
+        return <audio src={src} controls style={{ maxWidth: 260 }} />;
+    }
+    // document
+    return (
+        <Card withBorder padding="xs" radius="md" style={{ minWidth: 160 }}>
+            <Text size="xs" truncate style={{ maxWidth: 180 }}>📄 {att.name}</Text>
+            <Anchor href={att.url} target="_blank" size="xs">查看文件</Anchor>
+        </Card>
     );
 };
 

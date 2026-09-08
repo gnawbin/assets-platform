@@ -89,7 +89,7 @@ export default function WorkflowListPage() {
     const handleExecute = async (id: string) => {
         try {
             await executeWorkflow({ workflowId: id });
-            router.push(`/knowledge/workflow/${id}/runs`);
+            router.push(`/knowledge/workflow/runs?id=${id}`);
         } catch {
             // ignore
         }
@@ -192,7 +192,7 @@ export default function WorkflowListPage() {
                                     <Table.Td>
                                         <Group gap={4}>
                                             <Tooltip label="编辑">
-                                                <ActionIcon variant="light" color="blue" size="sm" onClick={() => router.push(`/knowledge/workflow/${wf.id}/edit`)}>
+                                                <ActionIcon variant="light" color="blue" size="sm" onClick={() => router.push(`/knowledge/workflow/editor?id=${wf.id}`)}>
                                                     <IconEdit size={14} />
                                                 </ActionIcon>
                                             </Tooltip>
@@ -202,7 +202,7 @@ export default function WorkflowListPage() {
                                                 </ActionIcon>
                                             </Tooltip>
                                             <Tooltip label="执行历史">
-                                                <ActionIcon variant="light" color="gray" size="sm" onClick={() => router.push(`/knowledge/workflow/${wf.id}/runs`)}>
+                                                <ActionIcon variant="light" color="gray" size="sm" onClick={() => router.push(`/knowledge/workflow/runs?id=${wf.id}`)}>
                                                     <IconHistory size={14} />
                                                 </ActionIcon>
                                             </Tooltip>

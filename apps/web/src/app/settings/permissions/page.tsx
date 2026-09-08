@@ -33,7 +33,6 @@ import {
 import { getTenants, type Tenant } from '@/services/tenantService';
 
 const PermissionsPage: React.FC = () => {
-  console.log('PermissionsPage RENDERED');
   const [roles, setRoles] = useState<Role[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
 

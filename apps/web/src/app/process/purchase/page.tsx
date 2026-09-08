@@ -33,17 +33,17 @@ import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 const PurchasePage: React.FC = () => {
     const [purchases, setPurchases] = useState<AssetPurchase[]>([]);
     const [modalOpened, setModalOpened] = useState(false);
-    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<AssetPurchaseInput>({
         asset_name: '',
-        category_id: 0,
+        category_id: '',
         model: '',
         manufacturer: '',
         quantity: 1,
         unit_price: 0,
         total_price: 0,
-        apply_user: 0,
-        dept_id: 0,
+        apply_user: '',
+        dept_id: '',
         reason: '',
         status: 0,
         supplier: '',
@@ -69,14 +69,14 @@ const PurchasePage: React.FC = () => {
         setEditingId(null);
         setForm({
             asset_name: '',
-            category_id: 0,
+            category_id: '',
             model: '',
             manufacturer: '',
             quantity: 1,
             unit_price: 0,
             total_price: 0,
-            apply_user: 0,
-            dept_id: 0,
+            apply_user: '',
+            dept_id: '',
             reason: '',
             status: 0,
             supplier: '',
@@ -130,7 +130,7 @@ const PurchasePage: React.FC = () => {
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!confirm('确定删除此采购记录？')) return;
         const result = await execDelete(id);
         if (result) {
@@ -247,7 +247,7 @@ const PurchasePage: React.FC = () => {
                             label="分类ID"
                             type="number"
                             value={form.category_id || ''}
-                            onChange={(e) => setForm({ ...form, category_id: parseInt(e.currentTarget.value) || 0 })}
+                            onChange={(e) => setForm({ ...form, category_id: e.currentTarget.value })}
                             required
                         />
                         <TextInput
@@ -285,10 +285,10 @@ const PurchasePage: React.FC = () => {
                                 departmentId={form.dept_id ? String(form.dept_id) : null}
                                 userId={form.apply_user ? String(form.apply_user) : null}
                                 onDepartmentChange={(deptId) =>
-                                    setForm({ ...form, dept_id: deptId ? parseInt(deptId) : 0 })
+                                    setForm({ ...form, dept_id: deptId ?? '' })
                                 }
                                 onUserChange={(userId) =>
-                                    setForm({ ...form, apply_user: userId ? parseInt(userId) : 0 })
+                                    setForm({ ...form, apply_user: userId ?? '' })
                                 }
                                 userLabel="选择申请人"
                             />

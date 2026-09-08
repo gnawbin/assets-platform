@@ -7,8 +7,8 @@
 //! - upload_get_version_history: 获取文件版本历史
 //! - upload_rollback: 回滚到指定版本
 
-use crate::storage::s3::{S3Client, S3Config};
-use crate::storage::upload::UploadManager;
+use assets_storage::s3::{S3Client, S3Config};
+use assets_storage::upload::UploadManager;
 
 /// 初始化上传（占位）
 ///
@@ -24,7 +24,7 @@ pub async fn upload_init(
     fileMd5: Option<String>,
     currentUserId: Option<String>,
 ) -> Result<String, String> {
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
@@ -33,7 +33,7 @@ pub async fn upload_init(
 
     let created_by: i64 = currentUserId.and_then(|id| id.parse().ok()).unwrap_or(1);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     let record_id = upload_mgr
         .init(
@@ -62,14 +62,14 @@ pub async fn upload_start(uploadId: String) -> Result<serde_json::Value, String>
         .parse()
         .map_err(|_| "upload_id 格式不正确".to_string())?;
 
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     let result = upload_mgr.start_upload(&schema, upload_id).await?;
 
@@ -96,14 +96,14 @@ pub async fn upload_commit(
         .parse()
         .map_err(|_| "context_id 格式不正确".to_string())?;
 
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     upload_mgr
         .commit(&schema, upload_id, &contextType, context_id)
@@ -121,14 +121,14 @@ pub async fn upload_report_chunk(
         .parse()
         .map_err(|_| "upload_id 格式不正确".to_string())?;
 
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     upload_mgr
         .report_chunk(&schema, upload_id, partNumber, &etag)
@@ -142,14 +142,14 @@ pub async fn upload_get_progress(uploadId: String) -> Result<serde_json::Value, 
         .parse()
         .map_err(|_| "upload_id 格式不正确".to_string())?;
 
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     let progress = upload_mgr.get_progress(&schema, upload_id).await?;
 
@@ -168,14 +168,14 @@ pub async fn upload_complete(uploadId: String) -> Result<serde_json::Value, Stri
         .parse()
         .map_err(|_| "upload_id 格式不正确".to_string())?;
 
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     let result = upload_mgr.complete(&schema, upload_id).await?;
 
@@ -192,14 +192,14 @@ pub async fn upload_abort(uploadId: String) -> Result<(), String> {
         .parse()
         .map_err(|_| "upload_id 格式不正确".to_string())?;
 
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     upload_mgr.abort(&schema, upload_id).await
 }
@@ -209,14 +209,14 @@ pub async fn upload_abort(uploadId: String) -> Result<(), String> {
 pub async fn upload_get_version_history(
     fileGroupId: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let pool = crate::database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
+    let pool = assets_database::get_pool().map_err(|e| format!("获取数据库连接池失败: {}", e))?;
     let s3_config = S3Config::from_env().map_err(|e| format!("S3 配置加载失败: {}", e))?;
     let s3_client = S3Client::new(s3_config.clone())
         .await
         .map_err(|e| format!("S3 客户端初始化失败: {}", e))?;
     let upload_mgr = UploadManager::new(pool, s3_client, s3_config);
 
-    let schema = crate::database::current_schema_name();
+    let schema = assets_database::current_schema_name();
 
     let records = upload_mgr
         .get_version_history(&schema, &fileGroupId)

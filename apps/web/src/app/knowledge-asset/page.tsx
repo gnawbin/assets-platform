@@ -281,18 +281,22 @@ export default function KnowledgeAssetPage() {
         setUploadError(null);
 
         try {
-            // 1. 初始化分片上传
+            // 1. 初始化分片上传（占位）
             const initResp = await uploadService.init(file.name, file.size, file.type);
-            const { uploadId, chunkSize, totalChunks, presignedUrls } = initResp;
+            const uploadId = initResp.uploadId;
             uploadIdRef.current = uploadId;
 
-            // 2. 分片
+            // 2. 开始上传（创建 S3 MultipartUpload，返回 presigned URLs）
+            const startResp = await uploadService.startUpload(uploadId);
+            const { chunkSize, totalChunks, presignedUrls } = startResp;
+
+            // 3. 分片
             const chunks: Blob[] = [];
             for (let start = 0; start < file.size; start += chunkSize) {
                 chunks.push(file.slice(start, Math.min(start + chunkSize, file.size)));
             }
 
-            // 3. 并发上传分片（并发数 3）
+            // 4. 并发上传分片（并发数 3）
             const concurrency = 3;
             let uploadedCount = 0;
             let lastLoaded = 0;

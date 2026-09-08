@@ -46,6 +46,17 @@ export interface MarkdownEditorProps {
     // 操作
     onSave?: () => void;
     saving?: boolean;
+
+    // 文件上传状态（页面自管理上传时传入，用于展示进度与控制）
+    uploadStatus?: 'idle' | 'uploading' | 'paused' | 'completed' | 'error';
+    uploadProgress?: number;
+    uploadSpeed?: number;
+    uploadError?: string | null;
+    onFileSelect?: (file: File) => void;
+    onPause?: () => void;
+    onResume?: () => void;
+    onCancel?: () => void;
+    onRetry?: () => void;
 }
 
 /** OKF 类型选项 */

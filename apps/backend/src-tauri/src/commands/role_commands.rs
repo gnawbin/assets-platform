@@ -2,8 +2,8 @@
 //!
 //! 对应 lib.rs 中的 insert_role / get_roles / get_role_menu_ids / assign_role_menus / delete_role / get_all_menus_tree
 
-use crate::database::models::{MantineTree, Role, SidebarMenuItem};
-use crate::service;
+use assets_database::models::{MantineTree, Role, SidebarMenuItem};
+use assets_service;
 use tracing::info;
 
 /// 新增角色
@@ -21,7 +21,7 @@ pub async fn insert_role(
         ),
         _ => None,
     };
-    service::role_service::insert_role_by_params(
+    assets_service::role_service::insert_role_by_params(
         &role_key,
         &role_name,
         description.as_deref(),
@@ -49,7 +49,7 @@ pub async fn get_roles(
         ),
         _ => None,
     };
-    let result = service::role_service::get_roles(tid, keyword).await;
+    let result = assets_service::role_service::get_roles(tid, keyword).await;
     info!(
         "[DEBUG] get_roles result: {:?}",
         result.as_ref().map(|r| r.len())
@@ -63,7 +63,7 @@ pub async fn get_role_menu_ids(role_id: String) -> Result<Vec<i64>, String> {
     let role_id: i64 = role_id
         .parse()
         .map_err(|e| format!("无效的角色ID: {}", e))?;
-    service::role_service::get_role_menu_ids(role_id).await
+    assets_service::role_service::get_role_menu_ids(role_id).await
 }
 
 /// 为角色分配菜单权限
@@ -79,7 +79,7 @@ pub async fn assign_role_menus(role_id: String, menu_ids: Vec<String>) -> Result
                 .map_err(|e| format!("无效的菜单ID: {}", e))
         })
         .collect::<Result<Vec<i64>, String>>()?;
-    service::role_service::assign_role_menus(role_id, menu_ids).await
+    assets_service::role_service::assign_role_menus(role_id, menu_ids).await
 }
 
 /// 删除角色
@@ -88,13 +88,13 @@ pub async fn delete_role(role_id: String) -> Result<(), String> {
     let role_id: i64 = role_id
         .parse()
         .map_err(|e| format!("无效的角色ID: {}", e))?;
-    service::role_service::delete_role(role_id).await
+    assets_service::role_service::delete_role(role_id).await
 }
 
 /// 获取所有菜单树（用于权限分配）
 #[tauri::command]
 pub async fn get_all_menus_tree() -> Result<Vec<MantineTree>, String> {
-    service::role_service::get_all_menus_tree().await
+    assets_service::role_service::get_all_menus_tree().await
 }
 
 /// 获取侧边栏菜单（只返回目录和菜单，不返回按钮）
@@ -107,7 +107,7 @@ pub async fn get_user_menus(user_id: Option<String>) -> Result<Vec<SidebarMenuIt
     match user_id {
         Some(uid) => {
             let user_id: i64 = uid.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-            service::role_service::get_user_menus(user_id).await
+            assets_service::role_service::get_user_menus(user_id).await
         }
         None => Ok(Vec::new()), // 未登录时返回空菜单
     }
@@ -117,7 +117,7 @@ pub async fn get_user_menus(user_id: Option<String>) -> Result<Vec<SidebarMenuIt
 #[tauri::command]
 pub async fn get_user_role_ids(id: String) -> Result<Vec<i64>, String> {
     let user_id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::role_service::get_user_role_ids(user_id).await
+    assets_service::role_service::get_user_role_ids(user_id).await
 }
 
 /// 为用户分配角色
@@ -131,5 +131,5 @@ pub async fn assign_user_roles(id: String, role_ids: Vec<String>) -> Result<(), 
                 .map_err(|e| format!("无效的角色ID: {}", e))
         })
         .collect::<Result<Vec<i64>, String>>()?;
-    service::role_service::assign_user_roles(user_id, role_ids).await
+    assets_service::role_service::assign_user_roles(user_id, role_ids).await
 }

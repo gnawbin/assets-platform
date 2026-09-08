@@ -34,15 +34,15 @@ import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 const ReturnPage: React.FC = () => {
   const [returns, setReturns] = useState<AssetReturn[]>([]);
   const [modalOpened, setModalOpened] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<AssetReturnInput>({
-    receive_id: 0,
-    asset_id: 0,
-    user_id: 0,
+    receive_id: '',
+    asset_id: '',
+    user_id: '',
     return_date: '',
     asset_status: 0,
     remark: '',
-    confirm_by: 0,
+    confirm_by: '',
     confirm_time: '',
   });
 
@@ -63,13 +63,13 @@ const ReturnPage: React.FC = () => {
   const openCreateModal = () => {
     setEditingId(null);
     setForm({
-      receive_id: 0,
-      asset_id: 0,
-      user_id: 0,
+      receive_id: '',
+      asset_id: '',
+      user_id: '',
       return_date: new Date().toISOString().split('T')[0],
       asset_status: 0,
       remark: '',
-      confirm_by: 0,
+      confirm_by: '',
       confirm_time: new Date().toISOString().split('T')[0],
     });
     setModalOpened(true);
@@ -113,7 +113,7 @@ const ReturnPage: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('确定删除此归还记录？')) return;
     const result = await execDelete(id);
     if (result) {
@@ -222,7 +222,7 @@ const ReturnPage: React.FC = () => {
               label="领用ID"
               type="number"
               value={form.receive_id || ''}
-              onChange={(e) => setForm({ ...form, receive_id: parseInt(e.currentTarget.value) || 0 })}
+              onChange={(e) => setForm({ ...form, receive_id: e.currentTarget.value })}
               required
             />
             <div>
@@ -230,7 +230,7 @@ const ReturnPage: React.FC = () => {
               <AssetSelect
                 mode="single"
                 value={form.asset_id ? String(form.asset_id) : null}
-                onChange={(id) => setForm({ ...form, asset_id: id ? parseInt(id) : 0 })}
+                onChange={(id) => setForm({ ...form, asset_id: id ?? '' })}
                 label="选择资产"
               />
             </div>
@@ -241,7 +241,7 @@ const ReturnPage: React.FC = () => {
                 userId={form.user_id ? String(form.user_id) : null}
                 onDepartmentChange={() => { }}
                 onUserChange={(userId) =>
-                  setForm({ ...form, user_id: userId ? parseInt(userId) : 0 })
+                  setForm({ ...form, user_id: userId ?? '' })
                 }
                 userLabel="选择用户"
               />
@@ -275,7 +275,7 @@ const ReturnPage: React.FC = () => {
                 userId={form.confirm_by ? String(form.confirm_by) : null}
                 onDepartmentChange={() => { }}
                 onUserChange={(userId) =>
-                  setForm({ ...form, confirm_by: userId ? parseInt(userId) : 0 })
+                  setForm({ ...form, confirm_by: userId ?? '' })
                 }
                 userLabel="选择确认人"
               />

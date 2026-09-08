@@ -2,14 +2,14 @@
 //!
 //! 对应 lib.rs 中的流程管理相关 command
 
-use crate::service;
-use crate::service::process_service::{
+use assets_service;
+use assets_service::process_service::{
     AssetPurchaseInput, AssetPurchaseUpdateInput, AssetReceiveInput, AssetReceiveUpdateInput,
     AssetRepairInput, AssetRepairUpdateInput, AssetReturnInput, AssetReturnUpdateInput,
     AssetScrapInput, AssetScrapUpdateInput, AssetTransferInput, AssetTransferUpdateInput,
 };
 
-use crate::database::models::{
+use assets_database::models::{
     AssetPurchase, AssetReceive, AssetRepair, AssetReturn, AssetScrap, AssetTransfer,
 };
 
@@ -17,12 +17,12 @@ use crate::database::models::{
 
 #[tauri::command]
 pub async fn get_receives() -> Result<Vec<AssetReceive>, String> {
-    service::process_service::get_receives().await
+    assets_service::process_service::get_receives().await
 }
 
 #[tauri::command]
 pub async fn insert_receive(input: AssetReceiveInput) -> Result<AssetReceive, String> {
-    service::process_service::insert_receive(input).await
+    assets_service::process_service::insert_receive(input).await
 }
 
 #[tauri::command]
@@ -31,25 +31,25 @@ pub async fn update_receive(
     input: AssetReceiveUpdateInput,
 ) -> Result<AssetReceive, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::update_receive(id, input).await
+    assets_service::process_service::update_receive(id, input).await
 }
 
 #[tauri::command]
 pub async fn delete_receive(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::delete_receive(id).await
+    assets_service::process_service::delete_receive(id).await
 }
 
 // ======================== 归还管理 ========================
 
 #[tauri::command]
 pub async fn get_returns() -> Result<Vec<AssetReturn>, String> {
-    service::process_service::get_returns().await
+    assets_service::process_service::get_returns().await
 }
 
 #[tauri::command]
 pub async fn insert_return(input: AssetReturnInput) -> Result<AssetReturn, String> {
-    service::process_service::insert_return(input).await
+    assets_service::process_service::insert_return(input).await
 }
 
 #[tauri::command]
@@ -58,25 +58,25 @@ pub async fn update_return(
     input: AssetReturnUpdateInput,
 ) -> Result<AssetReturn, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::update_return(id, input).await
+    assets_service::process_service::update_return(id, input).await
 }
 
 #[tauri::command]
 pub async fn delete_return(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::delete_return(id).await
+    assets_service::process_service::delete_return(id).await
 }
 
 // ======================== 调拨管理 ========================
 
 #[tauri::command]
 pub async fn get_transfers() -> Result<Vec<AssetTransfer>, String> {
-    service::process_service::get_transfers().await
+    assets_service::process_service::get_transfers().await
 }
 
 #[tauri::command]
 pub async fn insert_transfer(input: AssetTransferInput) -> Result<AssetTransfer, String> {
-    service::process_service::insert_transfer(input).await
+    assets_service::process_service::insert_transfer(input).await
 }
 
 #[tauri::command]
@@ -85,25 +85,25 @@ pub async fn update_transfer(
     input: AssetTransferUpdateInput,
 ) -> Result<AssetTransfer, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::update_transfer(id, input).await
+    assets_service::process_service::update_transfer(id, input).await
 }
 
 #[tauri::command]
 pub async fn delete_transfer(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::delete_transfer(id).await
+    assets_service::process_service::delete_transfer(id).await
 }
 
 // ======================== 维修管理 ========================
 
 #[tauri::command]
 pub async fn get_repairs() -> Result<Vec<AssetRepair>, String> {
-    service::process_service::get_repairs().await
+    assets_service::process_service::get_repairs().await
 }
 
 #[tauri::command]
 pub async fn insert_repair(input: AssetRepairInput) -> Result<AssetRepair, String> {
-    service::process_service::insert_repair(input).await
+    assets_service::process_service::insert_repair(input).await
 }
 
 #[tauri::command]
@@ -112,49 +112,49 @@ pub async fn update_repair(
     input: AssetRepairUpdateInput,
 ) -> Result<AssetRepair, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::update_repair(id, input).await
+    assets_service::process_service::update_repair(id, input).await
 }
 
 #[tauri::command]
 pub async fn delete_repair(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::delete_repair(id).await
+    assets_service::process_service::delete_repair(id).await
 }
 
 // ======================== 报废管理 ========================
 
 #[tauri::command]
 pub async fn get_scraps() -> Result<Vec<AssetScrap>, String> {
-    service::process_service::get_scraps().await
+    assets_service::process_service::get_scraps().await
 }
 
 #[tauri::command]
 pub async fn insert_scrap(input: AssetScrapInput) -> Result<AssetScrap, String> {
-    service::process_service::insert_scrap(input).await
+    assets_service::process_service::insert_scrap(input).await
 }
 
 #[tauri::command]
 pub async fn update_scrap(id: String, input: AssetScrapUpdateInput) -> Result<AssetScrap, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::update_scrap(id, input).await
+    assets_service::process_service::update_scrap(id, input).await
 }
 
 #[tauri::command]
 pub async fn delete_scrap(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::delete_scrap(id).await
+    assets_service::process_service::delete_scrap(id).await
 }
 
 // ======================== 采购管理 ========================
 
 #[tauri::command]
 pub async fn get_purchases() -> Result<Vec<AssetPurchase>, String> {
-    service::process_service::get_purchases().await
+    assets_service::process_service::get_purchases().await
 }
 
 #[tauri::command]
 pub async fn insert_purchase(input: AssetPurchaseInput) -> Result<AssetPurchase, String> {
-    service::process_service::insert_purchase(input).await
+    assets_service::process_service::insert_purchase(input).await
 }
 
 #[tauri::command]
@@ -163,11 +163,11 @@ pub async fn update_purchase(
     input: AssetPurchaseUpdateInput,
 ) -> Result<AssetPurchase, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::update_purchase(id, input).await
+    assets_service::process_service::update_purchase(id, input).await
 }
 
 #[tauri::command]
 pub async fn delete_purchase(id: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::process_service::delete_purchase(id).await
+    assets_service::process_service::delete_purchase(id).await
 }

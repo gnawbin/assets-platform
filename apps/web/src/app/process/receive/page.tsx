@@ -34,7 +34,7 @@ import DepartmentUserSelect from '@/components/DepartmentUserSelect';
 const ReceivePage: React.FC = () => {
     const [receives, setReceives] = useState<AssetReceive[]>([]);
     const [modalOpened, setModalOpened] = useState(false);
-    const [editingId, setEditingId] = useState<number | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<AssetReceiveInput>({
         asset_id: '',
         user_id: '',
@@ -107,7 +107,7 @@ const ReceivePage: React.FC = () => {
         }
     };
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!confirm('确定删除此领用记录？')) return;
         const result = await execDelete(id);
         if (result) {

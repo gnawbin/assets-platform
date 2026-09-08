@@ -2,13 +2,13 @@
 //!
 //! 对应 lib.rs 中的 login / get_users / insert_user / update_user / delete_user / reset_password
 
-use crate::service;
-use crate::service::user_service::{LoginResponse, UserResponse};
+use assets_service;
+use assets_service::user_service::{LoginResponse, UserResponse};
 
 /// 用户登录
 #[tauri::command]
 pub async fn login(username: String, password: String) -> Result<LoginResponse, String> {
-    service::user_service::login(&username, &password).await
+    assets_service::user_service::login(&username, &password).await
 }
 
 /// 获取用户列表
@@ -21,7 +21,7 @@ pub async fn get_users(
     tenant_id: Option<i64>,
     keyword: Option<String>,
 ) -> Result<Vec<UserResponse>, String> {
-    service::user_service::get_users(tenant_id, keyword).await
+    assets_service::user_service::get_users(tenant_id, keyword).await
 }
 
 /// 新增用户
@@ -41,7 +41,7 @@ pub async fn insert_user(
     tenant_id: Option<i64>,
     created_by: Option<i64>,
 ) -> Result<UserResponse, String> {
-    service::user_service::insert_user(
+    assets_service::user_service::insert_user(
         &username,
         &password,
         &real_name,
@@ -76,7 +76,7 @@ pub async fn update_user(
     updated_by: Option<i64>,
 ) -> Result<UserResponse, String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::update_user(
+    assets_service::user_service::update_user(
         id,
         &username,
         &real_name,
@@ -105,7 +105,7 @@ pub async fn delete_user(
     is_super_admin: bool,
 ) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::delete_user(id, current_user_id, is_super_admin).await
+    assets_service::user_service::delete_user(id, current_user_id, is_super_admin).await
 }
 
 /// 获取当前登录用户信息（从 JWT token 解析用户ID）
@@ -116,7 +116,7 @@ pub async fn get_current_user(token: String) -> Result<UserResponse, String> {
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| "assets-platform-default-secret-key".to_string());
 
-    let token_data = decode::<service::user_service::Claims>(
+    let token_data = decode::<assets_service::user_service::Claims>(
         &token,
         &DecodingKey::from_secret(jwt_secret.as_bytes()),
         &Validation::default(),
@@ -124,12 +124,12 @@ pub async fn get_current_user(token: String) -> Result<UserResponse, String> {
     .map_err(|e| format!("Token 验证失败: {}", e))?;
 
     let user_id = token_data.claims.sub;
-    service::user_service::get_user_by_id(user_id).await
+    assets_service::user_service::get_user_by_id(user_id).await
 }
 
 /// 重置密码
 #[tauri::command]
 pub async fn reset_password(id: String, new_password: String) -> Result<(), String> {
     let id: i64 = id.parse().map_err(|e| format!("无效的用户ID: {}", e))?;
-    service::user_service::reset_password(id, &new_password).await
+    assets_service::user_service::reset_password(id, &new_password).await
 }

@@ -825,7 +825,7 @@ mod edge_case_tests {
         let rgb = DynamicImage::ImageRgba8(rgba_img).to_rgb8();
 
         assert_eq!(
-            rgb.samples().len() / (rgb.width() * rgb.height()),
+            rgb.as_raw().len() / (rgb.width() as usize * rgb.height() as usize),
             3,
             "❌ RGBA→RGB 后应有 3 通道"
         );

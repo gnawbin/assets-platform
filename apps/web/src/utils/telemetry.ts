@@ -193,8 +193,8 @@ export function initTelemetry(): void {
 
     const loggerProvider = new LoggerProvider({
       resource,
-      processors: [new SimpleLogRecordProcessor(logExporter)],
-    } as any);
+      processors: [new SimpleLogRecordProcessor({ exporter: logExporter })],
+    });
 
     // ==================== 3. 初始化 MeterProvider（指标） ====================
     const metricExporter = new OTLPMetricExporter({

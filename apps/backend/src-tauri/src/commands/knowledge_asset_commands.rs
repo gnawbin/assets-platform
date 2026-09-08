@@ -2,8 +2,8 @@
 //!
 //! 全新 knowledge_asset 表命令，与现有 knowledge_commands.rs 完全独立。
 
-use crate::database::models::KnowledgeAsset;
-use crate::service;
+use assets_database::models::KnowledgeAsset;
+use assets_service;
 
 /// 根据 tree_node_id 获取关联的知识资产（未关联时返回 null）
 #[tauri::command]
@@ -13,14 +13,14 @@ pub async fn get_knowledge_asset_by_tree_node(
     let id: i64 = treeNodeId
         .parse()
         .map_err(|e| format!("无效的节点ID: {}", e))?;
-    service::knowledge_asset_service::get_knowledge_asset_by_tree_node(id).await
+    assets_service::knowledge_asset_service::get_knowledge_asset_by_tree_node(id).await
 }
 
 /// 获取单条知识资产
 #[tauri::command]
 pub async fn get_knowledge_asset(id: String) -> Result<KnowledgeAsset, String> {
     let item_id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::knowledge_asset_service::get_knowledge_asset(item_id).await
+    assets_service::knowledge_asset_service::get_knowledge_asset(item_id).await
 }
 
 /// 获取知识资产列表
@@ -29,7 +29,7 @@ pub async fn list_knowledge_assets(
     okf_type: Option<String>,
     _tags: Option<Vec<String>>,
 ) -> Result<Vec<KnowledgeAsset>, String> {
-    service::knowledge_asset_service::list_knowledge_assets(okf_type.as_deref(), None).await
+    assets_service::knowledge_asset_service::list_knowledge_assets(okf_type.as_deref(), None).await
 }
 
 /// 创建知识资产（同时创建 knowledge_tree 节点）
@@ -83,7 +83,7 @@ pub async fn create_knowledge_asset(
         deleted: 0,
     };
 
-    service::knowledge_asset_service::create_knowledge_asset(&asset).await
+    assets_service::knowledge_asset_service::create_knowledge_asset(&asset).await
 }
 
 /// 更新知识资产
@@ -107,7 +107,7 @@ pub async fn update_knowledge_asset(
         _ => None,
     };
 
-    service::knowledge_asset_service::update_knowledge_asset(
+    assets_service::knowledge_asset_service::update_knowledge_asset(
         asset_id,
         title.as_deref(),
         content.as_deref(),
@@ -124,7 +124,7 @@ pub async fn update_knowledge_asset(
 #[tauri::command]
 pub async fn delete_knowledge_asset(id: String) -> Result<(), String> {
     let asset_id: i64 = id.parse().map_err(|e| format!("无效的ID: {}", e))?;
-    service::knowledge_asset_service::delete_knowledge_asset(asset_id).await
+    assets_service::knowledge_asset_service::delete_knowledge_asset(asset_id).await
 }
 
 /// 将文件绑定到知识资产
@@ -140,7 +140,7 @@ pub async fn attach_file_to_knowledge(
     let asset_id: i64 = assetId
         .parse()
         .map_err(|e| format!("无效的资产ID: {}", e))?;
-    service::knowledge_asset_service::attach_file_to_asset(
+    assets_service::knowledge_asset_service::attach_file_to_asset(
         asset_id, &fileUrl, &fileName, fileSize, &fileMime, &fileMd5,
     )
     .await

@@ -12,7 +12,7 @@ export default function NewWorkflowPage() {
     return (
         <Layout>
             <Box style={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
-                <WorkflowEditor onSaved={(id) => router.push(`/knowledge/workflow/${id}/edit`)} />
+                <WorkflowEditor onSaved={(id) => router.push(`/knowledge/workflow/editor?id=${id}`)} />
             </Box>
         </Layout>
     );

@@ -17,6 +17,11 @@ import { UploadService } from '@/services/uploadService';
 
 const mockInitResponse = {
   uploadId: 'upload-001',
+  needStart: true,
+};
+
+const mockStartResponse = {
+  uploadId: 'upload-001',
   s3UploadId: 's3-upload-001',
   chunkSize: 5242880,
   totalChunks: 10,
@@ -84,8 +89,8 @@ describe('UploadService', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: 'report.pdf',
-          fileSize: 52428800,
-          mimeType: 'application/pdf',
+          file_size: 52428800,
+          mime_type: 'application/pdf',
         }),
       });
     });
@@ -100,16 +105,31 @@ describe('UploadService', () => {
 
     it('应正确处理超大文件', async () => {
       const largeResponse = {
-        ...mockInitResponse,
+        ...mockStartResponse,
         totalChunks: 2000,
         presignedUrls: Array(2000).fill('https://s3.example.com/part/1'),
       };
       (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse(largeResponse));
 
-      const result = await service.init('large-file.zip', 10 * 1024 * 1024 * 1024, 'application/zip');
+      const result = await service.startUpload('upload-001');
 
       expect(result.totalChunks).toBe(2000);
       expect(result.presignedUrls).toHaveLength(2000);
+    });
+  });
+
+  // ======================== startUpload ========================
+
+  describe('startUpload', () => {
+    it('应成功开始上传并返回 S3 分片信息', async () => {
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse(mockStartResponse));
+
+      const result = await service.startUpload('upload-001');
+
+      expect(result).toEqual(mockStartResponse);
+      expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/start', {
+        method: 'POST',
+      });
     });
   });
 
@@ -163,7 +183,7 @@ describe('UploadService', () => {
       expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/chunk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partNumber: 1, etag: '"etag-001"' }),
+        body: JSON.stringify({ part_number: 1, etag: '"etag-001"' }),
       });
     });
 
