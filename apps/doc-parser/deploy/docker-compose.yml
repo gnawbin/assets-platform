@@ -1,0 +1,42 @@
+# doc-parser 同机 Docker 部署示例（端口只绑本机）
+# 用法：
+#   docker compose -f apps/doc-parser/deploy/docker-compose.yml up -d --build
+#   docker inspect --format '{{.State.Health.Status}}' doc-parser
+#
+# 前置：/etc/doc-parser/doc-parser.env 必须存在且 chmod 600，其中
+#   PARSER_HOST=0.0.0.0（容器内必须）
+#   DOC_PARSER_TOKEN=<与后端 [doc_parser] token 一致>
+# 详见 docs/doc-parser 独立部署指南.md §5
+services:
+  doc-parser:
+    build: ..
+    image: doc-parser:0.1.0
+    container_name: doc-parser
+    ports:
+      # 只绑 127.0.0.1；切勿写成 "8321:8321"（会暴露到所有网卡）
+      - "127.0.0.1:8321:8321"
+    env_file:
+      - /etc/doc-parser/doc-parser.env
+    # 让容器内可通过 host.docker.internal 访问宿主机的 SurrealDB / Ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Whisper / Embedding 模型缓存（避免每次重建下载）
+      - docparser-cache:/root/.cache
+      # 嵌入式 SurrealDB 数据（改用外部实例时可去掉）
+      - docparser-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8321/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  docparser-cache:
+  docparser-data:

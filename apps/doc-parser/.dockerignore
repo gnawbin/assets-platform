@@ -1,0 +1,19 @@
+# 构建上下文排除项
+.env
+.env.*
+!.env.example
+
+# 测试与产物
+tests/
+.pytest_cache/
+pytest_video_output.txt
+*.egg-info/
+**/__pycache__/
+**/*.pyc
+*.log
+
+# 运行时数据（模型缓存、嵌入式 SurrealDB 数据、临时抽帧）
+data/
+.doc_parser_cache/
+tmp/
+output/

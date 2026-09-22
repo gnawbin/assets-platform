@@ -20,6 +20,11 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8321 --reload
 curl http://127.0.0.1:8321/health
 ```
 
+> ⚠️ 上例为**本机开发**用法（`--reload` 仅开发可用，且依赖后端注入 token）。
+> **独立部署（systemd / Docker，后端只做客户端）请遵循 `docs/doc-parser 独立部署指南.md`**，其中包含：
+> token 生成与两侧一致性校验、`PARSER_HOST=0.0.0.0` 与"token 必须非空"的强制关系、
+> 端口发布必须写成 `-p 127.0.0.1:8321:8321`、模型缓存与数据卷挂载、与后端 `[doc_parser]` 的配置对照、排障表。
+
 ## API
 
 | 方法 | 路径 | 说明 |
@@ -60,8 +65,13 @@ doc-parser/
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `PARSER_HOST` | `127.0.0.1` | 监听地址；**容器内必须 `0.0.0.0`**（此时 token 必须非空） |
+| `PARSER_PORT` | `8321` | 监听端口 |
+| `DOC_PARSER_TOKEN` | `""` | 共享密钥：模式 A 由后端启动时注入；**独立部署（systemd/Docker）必填**，且需与后端 `[doc_parser] token` 完全一致 |
+| `DOC_PARSER_ALLOW_NO_TOKEN` | `0` | 仅本机调试可置 `1` 允许空 token 启动（生产保持 `0`） |
+| `SURREALDB_URL` | `file://./data/surrealdb` | 向量记忆存储；生产建议外部实例 `ws://127.0.0.1:8000`，嵌入式需挂持久卷 |
 | `VLM_MODE` | `ollama` | VLM 模式：ollama/cloud |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 地址 |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama 地址（容器内需用 `host.docker.internal`） |
 | `WHISPER_MODEL` | `base` | Whisper 模型大小 |
 | `OCR_LANGUAGE` | `chi_sim+eng` | OCR 语言 |
 
@@ -124,7 +134,7 @@ tests/test_video_parse.py::TestVideoParse::test_video_parse_to_text PASSED [100%
 视频上传 → VideoParser(Whisper语音 + 帧OCR画面)
         → TextChunker 切片（带时间戳）
         → Embedding 向量化（bge-zh）
-        → LanceDB 落盘（记忆持久化，SHA-256 幂等去重）
+        → SurrealDB 入库（记忆持久化，SHA-256 幂等去重；实现见 services/vector_store.py）
         → RAG 问答：问题 → 检索相关切片 → LLM 生成回答（引用视频时间点）
 ```
 
