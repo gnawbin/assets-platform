@@ -18,7 +18,7 @@ name = "assets-platform"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = {version = "2.5.6", default-features = false, features = [] }# 关闭默认特性
+tauri-build = {version = "2.7.1", default-features = false, features = [] }# 关闭默认特性
 
 [dependencies]
 tracing = "0.1.44"
@@ -27,13 +27,13 @@ tracing = "0.1.44"
 getrandom = {version = "0.4.3", features = ["std"] }
 
 # Tauri 核心（最小特性集）
-tauri = {version = "2.11.5", default-features = false, features = ["wry"] }
-tauri-plugin-dialog = "2.7.3"
-tauri-plugin-fs = "2.5.2"
-tauri-plugin-opener = {version = "2.5.5", default-features = false}
-tauri-plugin-process = "2.3.0"
-tauri-plugin-shell = "2.3.6"
-tauri-plugin-updater = "2.11.0"
+tauri = {version = "2.12.2", default-features = false, features = ["wry"] }
+tauri-plugin-dialog = "2.8.1"
+tauri-plugin-fs = "2.6.0"
+tauri-plugin-opener = {version = "2.7.0", default-features = false}
+tauri-plugin-process = "2.4.0"
+tauri-plugin-shell = "2.4.1"
+tauri-plugin-updater = "2.13.2"
 
 # 内部业务 crate（crates/*）
 assets-api = {path = "crates/assets-api"}
@@ -45,7 +45,7 @@ assets-utils = {path = "crates/assets-utils"}
 assets-workflow = {path = "crates/assets-workflow"}
 
 # 序列化
-chrono = {version = "0.4", default-features = false, features = ["serde"] }
+chrono = {version = "0.4.45", default-features = false, features = ["serde"] }
 serde = {version = "1.0.229", default-features = false, features = [
   "derive",
   "alloc",
@@ -53,7 +53,7 @@ serde = {version = "1.0.229", default-features = false, features = [
 serde_json = {version = "1.0.151", default-features = false, features = ["alloc"] }
 
 # JWT（命令层）
-jsonwebtoken = {version = "11.0.0", default-features = false, features = [
+jsonwebtoken = {version = "11.1.0", default-features = false, features = [
   "aws_lc_rs",
 ] }
 
@@ -68,7 +68,7 @@ sqlx = {version = "0.9.0", default-features = false, features = [
 ] }
 
 # 异步运行时（只开必须的特性，不要 full）
-tokio = {version = "1.53.1", default-features = false, features = [
+tokio = {version = "1.53.2", default-features = false, features = [
   "rt-multi-thread",
   "rt",
   "macros",

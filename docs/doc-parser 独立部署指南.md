@@ -162,7 +162,26 @@ docker build -t doc-parser:0.1.0 .
 
 镜像内已安装 `ffmpeg`（含 ffprobe）、`tesseract-ocr` + 中文包、`poppler-utils`、`libgl1`、`libglib2.0-0`。
 
+> **国内构建加速（可选）**：镜像需下载 `torch`（PyPI 默认 Linux 轮子为 CUDA 版，≈555 MB）及 `nvidia-*` 等大包，直连 PyPI 常出现数分钟无进展甚至超时。`Dockerfile` 提供 `PIP_INDEX_URL` / `PIP_TRUSTED_HOST` 两个**构建参数**（默认空 = 官方 PyPI，不改变默认行为）；传入后会写入镜像内 `/etc/pip.conf`，后续 `pip install` 全部走该源：
+>
+> ```bash
+> docker build -t doc-parser:0.1.0 \
+>   --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+>   --build-arg PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn .
+> ```
+>
+> compose（§5.4）已把这两个参数暴露为环境变量 `DOC_PARSER_PIP_INDEX_URL` / `DOC_PARSER_PIP_TRUSTED_HOST`，用法见 §5.4 末尾。
+> Embedding 模型走 HuggingFace，与 pip 源无关，另见 §5.2 的 `HF_ENDPOINT=https://hf-mirror.com`。
+
+> **构建中断后原样重跑即可**：依赖层先把 wheel 下载到 BuildKit cache mount（`/wheels`）再离线安装，
+> 且 `pip download` 会跳过已存在的文件（输出 `File was already downloaded`）。
+> 因此若某个大包因镜像读超时而中断，**重跑同一条 `build` / `up -d --build` 命令**只会补下缺失的文件，
+> 不会从零重下数 GB。需要彻底清空时用 `docker builder prune`。
+
 ### 5.2 运行（**注意端口发布方式**）
+
+> **环境文件放哪里？** 本节示例用 `/etc/doc-parser/doc-parser.env`（规范路径，权限 `600`、`root` 属主，需 `sudo`）。
+> **免 sudo 的同机开发**同样可将该文件放在 `apps/doc-parser/deploy/doc-parser.env`（**已被 `.gitignore` 忽略**），§5.4 的 compose 默认读取**同目录**的 `./doc-parser.env`。两种路径内容完全一致，模板见 `apps/doc-parser/deploy/doc-parser.env.example`。
 
 ```bash
 # 生成 token（与后端保持一致）
@@ -206,13 +225,17 @@ docker run -d --name doc-parser \
 # apps/doc-parser/deploy/docker-compose.yml
 services:
   doc-parser:
-    build: ..
+    build:
+      context: ..
+      args:                                  # 可选：pip 镜像源（默认空 = 官方 PyPI）
+        PIP_INDEX_URL: ${DOC_PARSER_PIP_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${DOC_PARSER_PIP_TRUSTED_HOST:-}
     image: doc-parser:0.1.0
     container_name: doc-parser
     ports:
       - "127.0.0.1:8321:8321"      # 只绑本机
     env_file:
-      - /etc/doc-parser/doc-parser.env
+      - ./doc-parser.env           # 规范部署改为 /etc/doc-parser/doc-parser.env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -233,9 +256,18 @@ volumes:
 ```
 
 ```bash
+# 首次构建耗时较长（torch / cuda-* 等大包）。国内可先导出 pip 镜像源（见 §5.1）；
+# 构建因镜像读超时中断时，原样重跑本命令即可（已下载的 wheel 会跳过，见 §5.1）。
+export DOC_PARSER_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+export DOC_PARSER_PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+
 docker compose -f apps/doc-parser/deploy/docker-compose.yml up -d --build
 docker inspect --format '{{.State.Health.Status}}' doc-parser   # 期望 healthy
 ```
+
+> **`env_file` 是相对 compose 文件所在目录的路径**：仓库内默认 `./doc-parser.env`（git 忽略、免 sudo，见 §5.2 说明）；
+> 若按 §5.2 的规范路径部署，把该行改回 `/etc/doc-parser/doc-parser.env` 即可。
+> `restart: unless-stopped` 保证宿主重启/进程崩溃后容器自动拉起 —— 这正是模式 C 下「部署方负责进程存活」的落点（后端此时 `enabled = false`，只做客户端，见 §6.1）。
 
 ---
 
@@ -256,6 +288,23 @@ token = "<与 doc-parser 的 DOC_PARSER_TOKEN 完全一致>"   # ✅ 当前生�
 ```
 
 `apps/backend/.env.example.toml` 已补充该段（含 A/B/C 三模式注释与**逐键生效状态**标注）。
+
+> **`apps/backend/.env.toml` 是否已存在？** 该文件**被 `.gitignore` 忽略**（`.gitignore:17`），新克隆的仓库里通常**不存在**，需自行创建。
+> 缺失时后端走「未找到 .env 文件，将使用默认环境变量」分支（`apps/backend/src-tauri/src/lib.rs:83-85`）：`DOC_PARSER_URL` 取默认 `http://127.0.0.1:8321`（恰好与容器一致），但 `DOC_PARSER_TOKEN` 为**空** → `/parse` 返回 **401**「缺少认证令牌」。
+>
+> **最小可用做法**（只写 `[doc_parser]` 一段即可；其它段缺省只是保持后端既有默认值，不会覆盖任何东西）：
+>
+> ```bash
+> cat > apps/backend/.env.toml <<'EOF'
+> [doc_parser]
+> enabled = false
+> url  = "http://127.0.0.1:8321"
+> token = "<与 doc-parser 的 DOC_PARSER_TOKEN 完全一致>"
+> EOF
+> ```
+>
+> 若还需 Postgres / S3 / Ollama 等段，从 `apps/backend/.env.example.toml` 复制补齐即可。
+> ⚠️ 注意 `load_env()` 用 `std::env::set_var` **无条件覆盖**同名环境变量（`lib.rs:65`），因此 `.env.toml` 里写了的键会盖掉你另外 export 的值 —— 不写就不会。
 
 ### 6.2 配置写法（两种等效）
 
@@ -354,7 +403,10 @@ grep -A6 '^\[doc_parser\]' apps/backend/.env.toml | grep '^token' | cut -d= -f2-
 | `apps/doc-parser/.dockerignore` | 排除 tests/data/缓存/`.env` |
 | `apps/doc-parser/deploy/docker-compose.yml` | 同机 compose 示例（端口只绑本机 + 卷 + healthcheck） |
 | `apps/doc-parser/deploy/doc-parser.service` | systemd 单元（加固项 + Restart） |
-| `apps/doc-parser/deploy/doc-parser.env.example` | `EnvironmentFile` 模板（权限 600） |
+| `apps/doc-parser/deploy/doc-parser.env.example` | `EnvironmentFile` / `--env-file` 模板（权限 600） |
+| `apps/doc-parser/deploy/doc-parser.env` | **本机实例**环境文件（**git 忽略**、免 sudo；§5.4 的 compose 默认读取 `./doc-parser.env`） |
+| `apps/backend/.env.toml` | **本机实例**后端对接配置（**git 忽略**；本项目仅含 `[doc_parser]`，见 §6.1） |
+| `.gitignore` 增补 | 忽略 `apps/doc-parser/deploy/doc-parser.env`（`.env.toml` 原已在第 17 行忽略） |
 | `apps/doc-parser/.env.example` | 已按 A/B/C 三模式重写 token 段 |
 | `apps/backend/.env.example.toml` | 新增 `[doc_parser]` 段（标注 B0-4a 生效项） |
 | `docs/doc-parser 独立部署指南.md` | 本文件 |

@@ -12,6 +12,9 @@ pytest_video_output.txt
 **/*.pyc
 *.log
 
+# 部署脚本/编排文件（systemd/compose 与环境文件，勿打进镜像，避免密钥泄漏）
+deploy/
+
 # 运行时数据（模型缓存、嵌入式 SurrealDB 数据、临时抽帧）
 data/
 .doc_parser_cache/

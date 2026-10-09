@@ -25,12 +25,43 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# 先装依赖，利用构建缓存（仅 pyproject.toml 变更时重装）
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+# 可选：pip 镜像源（国内构建加速）。默认走官方 PyPI，不改变默认行为。
+# 覆盖示例：
+#   docker compose ... build \
+#     --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+#     --build-arg PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+ARG PIP_INDEX_URL=
+ARG PIP_TRUSTED_HOST=
+RUN if [ -n "$PIP_INDEX_URL" ]; then \
+      printf '[global]\nindex-url = %s\ntrusted-host = %s\n' \
+        "$PIP_INDEX_URL" "$PIP_TRUSTED_HOST" > /etc/pip.conf; \
+    fi
 
-# 再复制源码（.dockerignore 已排除 tests/data/缓存等）
+# 先装第三方依赖，利用构建缓存（仅 pyproject.toml 变更时重装）。
+# 注意：不能在此处直接 `pip install .` —— 此时源码尚未复制，
+# 而 pyproject.toml 的 [tool.setuptools] packages 显式列出了 models/parsers/...，
+# setuptools 会因「package directory does not exist」而失败。
+# 故先从 pyproject.toml 抽取 project.dependencies 单独安装依赖层。
+#
+# 依赖含 torch / cuda-* 等上百 MB 级 wheel（合计数 GB），而镜像源（尤其国内镜像）
+# 对 wheel 响应不做 HTTP 缓存，一旦某个文件读超时，整层构建就得从零重下。
+# 因此拆成「先下载、再离线安装」两步，并把 wheel 目录挂到 BuildKit cache mount：
+#   1) pip download -d /wheels：cache mount 不写入镜像层；
+#      重试时已下载的 wheel 会被跳过（pip 输出 File was already downloaded），
+#      只补缺失的，代价从「重下数 GB」降到「补几个文件」；
+#   2) pip install --no-index --find-links /wheels：纯本地安装，不再受网络影响；
+#   3) --timeout / --retries 放宽单文件下载超时与重试次数。
+COPY pyproject.toml ./
+RUN --mount=type=cache,target=/wheels \
+    python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > /tmp/requirements.txt \
+ && pip download --no-cache-dir --timeout 120 --retries 20 -d /wheels -r /tmp/requirements.txt \
+ && pip install --no-cache-dir --no-index --find-links /wheels -r /tmp/requirements.txt \
+ && rm -f /tmp/requirements.txt
+
+# 再复制源码（.dockerignore 已排除 tests/data/缓存等）并安装本包本体
+# （--no-deps：依赖已在上一层安装，避免重复解析与下载）
 COPY . .
+RUN pip install --no-cache-dir --no-deps .
 
 EXPOSE 8321
 

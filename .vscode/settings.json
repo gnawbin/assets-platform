@@ -1,0 +1,9 @@
+{
+  // This monorepo has no Cargo.toml at the root. The Rust/Tauri workspace lives
+  // under apps/backend/src-tauri. rust-analyzer only auto-discovers Cargo projects
+  // located at the root of an opened workspace folder, so link it explicitly.
+  "rust-analyzer.linkedProjects": ["apps/backend/src-tauri/Cargo.toml"],
+  "rust-analyzer.cargo.autoreload": true,
+  "rust-analyzer.check.command": "clippy"
+}
+

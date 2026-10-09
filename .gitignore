@@ -10,12 +10,15 @@ apps/*/.next
 apps/*/.turbo/
 pnpm-lock.yaml
 apps/*/pnpm-lock.yaml
-.vscode
+.vscode/*
+!.vscode/settings.json
 
 .env.local
 .env.toml
 
 apps/*/.env.local
+# doc-parser 本机 Docker 部署环境文件（含共享密钥）
+apps/doc-parser/deploy/doc-parser.env
 .env.local.toml
 .env.*.local
 .ra-target

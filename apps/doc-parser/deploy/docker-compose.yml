@@ -3,20 +3,31 @@
 #   docker compose -f apps/doc-parser/deploy/docker-compose.yml up -d --build
 #   docker inspect --format '{{.State.Health.Status}}' doc-parser
 #
-# 前置：/etc/doc-parser/doc-parser.env 必须存在且 chmod 600，其中
+# 前置：同目录下的 doc-parser.env（已被 .gitignore 忽略）必须存在，其中
 #   PARSER_HOST=0.0.0.0（容器内必须）
-#   DOC_PARSER_TOKEN=<与后端 [doc_parser] token 一致>
+#   DOC_PARSER_TOKEN=<与后端 [doc_parser] token 一致，非空>
+# 规范部署可用 /etc/doc-parser/doc-parser.env（权限 600），见 doc-parser.env 头部说明。
 # 详见 docs/doc-parser 独立部署指南.md §5
 services:
   doc-parser:
-    build: ..
+    build:
+      context: ..
+      # 可选：pip 镜像源（国内加速）。不设置则走官方 PyPI。
+      # 用法：DOC_PARSER_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+      #       DOC_PARSER_PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \
+      #       docker compose -f ... up -d --build
+      args:
+        PIP_INDEX_URL: ${DOC_PARSER_PIP_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${DOC_PARSER_PIP_TRUSTED_HOST:-}
     image: doc-parser:0.1.0
     container_name: doc-parser
     ports:
       # 只绑 127.0.0.1；切勿写成 "8321:8321"（会暴露到所有网卡）
       - "127.0.0.1:8321:8321"
     env_file:
-      - /etc/doc-parser/doc-parser.env
+      # 本机部署用仓库内（git 忽略）的环境文件，免 sudo；
+      # 规范部署可改为 /etc/doc-parser/doc-parser.env（权限 600，见该文件头部说明）
+      - ./doc-parser.env
     # 让容器内可通过 host.docker.internal 访问宿主机的 SurrealDB / Ollama
     extra_hosts:
       - "host.docker.internal:host-gateway"
