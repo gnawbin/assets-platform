@@ -1,0 +1,219 @@
+﻿backend.rs:10: //! * [`TractBackend`] — pure-Rust `tract` (`ocr-tract` feature, which
+backend.rs:19: //! extraction and CTC decoding stays shared in the sibling modules, so
+backend.rs:22: use super::error::{OcrError, OcrResult};
+backend.rs:29: fn run(&self, input: &ndarray::Array4<f32>) -> OcrResult<ndarray::ArrayD<f32>>;
+backend.rs:34: /// `tract` backend (`ocr-tract`, which `ml` implies and `wasm-ocr`
+backend.rs:37: pub(crate) fn build_backend(
+backend.rs:43: #[cfg(feature = "ocr")]
+backend.rs:47: #[cfg(all(not(feature = "ocr"), feature = "ocr-tract"))]
+backend.rs:49: Ok(Box::new(TractBackend::from_bytes(model_bytes)?))
+backend.rs:51: #[cfg(all(not(feature = "ocr"), not(feature = "ocr-tract")))]
+backend.rs:54: "no OCR inference backend compiled in (enable `ocr` or `ocr-tract`)".to_string(),
+backend.rs:63: #[cfg(feature = "ocr")]
+backend.rs:65: // `Mutex` because `ort::Session::run` needs `&mut` while the
+backend.rs:68: session: std::sync::Mutex<ort::session::Session>,
+backend.rs:71: #[cfg(feature = "ocr")]
+backend.rs:73: pub(crate) fn from_bytes(model_bytes: &[u8], num_threads: usize) -> OcrResult<Self> {
+backend.rs:74: // wrap `ort::Session::builder()` (and the
+backend.rs:87: // `ort::api()` inside `Session::builder()` and panics at
+backend.rs:96: ort::session::Session::builder()
+backend.rs:134: #[cfg(feature = "ocr")]
+backend.rs:136: fn run(&self, input: &ndarray::Array4<f32>) -> OcrResult<ndarray::ArrayD<f32>> {
+backend.rs:137: use ort::value::TensorRef;
+backend.rs:148: .run(ort::inputs!["x" => input_tensor])
+backend.rs:157: .try_extract_array::<f32>()
+backend.rs:158: .map_err(|e| OcrError::InferenceError(format!("Failed to extract output: {}", e)))?;
+backend.rs:167: // Pure-Rust `tract` backend — the wasm32 path.
+backend.rs:170: // When both `ocr` and `ocr-tract` are on (e.g. `--features ocr,ml`),
+backend.rs:175: #[cfg(feature = "ocr-tract")]
+backend.rs:177: pub(crate) struct TractBackend {
+backend.rs:180: // on first use (recognizer height is fixed at 48; detector pads to
+backend.rs:182: model: tract_onnx::prelude::InferenceModel,
+backend.rs:183: plans: std::sync::Mutex<std::collections::HashMap<Vec<usize>, std::sync::Arc<TractPlan>>>,
+backend.rs:186: #[cfg(feature = "ocr-tract")]
+backend.rs:188: type TractPlan = tract_onnx::prelude::TypedRunnableModel<tract_onnx::prelude::TypedModel>;
+backend.rs:190: #[cfg(feature = "ocr-tract")]
+backend.rs:192: impl TractBackend {
+backend.rs:193: pub(crate) fn from_bytes(model_bytes: &[u8]) -> OcrResult<Self> {
+backend.rs:194: use tract_onnx::prelude::*;
+backend.rs:195: let model = tract_onnx::onnx()
+backend.rs:197: .map_err(|e| OcrError::ModelLoadError(format!("tract: parse ONNX: {}", e)))?;
+backend.rs:205: fn plan_for(&self, shape: &[usize]) -> OcrResult<std::sync::Arc<TractPlan>> {
+backend.rs:206: use tract_onnx::prelude::*;
+backend.rs:212: .map_err(|e| OcrError::InferenceError(format!("tract: plan lock: {}", e)))?;
+backend.rs:224: .map_err(|e| OcrError::InferenceError(format!("tract: input fact: {}", e)))?
+backend.rs:226: .map_err(|e| OcrError::InferenceError(format!("tract: optimize: {}", e)))?
+backend.rs:228: .map_err(|e| OcrError::InferenceError(format!("tract: runnable: {}", e)))?;
+backend.rs:235: #[cfg(feature = "ocr-tract")]
+backend.rs:236: impl InferenceBackend for TractBackend {
+backend.rs:237: fn run(&self, input: &ndarray::Array4<f32>) -> OcrResult<ndarray::ArrayD<f32>> {
+backend.rs:238: use tract_onnx::prelude::*;
+backend.rs:244: // tract bundles its own `ndarray` version, so array types are
+backend.rs:250: .map_err(|e| OcrError::InferenceError(format!("tract: input tensor: {}", e)))?;
+backend.rs:254: .map_err(|e| OcrError::InferenceError(format!("tract: run: {}", e)))?;
+backend.rs:259: .ok_or_else(|| OcrError::InferenceError("tract: no output tensor".to_string()))?;
+backend.rs:264: .map_err(|e| OcrError::InferenceError(format!("tract: extract output: {}", e)))?;
+backend.rs:266: .map_err(|e| OcrError::InferenceError(format!("tract: reshape output: {}", e)))
+backend.rs:271: // #524 task 5 — ort↔tract numerical-equivalence harness.
+backend.rs:275: // large diff localizes the recognition garble to a tract inference op
+backend.rs:281: #[cfg(all(test, feature = "ocr", feature = "ocr-tract"))]
+backend.rs:283: use super::*;
+backend.rs:285: fn models_dir() -> std::path::PathBuf {
+backend.rs:297: fn deterministic_input(shape: [usize; 4]) -> ndarray::Array4<f32> {
+backend.rs:303: fn diff(a: &ndarray::ArrayD<f32>, b: &ndarray::ArrayD<f32>) -> (f32, f64) {
+backend.rs:307: "ort/tract output SHAPES differ: {:?} vs {:?}",
+backend.rs:323: fn ort_vs_tract_detector() {
+backend.rs:326: let tract = TractBackend::from_bytes(&m).expect("tract det");
+backend.rs:329: let t = tract.run(&inp).expect("tract run");
+backend.rs:332: assert!(mx < 1e-2, "detector ort/tract diverge: max_abs_diff={mx}");
+backend.rs:337: fn ort_vs_tract_recognizer() {
+backend.rs:340: let tract = TractBackend::from_bytes(&m).expect("tract rec");
+backend.rs:343: let t = tract.run(&inp).expect("tract run");
+backend.rs:346: assert!(mx < 1e-2, "recognizer ort/tract diverge: max_abs_diff={mx}");
+--- RENDER API ---
+mod.rs:50: pub use page_renderer::{
+mod.rs:53: pub use separation_renderer::{render_separation, render_separations, SeparationPlate};
+mod.rs:477: pub fn render_page(
+mod.rs:489: pub fn render_page_region(
+mod.rs:558: pub fn render_page_fit(
+mod.rs:594: pub fn flatten_to_images(doc: &crate::document::PdfDocument, dpi: u32) -> Result<Vec<u8>> {
+document.rs:107: pub struct PageInfo {
+document.rs:372: pub struct PdfDocument {
+document.rs:1087: pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
+document.rs:1097: pub fn open_from_bytes(data: Vec<u8>) -> Result<Self> {
+document.rs:1123: pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+document.rs:1615: pub fn open_with_config(path: impl AsRef<Path>, _config: impl std::any::Any) -> Result<Self> {
+document.rs:1632: pub fn authenticate(&self, password: &[u8]) -> Result<bool> {
+document.rs:1689: pub fn is_encrypted(&self) -> bool {
+document.rs:1709: pub fn is_authenticated(&self) -> bool {
+document.rs:1725: pub fn document_producer(&self) -> Option<String> {
+document.rs:1732: pub fn document_creator(&self) -> Option<String> {
+document.rs:2007: pub fn classify_page(
+document.rs:2048: pub fn classify_document(&self) -> Result<crate::extractors::auto::DocumentClassification> {
+document.rs:2079: pub fn extract_text_auto(&self, page: usize) -> Result<String> {
+document.rs:2133: pub fn version(&self) -> (u8, u8) {
+document.rs:2159: pub fn trailer(&self) -> &Object {
+document.rs:2174: pub fn all_object_ids(&self) -> Vec<u32> {
+document.rs:2502: pub fn load_object(&self, obj_ref: ObjectRef) -> Result<Object> {
+document.rs:2756: pub fn resolve_references(&self, obj: &Object, max_depth: usize) -> Result<Object> {
+document.rs:2823: pub fn is_form_xobject(&self, obj_ref: ObjectRef) -> bool {
+document.rs:4015: pub fn catalog(&self) -> Result<Object> {
+document.rs:4102: pub fn structure_tree(&self) -> Result<Option<crate::structure::StructTreeRoot>> {
+document.rs:4113: pub fn structure_tree_with_budget(
+document.rs:4236: pub fn prefers_structure_reading_order(&self) -> bool {
+document.rs:4256: pub fn output_intent_cmyk_profile(&self) -> Option<std::sync::Arc<crate::color::IccProfile>> {
+document.rs:4283: pub fn has_output_intents_declaration(&self) -> bool {
+document.rs:4413: pub fn mark_info(&self) -> Result<crate::structure::MarkInfo> {
+document.rs:4484: pub fn page_count(&self) -> Result<usize> {
+document.rs:4552: pub fn get_page_media_box(&self, page_index: usize) -> Result<(f32, f32, f32, f32)> {
+document.rs:4625: pub fn get_page_visible_box(&self, page_index: usize) -> Result<(f32, f32, f32, f32)> {
+document.rs:4666: pub fn get_page_rotation(&self, page_index: usize) -> Result<i32> {
+document.rs:4860: pub fn page_count_u32(&self) -> u32 {
+document.rs:4882: pub fn page_indices(&self) -> std::ops::Range<usize> {
+document.rs:4900: pub fn get_page(&self, page_index: usize) -> Result<Object> {
+document.rs:5758: pub fn extract_text(&self, page_index: usize) -> Result<String> {
+document.rs:5769: pub fn extract_text_with_options(
+document.rs:7393: pub fn extract_all_text(&self) -> Result<String> {
+document.rs:7415: pub fn erase_region(&self, page_index: usize, rect: crate::geometry::Rect) -> Result<()> {
+document.rs:7428: pub fn clear_erase_regions(&self, page_index: usize) -> Result<()> {
+document.rs:7439: pub fn remove_headers(&self, threshold: f32) -> Result<usize> {
+document.rs:7452: pub fn remove_footers(&self, threshold: f32) -> Result<usize> {
+document.rs:7468: pub fn remove_artifacts(&self, threshold: f32) -> Result<usize> {
+document.rs:7630: pub fn erase_header(&self, page_index: usize) -> Result<()> {
+document.rs:7636: pub fn edit_header(&self, page_index: usize) -> Result<()> {
+document.rs:7643: pub fn erase_footer(&self, page_index: usize) -> Result<()> {
+document.rs:7649: pub fn edit_footer(&self, page_index: usize) -> Result<()> {
+document.rs:7656: pub fn erase_artifacts(&self, page_index: usize) -> Result<()> {
+document.rs:7713: pub fn extract_text_with_ocr(
+document.rs:7749: pub fn extract_text_ocr_only(
+document.rs:7781: pub fn extract_spans_with_ocr(
+document.rs:10981: pub fn assemble_text_via_reading_order(
+document.rs:11060: pub fn has_text_layer(&self, page_index: usize) -> Result<bool> {
+document.rs:11090: pub fn permissions(&self) -> Option<crate::encryption::PdfPermissions> {
+document.rs:12636: pub fn extract_spans(&self, page_index: usize) -> Result<Vec<crate::layout::TextSpan>> {
+document.rs:12675: pub fn prepare_search(&self) -> Result<()> {
+document.rs:12684: pub fn clear_search_index(&self) {
+document.rs:13871: pub fn page_font_stats(&self, page_index: usize) -> Result<crate::layout::PageFontStats> {
+document.rs:13889: pub fn warnings(&self) -> Vec<String> {
+document.rs:13903: pub fn take_warnings(&self) -> Vec<String> {
+document.rs:13966: pub fn structured_warnings(&self) -> Vec<crate::extractors::warnings::Warning> {
+document.rs:13976: pub fn take_structured_warnings(&self) -> Vec<crate::extractors::warnings::Warning> {
+document.rs:13998: pub fn push_structured_warning(&self, warning: crate::extractors::warnings::Warning) {
+document.rs:17270: pub fn extract_text_filtered(
+document.rs:17294: pub fn extract_text_filtered_in_rect(
+document.rs:17359: pub fn extract_spans_with_reading_order(
+document.rs:17422: pub fn extract_spans_filtered_with_reading_order(
+document.rs:17570: pub fn extract_page_text(&self, page_index: usize) -> Result<crate::layout::PageText> {
+document.rs:17608: pub fn extract_structured(
+document.rs:17626: pub fn extract_structured_with_column_mode(
+document.rs:17698: pub fn extract_page_text_with_options(
+document.rs:17748: pub fn extract_spans_with_config(
+document.rs:17849: pub fn get_layers(&self) -> Result<Vec<String>> {
+document.rs:17926: pub fn get_page_inks(&self, page_index: usize) -> Result<Vec<String>> {
+document.rs:18007: pub fn get_page_inks_deep(&self, page_index: usize) -> Result<Vec<String>> {
+document.rs:18186: pub fn extract_chars(&self, page_index: usize) -> Result<Vec<crate::layout::TextChar>> {
+document.rs:18219: pub fn extract_chars_filtered(
+document.rs:18312: pub fn extract_words(&self, page_index: usize) -> Result<Vec<crate::layout::Word>> {
+document.rs:18326: pub fn extract_words_with_thresholds(
+document.rs:18343: pub fn extract_words_with_thresholds_no_artifacts(
+document.rs:18650: pub fn extract_text_lines(&self, page_index: usize) -> Result<Vec<crate::layout::TextLine>> {
+document.rs:18682: pub fn extract_text_lines_with_thresholds(
+document.rs:18703: pub fn extract_text_lines_with_thresholds_no_artifacts(
+document.rs:19067: pub fn apply_intelligent_text_processing(&self, mut spans: Vec<TextSpan>) -> Vec<TextSpan> {
+document.rs:19132: pub fn extract_hierarchical_content(
+document.rs:19144: pub fn get_page_content_data(&self, page_index: usize) -> Result<Vec<u8>> {
+document.rs:19310: pub fn extract_paths(&self, page_index: usize) -> Result<Vec<crate::elements::PathContent>> {
+document.rs:19652: pub fn extract_rects(&self, page_index: usize) -> Result<Vec<crate::elements::PathContent>> {
+document.rs:19660: pub fn extract_lines(&self, page_index: usize) -> Result<Vec<crate::elements::PathContent>> {
+document.rs:19678: pub fn extract_tables(
+document.rs:19766: pub fn extract_tables_with_config(
+document.rs:20190: pub fn extract_paths_in_rect(
+document.rs:20215: pub fn extract_text_in_rect(
+document.rs:20230: pub fn extract_words_in_rect(
+document.rs:20242: pub fn extract_text_lines_in_rect(
+document.rs:20254: pub fn extract_spans_in_rect(
+document.rs:20283: pub fn extract_text_excluding_rects(
+document.rs:20303: pub fn extract_words_excluding_rects(
+document.rs:20319: pub fn extract_spans_excluding_rects(
+document.rs:20331: pub fn extract_rects_in_rect(
+document.rs:20345: pub fn extract_lines_in_rect(
+document.rs:20361: pub fn extract_chars_in_rect(
+document.rs:20373: pub fn extract_images_in_rect(
+document.rs:20392: pub fn extract_tables_in_rect(
+document.rs:20405: pub fn extract_tables_in_rect_with_config(
+document.rs:20428: pub fn get_page_info(&self, page_index: usize) -> Result<PageInfo> {
+document.rs:20511: pub fn get_page_resources(&self, page_index: usize) -> Result<Object> {
+document.rs:20536: pub fn resolve_object(&self, obj: &Object) -> Result<Object> {
+document.rs:20550: pub fn get_or_load_font_for_rendering(
+document.rs:21855: pub fn to_markdown(
+document.rs:22415: pub fn to_markdown_with_ocr(
+document.rs:22514: pub fn to_html(
+document.rs:22804: pub fn to_plain_text(
+document.rs:22934: pub fn to_markdown_all(
+document.rs:22992: pub fn to_plain_text_all(
+document.rs:23037: pub fn check_for_circular_references(&self) -> Vec<(ObjectRef, ObjectRef)> {
+document.rs:23145: pub fn to_html_all(&self, options: &crate::converters::ConversionOptions) -> Result<String> {
+document.rs:23183: pub fn to_docx(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+document.rs:23201: pub fn to_docx_bytes(&self) -> Result<Vec<u8>> {
+document.rs:23226: pub fn to_docx_bytes_flow(&self) -> Result<Vec<u8>> {
+document.rs:23317: pub fn to_docx_bytes_layout(&self) -> Result<Vec<u8>> {
+document.rs:23322: pub fn to_pptx(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+document.rs:23337: pub fn to_pptx_bytes(&self) -> Result<Vec<u8>> {
+document.rs:23357: pub fn to_pptx_bytes_flow(&self) -> Result<Vec<u8>> {
+document.rs:23371: pub fn to_xlsx(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+document.rs:23385: pub fn to_xlsx_bytes(&self) -> Result<Vec<u8>> {
+document.rs:23407: pub fn to_xlsx_bytes_flow(&self) -> Result<Vec<u8>> {
+document.rs:23459: pub fn extract_images(&self, page_index: usize) -> Result<Vec<crate::extractors::PdfImage>> {
+document.rs:23567: pub fn extract_embedded_files(&self) -> Result<Vec<(String, Vec<u8>)>> {
+document.rs:23742: pub fn page_image_handles(
+document.rs:24737: pub fn extract_images_to_files(
+document.rs:24800: pub fn get_page_for_debug(&self, page_index: usize) -> Result<Object> {
+document.rs:24806: pub fn may_contain_text_public(data: &[u8]) -> bool {
+document.rs:24812: pub fn load_fonts_public(
+document.rs:24828: pub fn page_font_face_lookups(&self) -> Result<Vec<std::collections::HashMap<String, String>>> {
+document.rs:24888: pub fn extract_embedded_fonts(&self) -> Result<Vec<(String, Vec<u8>)>> {
+document.rs:24978: pub fn extract_embedded_fonts_with_unicode_maps(
+document.rs:24994: pub fn extract_embedded_fonts_with_unicode_maps_and_widths(
+document.rs:25201: pub struct ExtractedImageRef {
+document.rs:25401: pub fn parse_header<R: Read + Seek>(reader: &mut R, lenient: bool) -> Result<(u8, u8, u64)> {
+document.rs:25590: pub fn parse_trailer<R: Read>(reader: &mut R) -> Result<Object> {

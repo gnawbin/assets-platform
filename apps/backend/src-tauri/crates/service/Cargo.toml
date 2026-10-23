@@ -1,25 +1,31 @@
 [package]
+edition = "2021"
 name = "service"
 version = "0.1.0"
-edition = "2021"
 
 [dependencies]
-database = { path = "../database" }
-storage = { path = "../storage" }
-utils = { path = "../utils" }
-sqlx = { version = "0.9.0", default-features = false, features = [
+database = {path = "../database"}
+storage = {path = "../storage"}
+utils = {path = "../utils"}
+# 本地解析后端（DOC_PARSER_BACKEND=local），设计文档：docs/Rust原生多模态解析后端设计方案.md
+argon2 = "0.6.0"
+async-trait = "0.1.91"
+chrono = {version = "0.4", default-features = false, features = ["serde"]}
+jsonwebtoken = {version = "11.0.0", default-features = false, features = ["aws_lc_rs"]}
+parser = {path = "../parser"}
+rand = {version = "0.10.2", features = ["std_rng"]}
+reqwest = {version = "0.13.4", features = ["json", "rustls"], default-features = false}
+serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
+serde_json = {version = "1.0.151", default-features = false, features = ["alloc"]}
+sqlx = {version = "0.9.0", default-features = false, features = [
   "postgres",
   "runtime-tokio",
   "tls-rustls",
   "macros",
   "chrono",
   "rust_decimal",
-] }
-serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
-serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
-tracing = "0.1.44"
-tokio = { version = "1.53.1", default-features = false, features = [
+]}
+tokio = {version = "1.53.1", default-features = false, features = [
   "rt-multi-thread",
   "rt",
   "macros",
@@ -28,14 +34,10 @@ tokio = { version = "1.53.1", default-features = false, features = [
   "net",
   "signal",
   "sync",
-] }
-async-trait = "0.1.91"
-jsonwebtoken = { version = "11.0.0", default-features = false, features = ["aws_lc_rs"] }
-reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
-argon2 = "0.5.3"
-rand = { version = "0.10.2", features = ["std_rng"] }
+]}
+tracing = "0.1.44"
 # 代码经 argon2::password_hash 使用 rand_core 0.6 的 OsRng，
 # 需在 0.6 副本上显式启用 getrandom 特性
-rand_core = { version = "0.6", features = ["getrandom"] }
-uuid = { version = "1.24.0", features = ["v4"] }
 base64 = "0.23.0"
+rand_core = {version = "0.6", features = ["getrandom"]}
+uuid = {version = "1.24.0", features = ["v4"]}

@@ -1,0 +1,11 @@
+﻿cargo : warning: C:\project\assets-platform\apps\backend\src-tauri\Cargo.toml: version requirement `1.1.5+sp
+ec-1.1.0` for dependency `toml` includes semver metadata which will be ignored, removing the metadata is rec
+ommended to avoid confusion
+所在位置 行:1 字符: 57
++ ... src-tauri'; cargo build -p parser --features render --example spike_p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: C:\pro...avoid confusion:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Blocking waiting for file lock on build directory
+   Compiling pdf_oxide v0.3.78

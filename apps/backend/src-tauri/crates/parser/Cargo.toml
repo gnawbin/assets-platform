@@ -1,0 +1,37 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.229", default-features = false, features = [
+  "derive",
+  "alloc",
+] }
+serde_json = { version = "1.0.151", default-features = false, features = [
+  "alloc",
+] }
+tokio = { version = "1.53.2", default-features = false, features = ["rt"] }
+tracing = "0.1.44"
+# PDF：文本提取 / 页数 / 图片（与根包 tests/pdf_tests.rs 同一版本，已验证）
+pdf_oxide = "0.3.78"
+# Office：docx / xlsx / doc / xls，零 C 依赖（pdf_oxide 已间接引入，无新增编译成本）
+office_oxide = "0.1.15"
+
+# OCR 引擎需要构造 `image::DynamicImage` 喂给 `OcrEngine::ocr_image`。
+# pdf_oxide 本身已强依赖 image 0.25（非 optional），这里按需显式引入不增加下载量。
+image = { version = "0.25", optional = true, default-features = false, features = [
+  "png",
+] }
+
+[features]
+default = []
+# Phase 0 spike ②：PDF 页面 → 位图（tiny-skia + 系统字体，纯 Rust，无外部二进制）
+render = ["pdf_oxide/rendering"]
+# Phase 0 spike ②：内置 PP-OCR（tract-onnx 纯 Rust 推理，免随包分发 onnxruntime.dll）
+# 对照方案是 pdf_oxide/ocr（ONNX Runtime，需 load-dynamic 指定 onnxruntime 动态库）
+ocr = ["pdf_oxide/ocr-tract", "dep:image"]
+
+[dev-dependencies]
+# 仅在测试里内存构造最小 .docx 夹具，不参与生产构建
+zip = { version = "2.4.2", default-features = false }

@@ -1,29 +1,54 @@
-//! Python doc-parser 侧车客户端
+//! 文档解析客户端：`local`（进程内 Rust）/ `remote`（Python 侧车）双后端
 //!
-//! 调用 doc-parser 服务将非文本文件（PDF/Word/图片/音频/视频）解析为纯文本 + 图片路径。
-//! 服务地址由环境变量 `DOC_PARSER_URL` 控制（默认 `http://127.0.0.1:8321`），
-//! 认证令牌 `DOC_PARSER_TOKEN` 由 Tauri 启动时注入。
+//! 由环境变量 `DOC_PARSER_BACKEND` 单一开关控制（`local` | `remote`，缺省 `remote`）：
+//! - `local`：调用 `crates/parser`，解析在 Tauri 进程内完成，**不拉起 Python**；
+//! - `remote`：HTTP 调用 doc-parser 侧车（`DOC_PARSER_URL`，令牌 `DOC_PARSER_TOKEN`）。
 //!
-//! 相关文档：docs/知识库模块/智能问答多模态（文件与视频上传）设计方案.md
+//! 两条路径返回同一个 [`ParseResult`]（定义在 `crates/parser`），调用方无需感知差异。
+//! 远端模式由 [`start_doc_parser`] 自动拉起侧车进程；本地模式该函数直接早退。
+//!
+//! 相关文档：
+//! - docs/Rust原生多模态解析后端设计方案.md
+//! - docs/知识库模块/智能问答多模态（文件与视频上传）设计方案.md
 
-use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
-/// 解析结果（与 doc-parser 的 ParseResult 对齐）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParseResult {
-    /// 原文件名
-    pub file_name: String,
-    /// 文件类型: pdf / document / image / audio / video
-    pub file_type: String,
-    /// 提取或生成的纯文本内容
-    pub raw_text: String,
-    /// 需要 VLM 语义描述的本地图片路径（图片原图 / 视频抽帧）
-    #[serde(default)]
-    pub images: Vec<String>,
-    /// 可选元数据
-    #[serde(default)]
-    pub metadata: Option<serde_json::Value>,
+/// 解析结果（与 doc-parser 的 ParseResult 对齐，定义在 `crates/parser`）
+pub use parser::ParseResult;
+
+/// 解析后端
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// 进程内 Rust 解析（`crates/parser`）
+    Local,
+    /// Python 侧车 HTTP（`apps/doc-parser`）
+    Remote,
+}
+
+impl Backend {
+    /// 配置值 / 日志用的字符串表示
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Remote => "remote",
+        }
+    }
+}
+
+/// 当前解析后端
+///
+/// 读 `DOC_PARSER_BACKEND`（由 `.env.toml` 的 `[doc_parser] backend` 映射而来）。
+/// **缺省 / 非法值一律回落 `remote`**，保证未配置时行为与改造前完全一致。
+pub fn backend() -> Backend {
+    parse_backend_value(&std::env::var("DOC_PARSER_BACKEND").unwrap_or_default())
+}
+
+/// 解析配置值 → 后端（大小写 / 首尾空白容错，非法值回落 `remote`）
+fn parse_backend_value(raw: &str) -> Backend {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "local" => Backend::Local,
+        _ => Backend::Remote,
+    }
 }
 
 /// Python 侧车 HTTP 客户端
@@ -63,10 +88,57 @@ impl DocParserClient {
 
     /// 解析本地文件 → 纯文本 + 图片路径
     ///
+    /// 按 [`backend`] 分发：
+    /// - `local` → `crates/parser`（进程内）；
+    /// - `remote` → doc-parser 侧车 HTTP。
+    ///
     /// `options` 常见字段：
     /// - `skip_index`: 视频解析后是否跳过向量化入库（聊天场景必须 `true`，仅解析）
     /// - `frame_interval`: 视频抽帧间隔（秒）
     pub async fn parse_file(
+        &self,
+        file_path: &str,
+        options: &serde_json::Value,
+    ) -> Result<ParseResult, String> {
+        match backend() {
+            Backend::Local => self.parse_file_local(file_path, options).await,
+            Backend::Remote => self.parse_file_remote(file_path, options).await,
+        }
+    }
+
+    /// 本地后端：进程内 Rust 解析，不经过 HTTP
+    ///
+    /// Phase 1 覆盖 `pdf` / `doc` / `docx` / `xls` / `xlsx`；图片 / 音频 / 视频尚未实现，
+    /// 此时返回可操作的错误提示（而不是静默走远端，避免 `local` 模式下误连不存在的侧车）。
+    async fn parse_file_local(
+        &self,
+        file_path: &str,
+        options: &serde_json::Value,
+    ) -> Result<ParseResult, String> {
+        let path = std::path::Path::new(file_path);
+        let ext = parser::text::ext_of(path);
+        if !parser::is_locally_supported_ext(&ext) {
+            return Err(format!(
+                "本地解析后端尚未支持 .{}（{}），请将 DOC_PARSER_BACKEND 设为 remote",
+                ext,
+                parser::detect_file_type(&ext).unwrap_or("unknown")
+            ));
+        }
+
+        let parse_options = parser::ParseOptions::from_json(options);
+        let result = parser::parse_file(path, parse_options).await?;
+        info!(
+            "[local] 解析成功: file={}, type={}, text_len={}, images={}",
+            result.file_name,
+            result.file_type,
+            result.raw_text.len(),
+            result.images.len()
+        );
+        Ok(result)
+    }
+
+    /// 远端后端：HTTP 调 doc-parser 侧车
+    async fn parse_file_remote(
         &self,
         file_path: &str,
         options: &serde_json::Value,
@@ -131,8 +203,18 @@ impl DocParserClient {
 /// - 生成随机 `DOC_PARSER_TOKEN`（UUID v4）注入自身进程与子进程，
 ///   保证 `DocParserClient` 与 doc-parser 使用同一认证令牌；
 /// - 将 Python 所在目录注入子进程 `PATH`，确保 `ffmpeg` / `ffprobe` 可用；
-/// - 日志输出到 `/tmp/doc-parser.log`。
+/// - 日志输出到 `/tmp/doc-parser.log`；
+/// - **仅 `DOC_PARSER_BACKEND=remote` 时启动**；`local` 直接返回 `None`（不拉起 Python）。
 pub fn start_doc_parser() -> Option<std::process::Child> {
+    // 0. 本地后端无需 Python 侧车
+    if backend() != Backend::Remote {
+        tracing::info!(
+            "[doc-parser] 当前 DOC_PARSER_BACKEND={}，跳过 Python 侧车启动",
+            backend().as_str()
+        );
+        return None;
+    }
+
     // 1. 是否启用
     if std::env::var("DOC_PARSER_ENABLED")
         .map(|v| v == "false" || v == "0")
@@ -253,3 +335,23 @@ pub fn start_doc_parser() -> Option<std::process::Child> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_backend_value_defaults_to_remote() {
+        assert_eq!(parse_backend_value(""), Backend::Remote, "❌ 未配置时必须保持改造前行为");
+        assert_eq!(parse_backend_value(" LOCAL "), Backend::Local, "❌ 应容忍大小写与空白");
+        assert_eq!(parse_backend_value("remote"), Backend::Remote);
+        assert_eq!(parse_backend_value("typo"), Backend::Remote, "❌ 非法值应回落 remote");
+    }
+
+    #[test]
+    fn test_backend_as_str() {
+        assert_eq!(Backend::Local.as_str(), "local");
+        assert_eq!(Backend::Remote.as_str(), "remote");
+    }
+}
+
