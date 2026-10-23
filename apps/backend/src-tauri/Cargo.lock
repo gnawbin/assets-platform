@@ -2732,6 +2732,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ffmpeg-sidecar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "187df1a888981457401efeb1b36596aa97f34d0bbb6ab24d70a2226803b3fd52"
+dependencies = [
+ "anyhow",
+ "tar",
+ "ureq",
+ "xz2",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "field-offset"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6619,6 +6632,7 @@ dependencies = [
 name = "parser"
 version = "0.1.0"
 dependencies = [
+ "ffmpeg-sidecar",
  "image",
  "office_oxide",
  "pdf_oxide",
