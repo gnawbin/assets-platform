@@ -308,7 +308,7 @@ token = "<与 doc-parser 的 DOC_PARSER_TOKEN 完全一致>"   # ✅ 当前生�
 
 ### 6.2 配置写法（两种等效）
 
-`DocParserClient` 只读**环境变量**（`crates/assets-service/src/doc_parser.rs:44-46`），而 `load_env()` 会把 `.env.toml` 的每个 `[section] key` 映射为 `SECTION_KEY` 环境变量（`apps/backend/src-tauri/src/lib.rs:54-65`），且在 `start_doc_parser()` 之前执行（`:92 → :96`）。因此下面两种写法**完全等效**，任选其一：
+`DocParserClient` 只读**环境变量**（`crates/service/src/doc_parser.rs:44-46`），而 `load_env()` 会把 `.env.toml` 的每个 `[section] key` 映射为 `SECTION_KEY` 环境变量（`apps/backend/src-tauri/src/lib.rs:54-65`），且在 `start_doc_parser()` 之前执行（`:92 → :96`）。因此下面两种写法**完全等效**，任选其一：
 
 **写法 A：写在 `.env.toml`（推荐，随仓库外配置文件统一管理）**
 

@@ -9,7 +9,7 @@
  * 或运行时调用 setAdapter('http')
  *
  * 映射表覆盖后端 lib.rs invoke_handler 中注册的全部 Tauri 命令：
- * - 后端 HTTP API（crates/assets-api）已实现的路由 → 写入 COMMAND_ROUTE_MAP
+ * - 后端 HTTP API（crates/api）已实现的路由 → 写入 COMMAND_ROUTE_MAP
  * - 后端尚未提供 HTTP 端点（LLM 厂商/知识资产 OKF/对话/编号规则/RAG 等）
  *   → 登记在 TAURI_ONLY_COMMANDS，HTTP 模式下会抛出明确错误
  *
@@ -190,7 +190,7 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
 // ======================== 仅 Tauri 模式支持的命令 ========================
 
 /**
- * 后端 HTTP API（crates/assets-api）尚未提供 HTTP 端点的命令。
+ * 后端 HTTP API（crates/api）尚未提供 HTTP 端点的命令。
  *
  * 这些命令仅能通过 Tauri invoke() 调用。若在 HTTP 适配器下被调用，
  * httpCall() 会抛出明确错误，避免使用不存在的虚拟路由导致 404 混淆。

@@ -1,5 +1,5 @@
-use assets_engine::skill_context::{SkillContext, SkillResult};
-use assets_engine::skill_registry::{SkillMeta, SkillRegistry};
+use engine::skill_context::{SkillContext, SkillResult};
+use engine::skill_registry::{SkillMeta, SkillRegistry};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::State;

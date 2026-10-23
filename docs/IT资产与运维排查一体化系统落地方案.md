@@ -105,7 +105,7 @@ apps/backend/src-tauri/crates/assets-ops/
 
 配套接线：
 
-- `assets-api/src/ops_routes.rs`（Axum HTTP REST）+ Tauri `src/commands/ops_commands.rs`（桌面 IPC），**共享同一 service 层逻辑，防止命令层绕过校验**。
+- `api/src/ops_routes.rs`（Axum HTTP REST）+ Tauri `src/commands/ops_commands.rs`（桌面 IPC），**共享同一 service 层逻辑，防止命令层绕过校验**。
 - 前端 `apps/web/src/app/ops/*`、`src/services/opsService.ts`；`packages/shared` 增加 ops 共享类型。
 
 ### 3.2 关键设计决策
@@ -175,7 +175,7 @@ apps/backend/src-tauri/crates/assets-ops/
 3. **K8s 严禁连接节点 docker.sock 采集**：一律经 kube-rs 走 APIServer。
 4. **接口安全**：所有运维/日志/启停接口挂 JWT + 独立权限点；Tauri 命令层与 Axum 层共享同一 service 做同样校验，防命令层绕过。
 5. **审计不可删除**：`ops_audit_log` 从代码与数据库双侧保证只 INSERT 不可 UPDATE/DELETE；高危操作留存不可删。
-6. **配置与密钥**：连接串/kubeconfig/Token 复用 `assets-utils` AES-GCM 加密落库，界面不明文回显。
+6. **配置与密钥**：连接串/kubeconfig/Token 复用 `utils` AES-GCM 加密落库，界面不明文回显。
 7. **可观测**：沿用 OpenTelemetry，高危操作单独打 trace + 审计日志。
 
 ---
@@ -183,7 +183,7 @@ apps/backend/src-tauri/crates/assets-ops/
 
 ## 7. 数据库变更清单（新增迁移 SQL）
 
-新增 `apps/backend/src-tauri/crates/assets-database/src/sql/ops_module_migration.sql`（风格对齐既有 `knowledge_module_migration.sql`；public / 租户 schema 归属按现有租户隔离规范执行）。
+新增 `apps/backend/src-tauri/crates/database/src/sql/ops_module_migration.sql`（风格对齐既有 `knowledge_module_migration.sql`；public / 租户 schema 归属按现有租户隔离规范执行）。
 
 | 变更对象 | 内容 | 所在 |
 |---|---|---|

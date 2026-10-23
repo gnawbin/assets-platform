@@ -169,7 +169,7 @@ pub async fn insert_hardware_asset(
     Json(input): Json<HardwareAssetInput>,
 ) -> Result<Json<ApiResponse<HardwareAssetView>>, ApiError> {
     // 将 ctx.user_id 传入 service
-    match service::assets_service::insert_hardware_asset(input, ctx.user_id).await {
+    match service::service::insert_hardware_asset(input, ctx.user_id).await {
         // ...
     }
 }

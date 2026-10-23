@@ -36,13 +36,13 @@ tauri-plugin-shell = "2.4.1"
 tauri-plugin-updater = "2.13.2"
 
 # 内部业务 crate（crates/*）
-assets-api = {path = "crates/assets-api"}
-assets-database = {path = "crates/assets-database"}
-assets-engine = {path = "crates/assets-engine"}
-assets-service = {path = "crates/assets-service"}
-assets-storage = {path = "crates/assets-storage"}
-assets-utils = {path = "crates/assets-utils"}
-assets-workflow = {path = "crates/assets-workflow"}
+api = {path = "crates/api"}
+database = {path = "crates/database"}
+engine = {path = "crates/engine"}
+service = {path = "crates/service"}
+storage = {path = "crates/storage"}
+utils = {path = "crates/utils"}
+workflow = {path = "crates/workflow"}
 
 # 序列化
 chrono = {version = "0.4.45", default-features = false, features = ["serde"] }
@@ -83,6 +83,9 @@ tokio = {version = "1.53.2", default-features = false, features = [
 toml = "1.1.5+spec-1.1.0"
 
 # Windows 平台兼容
+adk-graph = "2.3.0"
+adk-rust = {version = "2.3.0", features = ["graph"] }
+llama-cpp-v3 = "0.1"
 winapi = {version = "0.3", features = [
   "memoryapi",
   "debugapi",
@@ -90,15 +93,12 @@ winapi = {version = "0.3", features = [
   "processthreadsapi",
   "errhandlingapi",
 ] }
-adk-rust = { version = "2.2.0", features = ["graph"] }
-adk-graph = "2.2.0"
-llama-cpp-v3 = "0.1"
 
 [dev-dependencies]
 # 集成测试专用（tests/ 目录）
-image = "0.25"
-pdf_oxide = "0.3.77"
-surrealdb = "3.2.4"
+image = "0.25.10"
+pdf_oxide = "0.3.78"
+surrealdb = "3.3.4"
 
 # Release模式优化配置
 [profile.release]
