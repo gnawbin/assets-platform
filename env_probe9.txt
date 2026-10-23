@@ -1,4 +1,0 @@
-﻿huggingface.co : False
-github.com : True
-crates.io : True
-static.crates.io : True
