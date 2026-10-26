@@ -1,8 +1,12 @@
 # AI 工作流编排器设计方案
 
-> 可视化拖拽构建 AI 推理链条：TinyFlow UI → JSON → langgraph 执行
+> 可视化拖拽构建 AI 推理链条：bpmn-js（标准 BPMN 2.0）→ IR JSON → langgraph 执行
+> 迁移说明见 [BPMN 工作流编辑器迁移方案](./BPMN工作流编辑器迁移方案.md)
 > 支撑数据表：workflow、workflow_execution
 > 关联模块：skill_registry、LLMRouter、Python Sidecar
+>
+> 注：下文部分早期章节仍保留 TinyFlow / react-flow 字样，仅作为设计演进记录；
+> 当前实现以第 8 章和迁移方案为准。
 
 ---
 
@@ -760,35 +764,68 @@ impl WorkflowService {
 
 ```
 apps/web/src/
-  ├─ app/workflow/
+  ├─ app/knowledge/workflow/
   │    ├─ page.tsx               ← 工作流列表页
-  │    └─ [id]/
-  │         ├─ edit/page.tsx     ← TinyFlow 编辑器
-  │         └─ runs/page.tsx     ← 执行历史
+  │    ├─ editor/page.tsx        ← BPMN 编辑器（静态路由 + ?id=xxx）
+  │    ├─ new/page.tsx           ← 新建流程
+  │    └─ runs/page.tsx          ← 执行历史
   ├─ components/workflow/
-  │    ├─ WorkflowEditor.tsx        ← TinyFlow 编辑器封装
-  │    ├─ SkillNodePanel.tsx        ← 左侧 Skill 节点面板
-  │    ├─ NodeConfigPanel.tsx       ← 右侧节点配置面板
-  │    ├── WorkflowVariableTable.tsx ← 变量映射表
-  │    └─ ExecutionTimeline.tsx     ← 执行时间线
-  └─ services/workflowService.ts    ← Tauri invoke 封装
+  │    ├─ WorkflowEditor.tsx     ← 编辑器外壳：加载/保存/执行/导入导出
+  │    ├─ NodePalettePanel.tsx   ← 左侧业务模板 + Skill 库
+  │    ├─ NodeConfigPanel.tsx    ← 右侧标准属性 + 执行参数
+  │    ├─ bpmn/
+  │    │    ├─ BpmnCanvas.tsx    ← bpmn-js 画布（dynamic ssr:false）
+  │    │    ├─ bpmn.css          ← 画布与语义着色
+  │    │    ├─ EngineFieldsPanel.tsx
+  │    │    ├─ types.ts
+  │    │    ├─ mapping/          ← nodeKinds / bpmnToDefinition / definitionToBpmn / helpers
+  │    │    ├─ modeler/          ← createModeler / modelerApi / 调色板 / 着色模块
+  │    │    ├─ moddle/           ← assets:EngineConfig 扩展描述
+  │    │    └─ template/         ← 空白 BPMN 文档
+  │    └─ ExecutionTimeline.tsx  ← 执行时间线
+  └─ services/workflowService.ts ← Tauri invoke 封装（IR + bpmn_xml 双写）
 ```
 
-### 8.2 Skill 节点动态加载
+### 8.2 BPMN 2.0 编辑器与执行 IR 的关系
 
-从 `skill_registry` 加载可用 Skill 列表，自动注册为 TinyFlow 节点类型：
+编辑器只编辑**标准 BPMN 2.0**，后端执行仍使用 `WorkflowDefinition.nodes/edges`：
+
+| IR 节点 | 标准 BPMN 元素 | 关键属性 |
+|---------|----------------|----------|
+| `trigger` | `bpmn:StartEvent` | `timer` / `message` 事件定义映射 `scheduled` / `webhook` |
+| `skill` | `bpmn:ServiceTask` | `implementation="##Skill"` |
+| `llm` | `bpmn:ServiceTask` | `implementation="##LLM"` |
+| `condition` | `bpmn:ExclusiveGateway` | 出线 `name="yes"/"no"` + `conditionExpression`，no 为 default flow |
+| `code` | `bpmn:ScriptTask` | `scriptFormat` + `script` |
+| `workflow` | `bpmn:CallActivity` | `calledElement` |
+| `output` | `bpmn:EndEvent` | 只保留在 XML 中，不投影为 IR |
+
+执行参数放在 BPMN 标准扩展容器中，不引入私有节点类型：
+
+```xml
+<bpmn:serviceTask id="Task_1" name="文档解析" implementation="##Skill">
+  <bpmn:extensionElements>
+    <assets:engineConfig xmlns:assets="https://assets-platform.local/schema/bpmn/assets"
+                         kind="skill" skillId="doc-parse" skillName="文档解析" />
+  </bpmn:extensionElements>
+</bpmn:serviceTask>
+```
+
+保存时 `save_workflow` 同时接收 `definition`（IR）与 `bpmnXml`；加载时优先
+`definition.bpmn_xml`，旧数据没有 XML 时由 `definitionToBpmn` 自动转换。导出的
+`.bpmn` 可以直接在 bpmn.io / Camunda Modeler 中打开。
+
+### 8.3 Skill 库动态加载
+
+左侧 `NodePalettePanel` 从 `list_skills` 读取可用 Skill，拖拽到画布时写入
+`application/assets-node` 负载，画布据此创建标准 `bpmn:ServiceTask` 并预填
+`assets:engineConfig`：
 
 ```typescript
-// workflowService.ts
-async function getSkillNodes(): Promise<SkillNodeType[]> {
-  const skills = await invoke("list_skills");
-  return skills.map(skill => ({
-    type: `skill:${skill.id}`,
-    label: skill.name,
-    icon: skill.icon,
-    description: skill.description,
-    configSchema: skill.configSchema,   // 动态配置表单
-  }));
+interface AssetsDragPayload {
+  presetId: 'skill';
+  name: string;
+  engine: { kind: 'skill'; skillId: string; skillName: string };
 }
 ```
 

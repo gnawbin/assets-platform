@@ -16,6 +16,7 @@ export type WorkflowNodeType =
     | 'llm'
     | 'condition'
     | 'code'
+    | 'workflow'
     | 'output';
 
 /** 触发节点配置 */
@@ -95,6 +96,13 @@ export interface WorkflowDefinition {
     edges: WorkflowEdge[];
     variables?: WorkflowVariable;
     config?: WorkflowConfig;
+    /**
+     * 标准 BPMN 2.0 XML（bpmn-js 导出）。
+     *
+     * nodes/edges 仍是后端执行 IR；bpmn_xml 是编辑器与外部 BPMN 工具之间的
+     * 无损交换格式。加载时优先使用 bpmn_xml。
+     */
+    bpmn_xml?: string;
 }
 
 /** 工作流列表项（元数据） */
@@ -295,13 +303,24 @@ export async function saveWorkflow(params: {
     description?: string;
     definition: WorkflowDefinition;
     status?: 'draft' | 'published';
+    /** 标准 BPMN 2.0 XML（与 definition.bpmn_xml 相同，便于后端单独存储） */
+    bpmnXml?: string;
+    /** 工作流列表展示用的节点类型摘要 */
+    node_types?: string[];
 }): Promise<{ id: string; version: string }> {
     try {
         return await api.post<{ id: string; version: string }>('save_workflow', params);
     } catch {
         console.warn('[workflowService] 后端 save_workflow 未实现，返回 mock');
+        const savedId = params.id ?? String(Date.now());
+        // 让 mock 模式下的“保存 → 跳转 → 重新加载”闭环可用
+        MOCK_DEFINITIONS[savedId] = {
+            ...params.definition,
+            name: params.name,
+            description: params.description ?? params.definition.description,
+        };
         return {
-            id: params.id ?? String(Date.now()),
+            id: savedId,
             version: '1.0.0',
         };
     }
@@ -322,8 +341,13 @@ export async function deleteWorkflow(id: string): Promise<void> {
  * 执行工作流
  */
 export async function executeWorkflow(params: {
-    workflowId: string;
+    /** 已保存工作流 ID；新建流程可先保存再执行 */
+    workflowId?: string;
+    /** 直接传入定义（新版后端可按 IR + BPMN XML 执行） */
+    definition?: WorkflowDefinition;
     inputData?: Record<string, unknown>;
+    /** 执行记录标题，默认取 definition.name */
+    title?: string;
 }): Promise<{ executionId: string; status: string }> {
     try {
         return await api.post<{ executionId: string; status: string }>('execute_workflow', params);

@@ -60,7 +60,8 @@
         "@tiptap/pm": "^3.26.0",
         "@tiptap/react": "^3.26.0",
         "@tiptap/starter-kit": "^3.11.0",
-        "@xyflow/react": "^12.11.2",
+        "bpmn-js": "18.31.1",
+        "bpmn-moddle": "10.3.1",
         "cytoscape": "^3.34.0",
         "dayjs": "^1.11.21",
         "embla-carousel": "^8.6.0",
@@ -116,7 +117,6 @@
         "stylelint": "^17.13.0",
         "stylelint-config-standard-scss": "^17.0.0",
         "terser": "^5.43.1",
-        "ts-jest": "^29.4.4",
         "typescript": "7.0.2",
         "typescript-eslint": "^8.46.0"
     }
