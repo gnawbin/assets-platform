@@ -31,6 +31,26 @@ export const NODE_PRESETS: NodePreset[] = [
         paletteIcon: 'bpmn-icon-start-event-none',
     },
     {
+        id: 'agent',
+        label: 'AI Agent',
+        description: '标准 ServiceTask，implementation="##Agent"（adk-graph 工具循环）',
+        bpmnType: 'bpmn:ServiceTask',
+        kind: 'agent',
+        icon: '🤖',
+        color: '#6741d9',
+        paletteIcon: 'bpmn-icon-service-task',
+    },
+    {
+        id: 'approval',
+        label: '人工审批',
+        description: '标准 UserTask，引擎挂起等待审批后继续',
+        bpmnType: 'bpmn:UserTask',
+        kind: 'approval',
+        icon: '✋',
+        color: '#f08c00',
+        paletteIcon: 'bpmn-icon-user-task',
+    },
+    {
         id: 'skill',
         label: 'Skill 任务',
         description: '标准 ServiceTask，implementation="##Skill"',
@@ -100,6 +120,7 @@ export function getPreset(presetId: string): NodePreset | undefined {
 export const EXECUTABLE_BPMN_TYPES = [
     'bpmn:StartEvent',
     'bpmn:ServiceTask',
+    'bpmn:UserTask',
     'bpmn:ScriptTask',
     'bpmn:ExclusiveGateway',
     'bpmn:CallActivity',
@@ -162,6 +183,8 @@ export function classifyBpmnElement(
             return 'trigger';
         case 'bpmn:EndEvent':
             return 'output';
+        case 'bpmn:UserTask':
+            return 'approval';
         case 'bpmn:ScriptTask':
             return 'code';
         case 'bpmn:ExclusiveGateway':
@@ -169,7 +192,10 @@ export function classifyBpmnElement(
         case 'bpmn:CallActivity':
             return 'workflow';
         case 'bpmn:ServiceTask':
-            if (engineKind === 'skill' || engineKind === 'llm') return engineKind;
+            if (engineKind === 'skill' || engineKind === 'llm' || engineKind === 'agent') {
+                return engineKind;
+            }
+            if (implementation?.toUpperCase().includes('AGENT')) return 'agent';
             if (implementation?.toUpperCase().includes('LLM')) return 'llm';
             return 'skill';
         default:
@@ -179,6 +205,8 @@ export function classifyBpmnElement(
 
 export const KIND_LABELS: Record<ElementKind, string> = {
     trigger: '开始事件',
+    agent: 'AI Agent',
+    approval: '人工审批',
     skill: 'Skill 任务',
     llm: 'LLM 任务',
     condition: '条件分支',
@@ -195,6 +223,10 @@ export function defaultEngineForPreset(preset: NodePreset): Partial<EngineFields
             return { triggerType: 'manual' };
         case 'condition':
             return { operator: '>', yesLabel: 'yes', noLabel: 'no' };
+        case 'agent':
+            return { kind: 'agent', maxIterations: 6, interruptPolicy: 'never' };
+        case 'approval':
+            return { kind: 'approval', approvalVariable: 'approved', approvalTitle: '请审批' };
         default:
             return {};
     }

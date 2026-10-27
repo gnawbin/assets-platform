@@ -153,6 +153,10 @@ pub fn run() {
             });
             app.manage(llm_router.clone());
 
+            // 初始化工作流运行时管理器（每租户引擎、持久化与 Agent checkpointer）
+            let _workflow_manager = workflow::WorkflowManager::init(llm_router.clone());
+            tracing::info!("工作流运行时管理器已初始化");
+
             // 在后台启动 HTTP API 服务（与 Tauri 共用 Tokio 运行时）
             let llm_router_clone = llm_router.clone();
             match database::get_pool() {
@@ -321,6 +325,17 @@ pub fn run() {
             commands::upload_commands::upload_get_progress,
             commands::upload_commands::upload_commit,
             commands::upload_commands::upload_get_version_history,
+            // AI 工作流（bpmninja 引擎）
+            commands::workflow_commands::list_workflows,
+            commands::workflow_commands::get_workflow,
+            commands::workflow_commands::save_workflow,
+            commands::workflow_commands::delete_workflow,
+            commands::workflow_commands::execute_workflow,
+            commands::workflow_commands::list_executions,
+            commands::workflow_commands::get_execution,
+            commands::workflow_commands::cancel_execution,
+            commands::workflow_commands::list_pending_tasks,
+            commands::workflow_commands::complete_user_task,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

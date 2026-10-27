@@ -4,9 +4,11 @@ import {
     engineToNodeConfig,
     formatConditionExpression,
     formatLiteral,
+    isExecutableKind,
     orderNodesForExecution,
     parseConditionExpression,
     parseLiteral,
+    readUserTaskAssignee,
     validateDefinition,
 } from '@/components/workflow/bpmn/mapping/helpers';
 import type { WorkflowDefinition } from '@/services/workflowService';
@@ -349,6 +351,125 @@ describe('BPMN 元素投影为 IR 节点', () => {
             language: 'javascript',
             code: 'input.amount * 2',
         });
+    });
+});
+
+
+describe('AI Agent 与人工审批节点', () => {
+    it('Agent 配置映射为 snake_case IR config', () => {
+        expect(
+            engineToNodeConfig('agent', {
+                prompt: '根据合同回答问题',
+                tools: 'knowledge_search, current_time',
+                maxIterations: 4,
+                interruptPolicy: 'before_tool',
+                model: 'qwen2.5',
+                temperature: 0.2,
+            })
+        ).toMatchObject({
+            kind: 'agent',
+            prompt: '根据合同回答问题',
+            tools: 'knowledge_search, current_time',
+            max_iterations: 4,
+            interrupt_policy: 'before_tool',
+            model: 'qwen2.5',
+            temperature: 0.2,
+        });
+    });
+
+    it('Agent 节点投影为 agent IR 节点', () => {
+        const node = engineToIrNode({
+            id: 'Task_agent',
+            kind: 'agent',
+            label: '合同问答',
+            position: { x: 250, y: 150 },
+            engine: { prompt: '回答问题', interruptPolicy: 'never' },
+        });
+
+        expect(node.type).toBe('agent');
+        expect(node.config).toMatchObject({ prompt: '回答问题', interrupt_policy: 'never' });
+    });
+
+    it('审批配置映射为 UserTask 变量', () => {
+        expect(
+            engineToNodeConfig('approval', {
+                assignee: 'legal-team',
+                approvalTitle: '合同要素确认',
+                approvalDescription: '请核对提取结果',
+                approvalVariable: 'approved',
+            })
+        ).toEqual({
+            kind: 'approval',
+            assignee: 'legal-team',
+            title: '合同要素确认',
+            description: '请核对提取结果',
+            variable: 'approved',
+        });
+    });
+
+    it('审批节点投影为 approval IR 节点（未设置审批人时为空串）', () => {
+        const node = engineToIrNode({
+            id: 'UserTask_1',
+            kind: 'approval',
+            label: '人工复核',
+            position: { x: 250, y: 250 },
+            engine: { approvalTitle: '请审批' },
+        });
+
+        expect(node.type).toBe('approval');
+        expect(node.config).toMatchObject({ assignee: '', title: '请审批' });
+    });
+
+    it('清理版校验：Agent 缺 Prompt 报错，审批缺审批人仅告警', () => {
+        const definition = baseDefinition({
+            nodes: [
+                { id: 'start', type: 'trigger', label: '开始', position: { x: 0, y: 0 } },
+                { id: 'agent', type: 'agent', label: '智能体', position: { x: 0, y: 100 }, config: {} },
+                {
+                    id: 'approval',
+                    type: 'approval',
+                    label: '审批',
+                    position: { x: 0, y: 200 },
+                    config: { kind: 'approval', assignee: '' },
+                },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'agent' },
+                { id: 'e2', source: 'agent', target: 'approval' },
+            ],
+        });
+
+        const issues = validateDefinition(definition);
+        expect(
+            issues.some(
+                (issue) =>
+                    issue.level === 'error' &&
+                    issue.elementId === 'agent' &&
+                    issue.message.includes('Prompt')
+            )
+        ).toBe(true);
+        expect(
+            issues.some(
+                (issue) =>
+                    issue.level === 'warning' &&
+                    issue.elementId === 'approval' &&
+                    issue.message.includes('审批人')
+            )
+        ).toBe(true);
+    });
+
+    it('agent / approval 属于可执行子集', () => {
+        expect(isExecutableKind('agent')).toBe(true);
+        expect(isExecutableKind('approval')).toBe(true);
+        expect(isExecutableKind('other')).toBe(false);
+    });
+
+    it('读取 UserTask 审批人：data-assignee / camunda:assignee 回退', () => {
+        expect(readUserTaskAssignee({ $attrs: { 'data-assignee': 'legal-team' } })).toBe('legal-team');
+        expect(readUserTaskAssignee({ $attrs: { 'camunda:assignee': 'admin' } })).toBe('admin');
+        expect(readUserTaskAssignee({ assignee: 'direct' })).toBe('direct');
+        expect(readUserTaskAssignee({ $attrs: {} })).toBe('');
+        expect(readUserTaskAssignee(undefined)).toBe('');
     });
 });
 

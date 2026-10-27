@@ -4,11 +4,15 @@ name = "workflow"
 version = "0.1.0"
 
 [dependencies]
+adk-graph = "2.3.0"
 async-trait = "0.1.91"
+bpmn-parser = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
 chrono = {version = "0.4", default-features = false, features = ["serde"]}
 database = {path = "../database"}
+engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
 serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
 serde_json = {version = "1.0.151", default-features = false, features = ["alloc"]}
+service = {path = "../service"}
 sqlx = {version = "0.9.0", default-features = false, features = [
   "postgres",
   "runtime-tokio",
@@ -16,6 +20,8 @@ sqlx = {version = "0.9.0", default-features = false, features = [
   "macros",
   "chrono",
   "rust_decimal",
+  "uuid",
+  "json",
 ]}
 tokio = {version = "1.54.1", default-features = false, features = [
   "rt-multi-thread",
@@ -28,5 +34,4 @@ tokio = {version = "1.54.1", default-features = false, features = [
   "sync",
 ]}
 tracing = "0.1.44"
-wfe-core = {version = "1.10.0", features = ["test-support"]}
-wfe-yaml = "1.10.0"
+uuid = {version = "1.23", features = ["v4", "serde"]}

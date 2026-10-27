@@ -16,6 +16,7 @@ import {
     parseConditionExpression,
     readElementName,
     readEngineFields,
+    readUserTaskAssignee,
     validateDefinition,
 } from './helpers';
 import { classifyBpmnElement, isExecutableBpmnType } from './nodeKinds';
@@ -232,6 +233,12 @@ export async function bpmnToDefinition(modeler: any, meta: BuildMeta): Promise<B
             engine.wfType = engine.wfType || asString(businessObject.calledElement) || undefined;
         }
 
+        // 审批人优先取标准 bpmn:UserTask assignee，其次才是 assets 扩展
+        if (kind === 'approval') {
+            const assignee = readUserTaskAssignee(businessObject);
+            if (assignee && !engine.assignee) engine.assignee = assignee;
+        }
+
         const shape = elementRegistry.get(id);
         const position = shape
             ? { x: Math.round(shape.x), y: Math.round(shape.y) }
@@ -253,7 +260,7 @@ export async function bpmnToDefinition(modeler: any, meta: BuildMeta): Promise<B
             issues.push({
                 level: 'warning',
                 elementId: id,
-                message: `服务任务「${name}」没有 implementation，默认按 Skill 任务处理（建议填写 ##Skill 或 ##LLM）。`,
+                message: `服务任务「${name}」没有 implementation，默认按 Skill 任务处理（建议填写 ##Skill / ##LLM / ##Agent）。`,
             });
         }
     });

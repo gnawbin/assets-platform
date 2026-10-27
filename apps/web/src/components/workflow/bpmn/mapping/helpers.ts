@@ -212,6 +212,8 @@ export function collectNodeTypes(definition: WorkflowDefinition): string[] {
 export function isExecutableKind(kind: ElementKind): boolean {
     return (
         kind === 'trigger' ||
+        kind === 'agent' ||
+        kind === 'approval' ||
         kind === 'skill' ||
         kind === 'llm' ||
         kind === 'condition' ||
@@ -258,6 +260,25 @@ export function engineToNodeConfig(kind: ElementKind, engine: EngineFields): Rec
             return { language: 'python', code: '' };
         case 'workflow':
             return { wf_type: engine.wfType || '' };
+        case 'agent':
+            return {
+                kind: 'agent',
+                prompt: engine.prompt || '',
+                ...(engine.tools ? { tools: engine.tools } : {}),
+                ...(engine.maxIterations !== undefined ? { max_iterations: engine.maxIterations } : {}),
+                ...(engine.interruptPolicy ? { interrupt_policy: engine.interruptPolicy } : {}),
+                ...(engine.model ? { model: engine.model } : {}),
+                ...(engine.temperature !== undefined ? { temperature: engine.temperature } : {}),
+                ...(engine.maxTokens !== undefined ? { max_tokens: engine.maxTokens } : {}),
+            };
+        case 'approval':
+            return {
+                kind: 'approval',
+                assignee: engine.assignee || '',
+                ...(engine.approvalTitle ? { title: engine.approvalTitle } : {}),
+                ...(engine.approvalDescription ? { description: engine.approvalDescription } : {}),
+                ...(engine.approvalVariable ? { variable: engine.approvalVariable } : {}),
+            };
         default:
             return {};
     }
@@ -364,6 +385,38 @@ export function validateDefinition(
             case 'llm':
                 if (!asString(config.prompt)) {
                     issues.push({ level: 'error', elementId: node.id, message: `LLM 节点「${node.label}」未填写 Prompt。` });
+                }
+                break;
+            case 'agent':
+                if (!asString(config.prompt)) {
+                    issues.push({
+                        level: 'error',
+                        elementId: node.id,
+                        message: `AI Agent 节点「${node.label}」未填写 Prompt（系统指令）。`,
+                    });
+                }
+                if (outgoing.length === 0) {
+                    issues.push({
+                        level: 'warning',
+                        elementId: node.id,
+                        message: `AI Agent 节点「${node.label}」没有出线，执行到此不会继续。`,
+                    });
+                }
+                break;
+            case 'approval':
+                if (!asString(config.assignee)) {
+                    issues.push({
+                        level: 'warning',
+                        elementId: node.id,
+                        message: `人工审批「${node.label}」未设置审批人，任务将进入未分配队列。`,
+                    });
+                }
+                if (outgoing.length === 0) {
+                    issues.push({
+                        level: 'warning',
+                        elementId: node.id,
+                        message: `人工审批「${node.label}」没有出线，审批通过后流程不会继续。`,
+                    });
                 }
                 break;
             case 'code':
@@ -483,7 +536,31 @@ export function readEngineFields(businessObject: any): EngineFields {
         prompt: asString(readModdleValue(config, 'prompt')) || undefined,
         outputSchema: asString(readModdleValue(config, 'outputSchema')) || undefined,
         params: asString(readModdleValue(config, 'params')) || undefined,
+        tools: asString(readModdleValue(config, 'tools')) || undefined,
+        maxIterations: asNumber(readModdleValue(config, 'maxIterations')),
+        interruptPolicy: asString(readModdleValue(config, 'interruptPolicy')) || undefined,
+        assignee: asString(readModdleValue(config, 'assignee')) || undefined,
+        approvalTitle: asString(readModdleValue(config, 'approvalTitle')) || undefined,
+        approvalDescription: asString(readModdleValue(config, 'approvalDescription')) || undefined,
+        approvalVariable: asString(readModdleValue(config, 'approvalVariable')) || undefined,
     };
+}
+
+/**
+ * 读取 bpmn:UserTask 的审批人。
+ *
+ * 标准 BPMN 2.0 没有 assignee 属性，bpmn-moddle 会把未知属性放进 `$attrs`：
+ * - `data-assignee`：本平台与 bpmninja bpmn-parser 的约定
+ * - `camunda:assignee`：Camunda Modeler 导出的流程
+ */
+export function readUserTaskAssignee(businessObject: any): string {
+    const attrs = readModdleValue(businessObject, '$attrs') as Record<string, unknown> | undefined;
+    const fromAttrs = attrs
+        ? asString(attrs['data-assignee']) ||
+          asString(attrs['camunda:assignee']) ||
+          asString(attrs['assignee'])
+        : '';
+    return fromAttrs || asString(readModdleValue(businessObject, 'assignee'));
 }
 
 /** 业务对象上的 BPMN documentation 文本 */

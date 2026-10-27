@@ -75,6 +75,25 @@ export function engineFromNode(node: WorkflowNode): Partial<EngineFields> {
             return { kind: 'code' };
         case 'workflow':
             return { kind: 'workflow', wfType: asString(config.wf_type) };
+        case 'agent':
+            return {
+                kind: 'agent',
+                prompt: asString(config.prompt),
+                tools: asString(config.tools) || undefined,
+                maxIterations: asNumber(config.max_iterations),
+                interruptPolicy: asString(config.interrupt_policy) || undefined,
+                model: asString(config.model) || undefined,
+                temperature: asNumber(config.temperature),
+                maxTokens: asNumber(config.max_tokens),
+            };
+        case 'approval':
+            return {
+                kind: 'approval',
+                assignee: asString(config.assignee) || asString(config.approver) || undefined,
+                approvalTitle: asString(config.title) || undefined,
+                approvalDescription: asString(config.description) || undefined,
+                approvalVariable: asString(config.variable) || undefined,
+            };
         default:
             return {};
     }

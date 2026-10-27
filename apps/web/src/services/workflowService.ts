@@ -1,17 +1,19 @@
-/**
+﻿/**
  * 工作流编排 API 服务
  *
- * 封装与后端工作流引擎的通信接口。
- * 目前后端 Rust CRUD 尚未实现，使用前端 mock 数据。
+ * 封装与后端工作流引擎（bpmninja engine-core + adk-graph）的通信接口。
+ * 所有调用直连 Tauri command / HTTP 路由，失败即抛出，由调用方决定提示方式。
  */
 
 import { api } from '@/utils/api';
 
 // ======================== 类型定义 ========================
 
-/** 工作流节点类型枚举 */
+/** 工作流节点类型枚举（与后端 `workflow::types` 的 IR 保持一致） */
 export type WorkflowNodeType =
     | 'trigger'
+    | 'agent'
+    | 'approval'
     | 'skill'
     | 'llm'
     | 'condition'
@@ -56,6 +58,34 @@ export interface ConditionConfig {
 export interface CodeConfig {
     language: 'javascript' | 'python';
     code: string;
+}
+
+/** AI Agent 节点配置（adk-graph StateGraph + 工具循环） */
+export interface AgentConfig {
+    /** 系统提示词，决定 Agent 目标 */
+    prompt: string;
+    /** 可用工具名列表，如 knowledge_search / current_time */
+    tools?: string[];
+    /** 单次执行最大工具调用轮数 */
+    max_iterations?: number;
+    /** before_tool：调用工具前挂起等人工审批；never：直接执行 */
+    interrupt_policy?: 'never' | 'before_tool';
+    /** 覆盖 LLM 路由的模型名 */
+    model?: string;
+    temperature?: number;
+    max_tokens?: number;
+}
+
+/** 人工审批节点配置（BPMN UserTask） */
+export interface ApprovalConfig {
+    /** 审批人标识，对应 UserTask assignee */
+    assignee?: string;
+    /** 审批提示文案 */
+    title?: string;
+    /** 审批说明 */
+    description?: string;
+    /** 审批变量名，默认 approved */
+    variable?: string;
 }
 
 /** 工作流节点 */
@@ -135,8 +165,9 @@ export interface WorkflowExecution {
     id: string;
     workflow_id: string;
     workflow_name?: string;
-    trigger_type: 'manual' | 'scheduled' | 'webhook';
-    status: 'running' | 'success' | 'failed' | 'cancelled';
+    trigger_type: string;
+    /** waiting：引擎挂起中（等待审批 / 定时器 / 服务任务回调） */
+    status: 'running' | 'waiting' | 'success' | 'failed' | 'cancelled';
     input_data?: unknown;
     result_data?: unknown;
     error_message?: string;
@@ -146,156 +177,62 @@ export interface WorkflowExecution {
     total_cost?: number;
     created_at: string;
     finished_at?: string;
+    /** bpmninja 引擎实例 ID */
+    engine_instance_id?: string;
+    /** 部署后的流程定义 key */
+    engine_definition_key?: string;
+    /** 当前停留节点（挂起时即等待中的节点） */
+    current_node_id?: string;
+    /** AI Agent 会话线程，用于恢复上下文 */
+    agent_thread_id?: string;
+    /** 等待中的人工任务 ID（UserTask） */
+    waiting_task_id?: string;
+    /** Agent 中断载荷（待审批的工具调用、提示词等） */
+    interrupt_payload?: unknown;
+    /** 引擎原始状态，如 waiting_user_task / completed_with_error */
+    bpmn_status?: string;
 }
 
-// ======================== Mock 数据 ========================
-
-const MOCK_WORKFLOWS: WorkflowMeta[] = [
-    {
-        id: '1',
-        name: '合同智能分析',
-        description: '上传合同PDF → 提取要素 → 生成摘要 → 推审批',
-        version: '1.0.0',
-        status: 'published',
-        node_types: ['skill:doc-parse', 'llm', 'condition', 'workflow:push-approval'],
-        use_count: 23,
-        last_executed_at: '2026-07-21T14:30:00Z',
-        created_at: '2026-06-15T10:00:00Z',
-        updated_at: '2026-07-20T09:00:00Z',
-    },
-    {
-        id: '2',
-        name: '文档批量翻译',
-        description: '上传文档 → 分段 → 翻译成中/英 → 合并输出',
-        version: '1.0.0',
-        status: 'published',
-        node_types: ['skill:doc-parse', 'skill:translate-en', 'skill:translate-zh'],
-        use_count: 15,
-        last_executed_at: '2026-07-19T16:00:00Z',
-        created_at: '2026-06-20T10:00:00Z',
-        updated_at: '2026-07-18T11:00:00Z',
-    },
-    {
-        id: '3',
-        name: '知识库自动打标签',
-        description: '读取新文档 → 自动生成标签 → 关联知识图谱',
-        version: '0.1.0',
-        status: 'draft',
-        node_types: ['skill:doc-parse', 'skill:auto-tag', 'skill:discover-relations'],
-        use_count: 0,
-        created_at: '2026-07-10T10:00:00Z',
-        updated_at: '2026-07-10T10:00:00Z',
-    },
-];
-
-const MOCK_EXECUTIONS: WorkflowExecution[] = [
-    {
-        id: '101',
-        workflow_id: '1',
-        workflow_name: '合同智能分析',
-        trigger_type: 'manual',
-        status: 'success',
-        input_data: { file_path: '/tmp/upload/contract_001.pdf' },
-        result_data: { final: '分析完成' },
-        node_results: [
-            { node_id: 'node_1', label: '文档解析', status: 'success', duration_ms: 450, output: { text: '合同内容...', pages: 5 } },
-            { node_id: 'node_2', label: '提取合同要素', status: 'success', duration_ms: 3200, output: { party_a: 'XX科技', amount: 150000 } },
-            { node_id: 'node_3', label: '金额判断', status: 'success', duration_ms: 50, output: { decision: 'yes' } },
-        ],
-        total_duration_ms: 3700,
-        total_tokens: 2500,
-        created_at: '2026-07-22T10:00:00Z',
-        finished_at: '2026-07-22T10:01:00Z',
-    },
-    {
-        id: '102',
-        workflow_id: '1',
-        workflow_name: '合同智能分析',
-        trigger_type: 'manual',
-        status: 'failed',
-        error_message: '文档解析超时',
-        input_data: { file_path: '/tmp/upload/large_doc.pdf' },
-        node_results: [
-            { node_id: 'node_1', label: '文档解析', status: 'failed', duration_ms: 30000, error: '解析超时' },
-        ],
-        total_duration_ms: 30000,
-        created_at: '2026-07-21T15:00:00Z',
-        finished_at: '2026-07-21T15:00:30Z',
-    },
-];
-
-const MOCK_DEFINITIONS: Record<string, WorkflowDefinition> = {
-    '1': {
-        name: '合同智能分析',
-        description: '上传合同PDF → 提取要素 → 生成摘要 → 推审批',
-        version: '1.0.0',
-        nodes: [
-            { id: 'node_1', type: 'trigger', label: '文件上传', position: { x: 250, y: 0 }, config: { trigger_type: 'file_upload', accept: '.pdf,.docx' } },
-            { id: 'node_2', type: 'skill', label: '文档解析', position: { x: 250, y: 150 }, config: { skill_id: 'doc-parse' } },
-            { id: 'node_3', type: 'llm', label: '提取合同要素', position: { x: 250, y: 300 }, config: { prompt: '提取甲方、乙方、金额、签署日期', temperature: 0.1 } },
-            { id: 'node_4', type: 'condition', label: '金额判断', position: { x: 250, y: 450 }, config: { field: 'amount', operator: '>', value: 100000 } },
-            { id: 'node_5', type: 'skill', label: '推审批', position: { x: 100, y: 600 }, config: { skill_id: 'asset-sync' } },
-            { id: 'node_6', type: 'output', label: '输出结果', position: { x: 400, y: 600 } },
-        ],
-        edges: [
-            { id: 'edge_1', source: 'node_1', target: 'node_2' },
-            { id: 'edge_2', source: 'node_2', target: 'node_3' },
-            { id: 'edge_3', source: 'node_3', target: 'node_4' },
-            { id: 'edge_4', source: 'node_4', target: 'node_5', label: 'yes' },
-            { id: 'edge_5', source: 'node_4', target: 'node_6', label: 'no' },
-        ],
-    },
-    '2': {
-        name: '文档批量翻译',
-        description: '上传文档 → 分段 → 翻译成中/英 → 合并输出',
-        version: '1.0.0',
-        nodes: [
-            { id: 'node_1', type: 'trigger', label: '上传文档', position: { x: 250, y: 0 } },
-            { id: 'node_2', type: 'skill', label: '文档解析', position: { x: 250, y: 150 }, config: { skill_id: 'doc-parse' } },
-            { id: 'node_3', type: 'skill', label: '翻译成英文', position: { x: 100, y: 300 }, config: { skill_id: 'translate-en' } },
-            { id: 'node_4', type: 'skill', label: '翻译成中文', position: { x: 400, y: 300 }, config: { skill_id: 'translate-zh' } },
-            { id: 'node_5', type: 'output', label: '合并输出', position: { x: 250, y: 450 } },
-        ],
-        edges: [
-            { id: 'edge_1', source: 'node_1', target: 'node_2' },
-            { id: 'edge_2', source: 'node_2', target: 'node_3' },
-            { id: 'edge_3', source: 'node_2', target: 'node_4' },
-            { id: 'edge_4', source: 'node_3', target: 'node_5' },
-            { id: 'edge_5', source: 'node_4', target: 'node_5' },
-        ],
-    },
-};
+/** 待办工作流任务（引擎 UserTask） */
+export interface PendingWorkflowTask {
+    task_id: string;
+    instance_id: string;
+    node_id: string;
+    assignee: string;
+    created_at: string;
+    business_key?: string;
+    execution_id?: string;
+    workflow_id?: string;
+    workflow_name?: string;
+    interrupt_payload?: unknown;
+}
 
 // ======================== 服务方法 ========================
 
 /**
  * 获取工作流列表
  */
-export async function listWorkflows(): Promise<WorkflowMeta[]> {
-    try {
-        // 尝试调用后端 API
-        return await api.get<WorkflowMeta[]>('list_workflows');
-    } catch {
-        // 后端未实现，返回 mock 数据
-        console.warn('[workflowService] 后端 list_workflows 未实现，使用 mock 数据');
-        return MOCK_WORKFLOWS;
-    }
+export async function listWorkflows(params?: {
+    keyword?: string;
+    status?: 'draft' | 'published' | 'archived';
+}): Promise<WorkflowMeta[]> {
+    return api.get<WorkflowMeta[]>('list_workflows', {
+        keyword: params?.keyword,
+        status: params?.status,
+    });
 }
 
 /**
  * 获取单个工作流定义
+ *
+ * 后端会用独立列回的 `bpmn_xml` / `name` / `version` 补全定义，编辑器可直接渲染。
  */
 export async function getWorkflow(id: string): Promise<WorkflowDefinition | null> {
-    try {
-        return await api.get<WorkflowDefinition>('get_workflow', { id });
-    } catch {
-        console.warn('[workflowService] 后端 get_workflow 未实现，使用 mock 数据');
-        return MOCK_DEFINITIONS[id] ?? null;
-    }
+    return api.get<WorkflowDefinition | null>('get_workflow', { id });
 }
 
 /**
- * 保存工作流（创建/更新）
+ * 保存工作流（创建/更新，IR 与 BPMN XML 双写）
  */
 export async function saveWorkflow(params: {
     id?: string;
@@ -308,91 +245,97 @@ export async function saveWorkflow(params: {
     /** 工作流列表展示用的节点类型摘要 */
     node_types?: string[];
 }): Promise<{ id: string; version: string }> {
-    try {
-        return await api.post<{ id: string; version: string }>('save_workflow', params);
-    } catch {
-        console.warn('[workflowService] 后端 save_workflow 未实现，返回 mock');
-        const savedId = params.id ?? String(Date.now());
-        // 让 mock 模式下的“保存 → 跳转 → 重新加载”闭环可用
-        MOCK_DEFINITIONS[savedId] = {
-            ...params.definition,
-            name: params.name,
-            description: params.description ?? params.definition.description,
-        };
-        return {
-            id: savedId,
-            version: '1.0.0',
-        };
-    }
+    const { definition, bpmnXml, ...rest } = params;
+    return api.post<{ id: string; version: string }>('save_workflow', {
+        ...rest,
+        definition,
+        bpmnXml: bpmnXml ?? definition.bpmn_xml,
+    });
 }
 
 /**
  * 删除工作流（软删除）
  */
 export async function deleteWorkflow(id: string): Promise<void> {
-    try {
-        await api.post('delete_workflow', { id });
-    } catch {
-        console.warn('[workflowService] 后端 delete_workflow 未实现');
-    }
+    await api.post<void>('delete_workflow', { id });
 }
 
 /**
  * 执行工作流
+ *
+ * 后端会编译 BPMN → 部署定义 → 启动引擎实例；返回的 `executionId` 可直接轮询。
  */
 export async function executeWorkflow(params: {
     /** 已保存工作流 ID；新建流程可先保存再执行 */
     workflowId?: string;
-    /** 直接传入定义（新版后端可按 IR + BPMN XML 执行） */
+    /** 直接传入定义（未保存草稿可直接按 IR + BPMN XML 执行） */
     definition?: WorkflowDefinition;
     inputData?: Record<string, unknown>;
     /** 执行记录标题，默认取 definition.name */
     title?: string;
 }): Promise<{ executionId: string; status: string }> {
-    try {
-        return await api.post<{ executionId: string; status: string }>('execute_workflow', params);
-    } catch {
-        console.warn('[workflowService] 后端 execute_workflow 未实现，返回 mock');
-        return {
-            executionId: String(Date.now()),
-            status: 'running',
-        };
-    }
+    return api.post<{ executionId: string; status: string }>('execute_workflow', {
+        workflowId: params.workflowId,
+        definition: params.definition,
+        inputData: params.inputData,
+        title: params.title,
+    });
 }
 
 /**
  * 获取执行详情
  */
 export async function getExecution(executionId: string): Promise<WorkflowExecution | null> {
-    try {
-        return await api.get<WorkflowExecution>('get_execution', { executionId });
-    } catch {
-        console.warn('[workflowService] 后端 get_execution 未实现，使用 mock 数据');
-        return MOCK_EXECUTIONS.find((e) => e.id === executionId) ?? null;
-    }
+    return api.get<WorkflowExecution | null>('get_execution', { executionId });
 }
 
 /**
  * 获取执行历史列表
  */
-export async function listExecutions(workflowId?: string): Promise<WorkflowExecution[]> {
-    try {
-        return await api.get<WorkflowExecution[]>('list_executions', workflowId ? { workflowId } : undefined);
-    } catch {
-        console.warn('[workflowService] 后端 list_executions 未实现，使用 mock 数据');
-        return workflowId
-            ? MOCK_EXECUTIONS.filter((e) => e.workflow_id === workflowId)
-            : MOCK_EXECUTIONS;
-    }
+export async function listExecutions(
+    workflowId?: string,
+    options?: { page?: number; pageSize?: number },
+): Promise<WorkflowExecution[]> {
+    return api.get<WorkflowExecution[]>('list_executions', {
+        workflowId,
+        page: options?.page,
+        pageSize: options?.pageSize,
+    });
 }
 
 /**
  * 取消正在执行的工作流
  */
 export async function cancelExecution(executionId: string): Promise<void> {
-    try {
-        await api.post('cancel_execution', { executionId });
-    } catch {
-        console.warn('[workflowService] 后端 cancel_execution 未实现');
-    }
+    await api.post<void>('cancel_execution', { executionId });
 }
+
+/**
+ * 获取待办审批任务
+ */
+export async function listPendingTasks(params?: {
+    workflowId?: string;
+    executionId?: string;
+}): Promise<PendingWorkflowTask[]> {
+    return api.get<PendingWorkflowTask[]>('list_pending_tasks', {
+        workflowId: params?.workflowId,
+        executionId: params?.executionId,
+    });
+}
+
+/**
+ * 完成人工审批任务
+ *
+ * `variables` 约定：`approved`（布尔）与 `comment`（字符串）。
+ * 通过后会唤醒挂起的引擎实例（含 AI Agent 的工具调用中断）。
+ */
+export async function completeUserTask(params: {
+    taskId: string;
+    variables?: Record<string, unknown>;
+}): Promise<void> {
+    await api.post<void>('complete_user_task', {
+        taskId: params.taskId,
+        variables: params.variables,
+    });
+}
+

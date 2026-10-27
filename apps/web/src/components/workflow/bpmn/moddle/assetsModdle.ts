@@ -39,6 +39,15 @@ export const assetsModdle = {
                 { name: 'prompt', isAttr: true, type: 'String' },
                 { name: 'outputSchema', isAttr: true, type: 'String' },
                 { name: 'params', isAttr: true, type: 'String' },
+                // AI Agent 节点
+                { name: 'tools', isAttr: true, type: 'String' },
+                { name: 'maxIterations', isAttr: true, type: 'Integer' },
+                { name: 'interruptPolicy', isAttr: true, type: 'String' },
+                // 人工审批节点（bpmn:UserTask）
+                { name: 'assignee', isAttr: true, type: 'String' },
+                { name: 'approvalTitle', isAttr: true, type: 'String' },
+                { name: 'approvalDescription', isAttr: true, type: 'String' },
+                { name: 'approvalVariable', isAttr: true, type: 'String' },
             ],
         },
     ],

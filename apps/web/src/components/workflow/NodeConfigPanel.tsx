@@ -125,7 +125,7 @@ function StandardSection({
                     <Select
                         size="xs"
                         data={Array.from(
-                            new Set(['##Skill', '##LLM', element.implementation || '##Skill'])
+                            new Set(['##Skill', '##LLM', '##Agent', element.implementation || '##Skill'])
                         ).map((value) => ({ value, label: value }))}
                         value={element.implementation || '##Skill'}
                         onChange={(value) =>

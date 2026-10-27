@@ -18,6 +18,7 @@ import {
     readDocumentation,
     readElementName,
     readEngineFields,
+    readUserTaskAssignee,
 } from '../mapping/helpers';
 import { classifyBpmnElement, isExecutableBpmnType } from '../mapping/nodeKinds';
 import { ENGINE_CONFIG_TYPE } from '../moddle/assetsModdle';
@@ -44,6 +45,11 @@ export function toSelectedElement(element: any): SelectedBpmnElement | null {
 
     const engine = readEngineFields(businessObject);
     const kind = classifyBpmnElement(type, asString(businessObject.implementation), engine.kind);
+    // 外部导入的 BPMN 常把审批人写在 camunda:assignee / data-assignee 上，面板需要回填
+    if (kind === 'approval' && !engine.assignee) {
+        const assignee = readUserTaskAssignee(businessObject);
+        if (assignee) engine.assignee = assignee;
+    }
     const eventDefinitionType = Array.isArray(businessObject.eventDefinitions)
         ? asString(businessObject.eventDefinitions[0]?.$type)
         : '';
@@ -149,6 +155,13 @@ export function createModelerApi(modeler: any): BpmnCanvasApi {
         if (fields.wfType !== undefined && element.businessObject?.$type === 'bpmn:CallActivity') {
             modeling.updateProperties(element, { calledElement: fields.wfType });
         }
+        // 审批人同时写到标准 UserTask 的 data-assignee，保证导出的 BPMN 单独部署也能识别
+        if (fields.assignee !== undefined && element.businessObject?.$type === 'bpmn:UserTask') {
+            const assignee = asString(fields.assignee);
+            modeling.updateProperties(element, {
+                'data-assignee': assignee ? assignee : undefined,
+            });
+        }
     };
 
     /** 条件分支：第一条出线为 yes（带 conditionExpression），其余为 no/default */
@@ -249,9 +262,13 @@ export function createModelerApi(modeler: any): BpmnCanvasApi {
             }
             case 'implementation': {
                 modeling.updateProperties(element, { implementation: patch.value });
-                setEngineFields(element, {
-                    kind: patch.value.toUpperCase().includes('LLM') ? 'llm' : 'skill',
-                });
+                const upper = patch.value.toUpperCase();
+                if (upper.includes('AGENT')) {
+                    // 与后端 AgentConfig 默认值对齐，避免面板显示与执行策略不一致
+                    setEngineFields(element, { kind: 'agent', maxIterations: 6, interruptPolicy: 'never' });
+                } else {
+                    setEngineFields(element, { kind: upper.includes('LLM') ? 'llm' : 'skill' });
+                }
                 break;
             }
             case 'calledElement':

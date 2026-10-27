@@ -113,7 +113,13 @@ export function createBusinessObjectForPreset(
 ): any {
     const engine: Partial<EngineFields> = {
         ...defaultEngineForPreset(preset),
-        kind: preset.kind === 'skill' || preset.kind === 'llm' ? preset.kind : undefined,
+        kind:
+            preset.kind === 'skill' ||
+            preset.kind === 'llm' ||
+            preset.kind === 'agent' ||
+            preset.kind === 'approval'
+                ? preset.kind
+                : undefined,
         ...normalizeEngineAttrs(options.engine),
     };
     const name = options.name ?? preset.label;
@@ -131,11 +137,24 @@ export function createBusinessObjectForPreset(
             }
             return businessObject;
         }
-        case 'bpmn:ServiceTask':
+        case 'bpmn:ServiceTask': {
+            const kind = options.engine?.kind || engine.kind;
+            const implementation =
+                kind === 'agent' ? '##Agent' : kind === 'llm' ? '##LLM' : '##Skill';
             return bpmnFactory.create('bpmn:ServiceTask', {
                 ...baseAttrs,
-                implementation: options.engine?.kind === 'llm' || engine.kind === 'llm' ? '##LLM' : '##Skill',
+                implementation,
             });
+        }
+        case 'bpmn:UserTask': {
+            const businessObject = bpmnFactory.create('bpmn:UserTask', baseAttrs);
+            // 标准 BPMN 的 UserTask 没有 assignee 属性，bpmn-moddle 会把未知属性
+            // 写进 $attrs 并按原样序列化；bpmninja 的 bpmn-parser 读的是 data-assignee。
+            // 这里必须用 set() 而不是直接赋值，否则导出 XML 时会丢字段。
+            const assignee = asString(options.engine?.assignee);
+            if (assignee) businessObject.set('data-assignee', assignee);
+            return businessObject;
+        }
         case 'bpmn:ScriptTask':
             return bpmnFactory.create('bpmn:ScriptTask', {
                 ...baseAttrs,

@@ -13,6 +13,8 @@ import type { WorkflowDefinition } from '@/services/workflowService';
 /** 可执行语义分类（同时用于 IR 投影与属性面板） */
 export type ElementKind =
     | 'trigger'
+    | 'agent'
+    | 'approval'
     | 'skill'
     | 'llm'
     | 'condition'
@@ -41,6 +43,17 @@ export interface EngineFields {
     prompt?: string;
     outputSchema?: string;
     params?: string;
+    /** AI Agent 可用工具，逗号分隔 */
+    tools?: string;
+    /** AI Agent 工具循环上限 */
+    maxIterations?: number;
+    /** never / before_tool（调用工具前挂起等审批） */
+    interruptPolicy?: string;
+    /** 人工审批人（写入 bpmn:UserTask assignee） */
+    assignee?: string;
+    approvalTitle?: string;
+    approvalDescription?: string;
+    approvalVariable?: string;
 }
 
 /** 连线信息（用于条件分支展示 / 投影） */
