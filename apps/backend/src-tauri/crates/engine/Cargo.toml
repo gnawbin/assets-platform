@@ -1,20 +1,12 @@
 [package]
+edition = "2021"
 name = "engine"
 version = "0.1.0"
-edition = "2021"
 
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
 [dependencies]
-serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
-serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
-tokio = { version = "1.53.1", default-features = false, features = [
-  "rt-multi-thread",
-  "rt",
-  "macros",
-  "time",
-  "fs",
-  "net",
-  "signal",
-  "sync",
-] }
-tracing = "0.1.44"
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true

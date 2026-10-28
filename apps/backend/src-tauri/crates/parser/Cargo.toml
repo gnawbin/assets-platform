@@ -3,35 +3,35 @@ edition = "2021"
 name = "parser"
 version = "0.1.0"
 
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
 [dependencies]
-serde = {version = "1.0.229", default-features = false, features = [
-  "derive",
-  "alloc",
-]}
-serde_json = {version = "1.0.151", default-features = false, features = [
-  "alloc",
-]}
-tokio = {version = "1.53.2", default-features = false, features = ["rt"]}
-tracing = "0.1.44"
-# PDF：文本提取 / 页数 / 图片（与根包 tests/pdf_tests.rs 同一版本，已验证）
-pdf_oxide = "0.3.78"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# PDF：文本提取 / 页数 / 图片（与根包 tests/pdf_tests.rs 同一版本）
+pdf_oxide.workspace = true
 # Office：docx / xlsx / doc / xls，零 C 依赖（pdf_oxide 已间接引入，无新增编译成本）
-office_oxide = "0.1.15"
+office_oxide.workspace = true
+# 视频抽帧 / 元数据（外部 ffmpeg 二进制由 sidecar 自动下载）
+ffmpeg-sidecar.workspace = true
 
-# OCR 引擎需要构造 `image::DynamicImage` 喂给 `OcrEngine::ocr_image`。
-# pdf_oxide 本身已强依赖 image 0.25（非 optional），这里按需显式引入不增加下载量。
-ffmpeg-sidecar = "2.7.0"
-image = {version = "0.25", optional = true, default-features = false, features = [
-  "png",
-]}
+# 例外：image 必须留在 crate 本地声明 ——
+#   1. [workspace.dependencies] 不允许 optional；
+#   2. 本 crate 需要 default-features = false + 仅 png，而根包 tests 需要默认格式特性，
+#      需求相反，且 edition 2021 下成员无法覆盖 default-features。
+# OCR 引擎需构造 image::DynamicImage 喂给 OcrEngine::ocr_image；pdf_oxide 本身已强依赖
+# image 0.25，这里按需显式引入不增加下载量。
+image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
+
 [features]
 default = []
 # Phase 0 spike ②：PDF 页面 → 位图（tiny-skia + 系统字体，纯 Rust，无外部二进制）
 render = ["pdf_oxide/rendering"]
 # Phase 0 spike ②：内置 PP-OCR（tract-onnx 纯 Rust 推理，免随包分发 onnxruntime.dll）
-# 对照方案是 pdf_oxide/ocr（ONNX Runtime，需 load-dynamic 指定 onnxruntime 动态库）
+# 对照方案是 pdf_oxide/ocr（ONNX Runtime，需 load-dynamic 指定 onnxruntime.dll）
 ocr = ["pdf_oxide/ocr-tract", "dep:image"]
 
 [dev-dependencies]
 # 仅在测试里内存构造最小 .docx 夹具，不参与生产构建
-zip = {version = "2.4.2", default-features = false}
+zip.workspace = true

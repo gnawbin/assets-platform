@@ -1,16 +1,11 @@
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 /// 加密密码（存数据库用）
 pub fn hash_password(password: &str) -> Result<String, String> {
-    // 生成安全盐
-    let salt = SaltString::generate(&mut OsRng);
-
-    // Argon2 加密
+    // argon2 0.6：盐由 Argon2 内部经 getrandom 生成 16 字节随机值，
+    // 不再需要手工构造 SaltString（password-hash 0.6 已移除该类型）
     let argon2 = Argon2::default();
     let password_hash = argon2
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|e| format!("哈希失败: {}", e))?
         .to_string();
 
@@ -18,7 +13,7 @@ pub fn hash_password(password: &str) -> Result<String, String> {
 }
 /// 验证密码（登录时用）
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
-    // 解析数据库里的哈希
+    // 解析数据库里的哈希（phc::PasswordHash，0.6 起为完全拥有的类型）
     let parsed_hash = PasswordHash::new(hash).map_err(|e| format!("解析哈希失败: {}", e))?;
 
     // 校验

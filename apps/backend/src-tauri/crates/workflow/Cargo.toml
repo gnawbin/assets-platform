@@ -3,35 +3,18 @@ edition = "2021"
 name = "workflow"
 version = "0.1.0"
 
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
 [dependencies]
-adk-graph = "2.3.0"
-async-trait = "0.1.91"
-bpmn-parser = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
-chrono = {version = "0.4", default-features = false, features = ["serde"]}
-database = {path = "../database"}
-engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
-serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
-serde_json = {version = "1.0.151", default-features = false, features = ["alloc"]}
-service = {path = "../service"}
-sqlx = {version = "0.9.0", default-features = false, features = [
-  "postgres",
-  "runtime-tokio",
-  "tls-rustls",
-  "macros",
-  "chrono",
-  "rust_decimal",
-  "uuid",
-  "json",
-]}
-tokio = {version = "1.54.1", default-features = false, features = [
-  "rt-multi-thread",
-  "rt",
-  "macros",
-  "time",
-  "fs",
-  "net",
-  "signal",
-  "sync",
-]}
-tracing = "0.1.44"
-uuid = {version = "1.23", features = ["v4", "serde"]}
+adk-graph.workspace = true
+async-trait.workspace = true
+bpmn-parser.workspace = true
+chrono.workspace = true
+database.workspace = true
+engine-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+service.workspace = true
+sqlx = { workspace = true, features = ["uuid", "json"] }
+tokio.workspace = true
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde"] }

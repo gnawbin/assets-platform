@@ -1,13 +1,137 @@
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-
+# ============================================================================
+# 工作区依赖唯一来源（Single Source of Truth）
+#   所有第三方 / 内部依赖的 version、features、default-features 只在这里定义；
+#   根包与 crates/* 一律通过 `xxx.workspace = true` 继承，禁止再写 version。
+#
+# 三条硬约束（Cargo 1.99 / edition 2021）：
+#   1. [workspace.dependencies] 不允许 optional → 需要 optional 的依赖（parser 的 image）
+#      只能留在成员 crate 本地声明。
+#   2. 成员的 features 是在本表基础上的「追加」，不能削减。
+#   3. 成员无法覆盖 default-features（该能力要求 edition 2024），
+#      所以 default-features 只能在下面定一次；若两个 crate 需求相反，就只能各写本地声明。
+# ============================================================================
 [package]
 authors = ["gengyuwangbin"]
 description = "资产平台APP"
 edition = "2021"
 name = "assets-platform"
 version = "0.1.0"
+
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.dependencies]
+# ---- 内部业务 crate ----
+api = {path = "crates/api"}
+database = {path = "crates/database"}
+engine = {path = "crates/engine"}
+parser = {path = "crates/parser"}
+service = {path = "crates/service"}
+storage = {path = "crates/storage"}
+utils = {path = "crates/utils"}
+workflow = {path = "crates/workflow"}
+
+# ---- 序列化 ----
+chrono = {version = "0.4.45", default-features = false, features = ["serde"]}
+serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
+serde_json = {version = "1.0.151", default-features = false, features = ["alloc"]}
+toml = "1.1.8+spec-1.1.0"
+
+# ---- 异步运行时 / 数据库 ----
+async-trait = "0.1.92"
+axum = {version = "0.8.9", features = ["macros"]}
+dashmap = "6.1.0"
+futures = "0.3.34"
+once_cell = "1.21.4"
+reqwest = {version = "0.13.4", default-features = false, features = ["json", "rustls"]}
+rust_decimal = "1.43.0"
+sqlx = {version = "0.9.0", default-features = false, features = [
+  "postgres",
+  "runtime-tokio",
+  "tls-rustls",
+  "macros",
+  "chrono",
+  "rust_decimal",
+]}
+tokio = {version = "1.54.1", default-features = false, features = [
+  "rt-multi-thread",
+  "rt",
+  "macros",
+  "time",
+  "fs",
+  "net",
+  "signal",
+  "sync",
+]}
+tower-http = {version = "0.7.0", features = ["cors", "trace"]}
+
+# ---- 认证 / 加密 ----
+# argon2 0.6 → password-hash 0.6：盐由 argon2 内部经 getrandom 0.4 生成，
+# 因此不再需要显式声明 rand_core 0.6 来激活 OsRng 特性。
+aes-gcm = "0.11.1"
+argon2 = "0.6.0"
+base64 = "0.23.1"
+getrandom = {version = "0.4.3", features = ["std"]}
+jsonwebtoken = {version = "11.1.0", default-features = false, features = ["aws_lc_rs"]}
+rand = {version = "0.10.2", features = ["std_rng"]}
+uuid = {version = "1.24.0", features = ["v4"]}
+
+# ---- 日志 / 追踪 ----
+opentelemetry = {version = "0.33.1", features = ["trace", "metrics", "logs"]}
+opentelemetry-appender-tracing = "0.33.1"
+opentelemetry-otlp = {version = "0.33.1", features = [
+  "grpc-tonic",
+  "http-proto",
+  "trace",
+  "logs",
+  "metrics",
+]}
+opentelemetry_sdk = {version = "0.33.1", features = ["rt-tokio", "trace", "metrics", "logs"]}
+tracing = "0.1.44"
+tracing-opentelemetry = "0.34.0"
+tracing-subscriber = {version = "0.3.23", features = ["env-filter"]}
+
+# ---- 通用工具 ----
+anyhow = "1.0.104"
+dirs = "7.0.0"
+thiserror = "2.0.21"
+twitter_snowflake = "1.0.3"
+winapi = {version = "0.3", features = [
+  "memoryapi",
+  "debugapi",
+  "sysinfoapi",
+  "processthreadsapi",
+  "errhandlingapi",
+]}
+
+# ---- 对象存储 ----
+aws-credential-types = "1.3.1"
+aws-sdk-s3 = {version = "1.156.0", default-features = false, features = ["rustls"]}
+aws-smithy-async = {version = "1.3.1", features = ["rt-tokio"]}
+
+# ---- 文档解析 ----
+ffmpeg-sidecar = "2.7.0"
+office_oxide = "0.1.15"
+pdf_oxide = "0.3.78"
+zip = {version = "9.1.3", default-features = false}
+
+# ---- 工作流 / Agent ----
+adk-graph = "2.3.0"
+adk-rust = {version = "2.3.0", features = ["graph"]}
+bpmn-parser = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
+engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
+llama-cpp-v3 = "0.1.8"
+
+# ---- Tauri ----
+tauri = {version = "2.12.5", default-features = false, features = ["wry"]}
+tauri-build = {version = "2.7.4", default-features = false}
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-fs = "2.7.1"
+tauri-plugin-opener = {version = "2.7.2", default-features = false}
+tauri-plugin-process = "2.4.0"
+tauri-plugin-shell = "2.6.0"
+tauri-plugin-updater = "2.14.1"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -18,87 +142,52 @@ name = "assets-platform"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = {version = "2.7.1", default-features = false, features = [] }# 关闭默认特性
+tauri-build = {workspace = true}
 
 [dependencies]
-tracing = "0.1.44"
-
-# 加这一行（surrealdb / rand 兼容）
-getrandom = {version = "0.4.3", features = ["std"] }
-
-# Tauri 核心（最小特性集）
-tauri = {version = "2.12.2", default-features = false, features = ["wry"] }
-tauri-plugin-dialog = "2.8.1"
-tauri-plugin-fs = "2.6.0"
-tauri-plugin-opener = {version = "2.7.0", default-features = false}
-tauri-plugin-process = "2.4.0"
-tauri-plugin-shell = "2.4.1"
-tauri-plugin-updater = "2.13.2"
-
 # 内部业务 crate（crates/*）
-api = {path = "crates/api"}
-database = {path = "crates/database"}
-engine = {path = "crates/engine"}
-service = {path = "crates/service"}
-storage = {path = "crates/storage"}
-utils = {path = "crates/utils"}
-workflow = {path = "crates/workflow"}
+api.workspace = true
+database.workspace = true
+engine.workspace = true
+service.workspace = true
+storage.workspace = true
+utils.workspace = true
+workflow.workspace = true
 
-# 序列化
-chrono = {version = "0.4.45", default-features = false, features = ["serde"] }
-serde = {version = "1.0.229", default-features = false, features = [
-  "derive",
-  "alloc",
-] }
-serde_json = {version = "1.0.151", default-features = false, features = ["alloc"] }
+# 序列化 / 异步 / 数据库
+chrono.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
 
 # JWT（命令层）
-jsonwebtoken = {version = "11.1.0", default-features = false, features = [
-  "aws_lc_rs",
-] }
+jsonwebtoken.workspace = true
 
-# 数据库（命令层 / 工作流）
-sqlx = {version = "0.9.0", default-features = false, features = [
-  "postgres",
-  "runtime-tokio",
-  "tls-rustls",
-  "macros",
-  "chrono",
-  "rust_decimal",
-] }
+# Agent / Windows 平台兼容
+adk-graph.workspace = true
+adk-rust.workspace = true
+llama-cpp-v3.workspace = true
+winapi.workspace = true
 
-# 异步运行时（只开必须的特性，不要 full）
-tokio = {version = "1.53.2", default-features = false, features = [
-  "rt-multi-thread",
-  "rt",
-  "macros",
-  "time",
-  "fs",
-  "net",
-  "signal",
-  "sync",
-] }
-
-# 配置（lib.rs 加载 .env.toml）
-toml = "1.1.5+spec-1.1.0"
-
-# Windows 平台兼容
-adk-graph = "2.3.0"
-adk-rust = {version = "2.3.0", features = ["graph"] }
-llama-cpp-v3 = "0.1"
-winapi = {version = "0.3", features = [
-  "memoryapi",
-  "debugapi",
-  "sysinfoapi",
-  "processthreadsapi",
-  "errhandlingapi",
-] }
+# Tauri 核心（最小特性集）
+tauri-plugin-dialog.workspace = true
+tauri-plugin-fs.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-process.workspace = true
+tauri-plugin-shell.workspace = true
+tauri-plugin-updater.workspace = true
+tauri.workspace = true
 
 [dev-dependencies]
 # 集成测试专用（tests/ 目录）
+pdf_oxide.workspace = true
+# 例外：tests/image_tests.rs 需要 png / jpeg / webp 编解码（默认格式特性），
+# 与 crates/parser 的 optional + 仅 png 需求相反，无法共用同一条 workspace 定义。
 image = "0.25.10"
-pdf_oxide = "0.3.78"
-surrealdb = "3.3.4"
 
 # Release模式优化配置
 [profile.release]

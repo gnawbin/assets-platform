@@ -819,7 +819,6 @@ pub async fn init_knowledge_module_public(pool: &PgPool) -> Result<()> {
 /// 创建默认管理员账号（密码用 argon2 加密）
 #[allow(dead_code)]
 pub async fn init_default_admin(pool: &PgPool) -> Result<()> {
-    use argon2::password_hash::SaltString;
     use argon2::{Argon2, PasswordHasher};
 
     // 检查是否已存在 admin 用户
@@ -839,11 +838,10 @@ pub async fn init_default_admin(pool: &PgPool) -> Result<()> {
     let password =
         std::env::var("DEFAULT_ADMIN_PASSWORD").unwrap_or_else(|_| "admin123".to_string());
 
-    // argon2 加密（使用系统随机数生成器）
-    let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
+    // argon2 加密（盐由 argon2 内部经 getrandom 生成 16 字节随机值）
     let argon2 = Argon2::default();
     let hash = argon2
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map_err(|e| anyhow!("密码加密失败: {}", e))?
         .to_string();
 
