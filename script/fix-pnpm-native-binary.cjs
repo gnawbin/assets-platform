@@ -6,15 +6,22 @@
  * pnpm 12 ships a native executable. Corepack installs the pnpm wrapper without
  * its dependencies and runs no lifecycle scripts, so the wrapper
  * (`bin/pnpm.mjs`) downloads that executable from the configured npm registry
- * on first use, through `get-pnpm`. A mirror that answers with a *relative*
- * `dist.tarball` breaks it — Huawei Cloud returns
- * `/@pnpm/exe.win32-x64/-/exe.win32-x64-12.15.0.tgz`, and `new URL()` on that
- * throws, aborting every pnpm command before any of it runs (on Windows the
- * abrupt exit then trips a libuv assertion in src\win\async.c).
+ * on first use, through `get-pnpm`. Two things break that download:
+ *
+ *  - A mirror that answers with a *relative* `dist.tarball` — Huawei Cloud
+ *    returns `/@pnpm/exe.win32-x64/-/exe.win32-x64-12.15.0.tgz`, and
+ *    `new URL()` on that throws, aborting every pnpm command before any of it
+ *    runs (on Windows the abrupt exit then trips a libuv assertion in
+ *    src\win\async.c).
+ *  - A connection that dies mid-transfer. The executable is a ~25 MB tarball
+ *    and `get-pnpm` neither resumes nor retries, so a slow or unstable link
+ *    leaves `pnpm-native.<hash>.tgz` fragments next to the wrapper and answers
+ *    `Could not download the pnpm <version> binary: ...`.
  *
  * This script repeats the download with an absolute tarball URL built from the
- * registry, verifies the bytes against the integrity npm published, and drops
- * the executable where the wrapper looks for it:
+ * registry (resuming and retrying when a transfer is cut short, and falling
+ * back to the public mirrors below), verifies the bytes against the integrity
+ * npm published, and drops the executable where the wrapper looks for it:
  *
  *   <corepack home>/v1/pnpm/<version>/pnpm-native[.exe]
  *
@@ -24,6 +31,12 @@
  *   node script/fix-pnpm-native-binary.cjs [--force]
  *
  * `--force` re-downloads even when the executable is already in place.
+ *
+ * Environment:
+ *   PNPM_NATIVE_BINARY_MIRROR  Comma-separated registry URLs to try before the
+ *                              built-in mirrors, e.g. `https://registry.npmmirror.com`.
+ *   COREPACK_NPM_REGISTRY      Registry to read the metadata and download from.
+ *   COREPACK_HOME              Corepack cache, when it is not the default one.
  */
 
 const { createHash } = require('crypto');
@@ -31,6 +44,8 @@ const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 // Mirrors corepack's own INSTALL_FOLDER_VERSION (v1).
@@ -38,6 +53,14 @@ const INSTALL_FOLDER_VERSION = 1;
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 const BINARY_NAME = process.platform === 'win32' ? 'pnpm-native.exe' : 'pnpm-native';
 const PROXY_VARS = ['https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY'];
+// Tried last, after the configured registry: the bytes are still checked against
+// the integrity npm published, so a mirror can only ever fail that check.
+const FALLBACK_MIRRORS = ['https://registry.npmmirror.com'];
+// A truncated transfer is resumed from what already arrived, so a slow link only
+// has to deliver the missing tail.
+const MAX_ATTEMPTS = 8;
+const RETRY_DELAY_MS = 2_000;
+const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
 const colors = {
   reset: '\x1b[0m',
@@ -195,31 +218,129 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function fetchBytes(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(10 * 60_000) });
+async function fetchBytes(url, tempPath) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await downloadTo(url, tempPath);
+      return fs.readFileSync(tempPath);
+    } catch (err) {
+      if (attempt >= MAX_ATTEMPTS) {
+        throw new Error(`${err.message} (gave up after ${attempt} attempts)`);
+      }
+      const received = fileSize(tempPath);
+      warn(
+        `Interrupted after ${formatBytes(received)}: ${err.message} — ` +
+          `retrying in ${RETRY_DELAY_MS / 1_000}s${received > 0 ? ' from what already arrived' : ''}...`
+      );
+      await sleep(RETRY_DELAY_MS);
+    }
+  }
+}
+
+/**
+ * Streams `url` into `tempPath`, picking up where the file left off. A server
+ * that answers a `Range` request with `200` ignored it, so the file is
+ * restarted rather than appended to twice.
+ */
+async function downloadTo(url, tempPath) {
+  const startSize = fileSize(tempPath);
+  const headers = startSize > 0 ? { range: `bytes=${startSize}-` } : {};
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+  // 416: the file already holds every byte the server has.
+  if (response.status === 416) {
+    return;
+  }
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} from ${url}`);
   }
-  return Buffer.from(await response.arrayBuffer());
+  if (response.body == null) {
+    throw new Error(`${url} answered with no body.`);
+  }
+
+  const resumed = startSize > 0 && response.status === 206;
+  const declared = Number(response.headers.get('content-length') ?? 0);
+  const expected = declared > 0 ? declared + (resumed ? startSize : 0) : 0;
+  const body = Readable.fromWeb(response.body);
+  let received = resumed ? startSize : 0;
+  let nextMilestone = 10;
+  const startedAt = Date.now();
+
+  body.on('data', (chunk) => {
+    received += chunk.length;
+    if (expected === 0) {
+      return;
+    }
+    const percent = Math.floor((received / expected) * 100);
+    if (percent >= nextMilestone) {
+      const elapsed = Math.max((Date.now() - startedAt) / 1_000, 1);
+      const speed = formatBytes((received - (resumed ? startSize : 0)) / elapsed);
+      info(`${percent}% — ${formatBytes(received)} of ${formatBytes(expected)} (${speed}/s)`);
+      nextMilestone = percent + 10;
+    }
+  });
+
+  await pipeline(body, fs.createWriteStream(tempPath, { flags: resumed ? 'a' : 'w' }));
+
+  if (expected > 0 && received < expected) {
+    throw new Error(`the transfer stopped at ${formatBytes(received)} of ${formatBytes(expected)}`);
+  }
+}
+
+function fileSize(file) {
+  return fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
 }
 
 /**
  * Absolute download URLs, most preferred first: the canonical npm layout on the
  * configured registry (mirrors serve it, and it keeps a relative `dist.tarball`
- * out of the picture), then whatever absolute URL the registry advertises.
+ * out of the picture), then whatever absolute URL the registry advertises, then
+ * the fallback mirrors.
  */
 function tarballCandidates(registry, packageName, distTarball) {
   const fileName = path.posix.basename(new URL(distTarball, 'https://registry.invalid').pathname);
-  const candidates = [new URL(`${packageName}/-/${fileName}`, registry).href];
-  try {
-    const advertised = new URL(distTarball).href;
-    if (!candidates.includes(advertised)) {
-      candidates.push(advertised);
+  const candidates = [];
+  const add = (url) => {
+    if (url != null && !candidates.includes(url.href)) {
+      candidates.push(url.href);
     }
+  };
+
+  add(new URL(`${packageName}/-/${fileName}`, registry));
+  try {
+    add(new URL(distTarball));
   } catch {
     // Relative: the canonical URL above covers it.
   }
+  for (const mirror of mirrorRegistries(registry)) {
+    add(new URL(`${packageName}/-/${fileName}`, mirror));
+  }
   return candidates;
+}
+
+/** Registries to fall back to, minus the one already being tried. */
+function mirrorRegistries(registry) {
+  const configured = (process.env.PNPM_NATIVE_BINARY_MIRROR ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+    .map(normalizeRegistry);
+  return [...configured, ...FALLBACK_MIRRORS.map(normalizeRegistry)].filter(
+    (mirror) => mirror !== registry
+  );
 }
 
 /** The digest the registry published for the tarball. */
@@ -300,29 +421,40 @@ async function main() {
   const { algorithm, expected } = integrityDigest(meta);
 
   step('Downloading the executable...');
+  // A stable name, so a run that has to be interrupted resumes where it stopped.
+  const tempPath = path.join(
+    os.tmpdir(),
+    `pnpm-native-${version}-${process.platform}-${process.arch}.part`
+  );
   let tarball;
   const failures = [];
-  for (const url of tarballCandidates(registry, name, meta.dist.tarball)) {
-    try {
-      info(url);
-      tarball = await fetchBytes(url);
-      break;
-    } catch (err) {
-      failures.push(`  ${url}\n    ${err.message}`);
+  try {
+    for (const url of tarballCandidates(registry, name, meta.dist.tarball)) {
+      try {
+        info(url);
+        tarball = await fetchBytes(url, tempPath);
+      } catch (err) {
+        failures.push(`  ${url}\n    ${err.message}`);
+        fs.rmSync(tempPath, { force: true });
+        continue;
+      }
+      step(`Verifying the ${algorithm} integrity...`);
+      const actual = createHash(algorithm).update(tarball).digest('base64');
+      if (actual === expected) {
+        break;
+      }
+      failures.push(`  ${url}\n    the bytes do not match the published checksum (${actual})`);
+      tarball = undefined;
+      // Restarting from a clean file, so the next source is not resumed onto these bytes.
+      fs.rmSync(tempPath, { force: true });
     }
+  } finally {
+    fs.rmSync(tempPath, { force: true });
   }
   if (tarball == null) {
     throw new Error(`Every download source failed:\n${failures.join('\n')}`);
   }
-
-  step(`Verifying the ${algorithm} integrity...`);
-  const actual = createHash(algorithm).update(tarball).digest('base64');
-  if (actual !== expected) {
-    throw new Error(
-      `The download does not match the checksum the registry published (${actual}). Refusing to install it.`
-    );
-  }
-  ok(`${tarball.length} bytes match ${algorithm}-${expected.slice(0, 12)}...`);
+  ok(`${formatBytes(tarball.length)} match ${algorithm}-${expected.slice(0, 12)}...`);
 
   step('Extracting...');
   const executable = extractExecutable(tarball, binFile);
