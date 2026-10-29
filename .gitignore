@@ -14,7 +14,7 @@ apps/*/pnpm-lock.yaml
 !.vscode/settings.json
 
 .env.local
-.env.toml
+
 
 apps/*/.env.local
 # doc-parser 本机 Docker 部署环境文件（含共享密钥）
