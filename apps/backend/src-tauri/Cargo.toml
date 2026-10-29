@@ -28,6 +28,7 @@ database = {path = "crates/database"}
 engine = {path = "crates/engine"}
 
 iso = {path = "crates/iso"}
+ops = {path = "crates/ops"}
 parser = {path = "crates/parser"}
 service = {path = "crates/service"}
 storage = {path = "crates/storage"}
@@ -116,6 +117,34 @@ winapi = {version = "0.3", features = [
 aws-credential-types = "1.3.1"
 aws-sdk-s3 = {version = "1.156.0", default-features = false, features = ["rustls"]}
 aws-smithy-async = {version = "1.3.1", features = ["rt-tokio"]}
+
+# ---- 运维采集（Docker / Swarm / Kubernetes，全部只读）----
+# bollard 0.21 起 connect_with_* 的参数是 `timeout: u64`（秒）与 `&ClientVersion`，
+# 不再是 Option<Duration>/Option<&str>；默认 features 为 http+pipe，ssl 才能连 2376 mTLS。
+bollard = {version = "0.21.1", default-features = false, features = [
+  "http",
+  "pipe",
+  "ssl",
+  "time",
+]}
+# kube 4.2 的 kube-client 依赖 serde-saphyr 0.0.29（要求 smallvec <1.16），
+# 与 pdf_oxide 要求的 smallvec ^1.16 冲突；kube 3.0 仍用 serde_yaml，故锁 3.0.0。
+# 加密 provider 统一走 ring（bollard 的 ssl 内部也是 rustls/ring），避免双 provider 歧义。
+kube = {version = "3.0.0", default-features = false, features = [
+  "client",
+  "config",
+  "rustls-tls",
+  "ring",
+]}
+# k8s-openapi 0.27 提供 v1_31 ~ v1_35，且 kube 要求「恰好一个」版本 feature。
+# 目标集群版本未知时取 v1_32 以获得较宽兼容性；确认集群版本后改这一行即可。
+k8s-openapi = {version = "0.27.0", default-features = false, features = [
+  "std",
+  "v1_32",
+]}
+# bollard 的 BollardDate 只有开启 time/chrono 特性时才不是 String；统一用 time，
+# 避免为了把 RFC3339 转成 epoch 毫秒而给 ops 引入 chrono 的 clock 特性。
+time = {version = "0.3.47", default-features = false, features = ["std"]}
 
 # ---- 文档解析 ----
 ffmpeg-sidecar = "2.7.0"

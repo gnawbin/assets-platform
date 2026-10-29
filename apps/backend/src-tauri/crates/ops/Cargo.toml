@@ -1,0 +1,36 @@
+[package]
+edition = "2024"
+name = "ops"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+[features]
+# 默认全关：不让 bollard / kube 拖慢 Tauri 主构建，按需在调用方开启。
+default = []
+# Docker 单机 + Swarm 采集（bollard：http=TCP 2375、pipe=本地 socket、ssl=2376 mTLS）
+docker = ["dep:bollard", "dep:time"]
+# Kubernetes 采集（kube-rs：只走 APIServer，绝不直连节点 docker.sock）
+k8s = ["dep:base64", "dep:k8s-openapi", "dep:kube"]
+
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+async-trait.workspace = true
+bollard = {workspace = true, optional = true}
+k8s-openapi = {workspace = true, optional = true}
+kube = {workspace = true, optional = true}
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = {workspace = true, features = ["io-util"]}
+tracing.workspace = true
+
+# Docker 采集：把 bollard 的 RFC3339 时间转成 epoch 毫秒
+time = {workspace = true, optional = true}
+# K8s 直连模式：把 PEM 证书编码进合成 kubeconfig 的 *-data 字段
+base64 = {workspace = true, optional = true}
+
+[dev-dependencies]
+# 仅用于 examples/ops_probe 与假服务测试输出日志
+tracing-subscriber.workspace = true
