@@ -1,12 +1,12 @@
 [package]
-edition = "2021"
+edition = "2024"
 name = "engine"
 version = "0.1.0"
 
 # 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
 [dependencies]
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true

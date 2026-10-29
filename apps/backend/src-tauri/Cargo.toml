@@ -3,17 +3,17 @@
 #   所有第三方 / 内部依赖的 version、features、default-features 只在这里定义；
 #   根包与 crates/* 一律通过 `xxx.workspace = true` 继承，禁止再写 version。
 #
-# 三条硬约束（Cargo 1.99 / edition 2021）：
+# 三条硬约束（Cargo 1.99 / edition 2024）：
 #   1. [workspace.dependencies] 不允许 optional → 需要 optional 的依赖（parser 的 image）
 #      只能留在成员 crate 本地声明。
 #   2. 成员的 features 是在本表基础上的「追加」，不能削减。
-#   3. 成员无法覆盖 default-features（该能力要求 edition 2024），
-#      所以 default-features 只能在下面定一次；若两个 crate 需求相反，就只能各写本地声明。
+#   3. default-features 默认仍只在此处定一次，以维持唯一来源；自 edition 2024（Cargo 1.99+）
+#      起成员已可用 default-features = true/false 覆盖本表，仅当两个 crate 需求相反时才这么做。
 # ============================================================================
 [package]
 authors = ["gengyuwangbin"]
 description = "资产平台APP"
-edition = "2021"
+edition = "2024"
 name = "assets-platform"
 version = "0.1.0"
 
@@ -30,12 +30,13 @@ parser = {path = "crates/parser"}
 service = {path = "crates/service"}
 storage = {path = "crates/storage"}
 utils = {path = "crates/utils"}
+vfs = {path = "crates/vfs"}
 workflow = {path = "crates/workflow"}
 
 # ---- 序列化 ----
 chrono = {version = "0.4.45", default-features = false, features = ["serde"]}
 serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
-serde_json = {version = "1.0.151", default-features = false, features = ["alloc"]}
+serde_json = {version = "1.0.154", default-features = false, features = ["alloc"]}
 toml = "1.1.8+spec-1.1.0"
 
 # ---- 异步运行时 / 数据库 ----
@@ -44,7 +45,7 @@ axum = {version = "0.8.9", features = ["macros"]}
 dashmap = "6.1.0"
 futures = "0.3.34"
 once_cell = "1.21.4"
-reqwest = {version = "0.13.4", default-features = false, features = ["json", "rustls"]}
+reqwest = {version = "0.13.5", default-features = false, features = ["json", "rustls"]}
 rust_decimal = "1.43.0"
 sqlx = {version = "0.9.0", default-features = false, features = [
   "postgres",
@@ -64,7 +65,11 @@ tokio = {version = "1.54.1", default-features = false, features = [
   "signal",
   "sync",
 ]}
-tower-http = {version = "0.7.0", features = ["cors", "trace"]}
+
+parking_lot = "0.13.0"
+rayon = "1.12"
+tokio-util = {version = "0.7", features = ["full"]}
+tower-http = {version = "0.7", features = ["cors", "trace"]}
 
 # ---- 认证 / 加密 ----
 # argon2 0.6 → password-hash 0.6：盐由 argon2 内部经 getrandom 0.4 生成，
@@ -74,8 +79,8 @@ argon2 = "0.6.0"
 base64 = "0.23.1"
 getrandom = {version = "0.4.3", features = ["std"]}
 jsonwebtoken = {version = "11.1.0", default-features = false, features = ["aws_lc_rs"]}
-rand = {version = "0.10.2", features = ["std_rng"]}
-uuid = {version = "1.24.0", features = ["v4"]}
+rand = {version = "0.10.3", features = ["std_rng"]}
+uuid = {version = "1.29.0", features = ["v4"]}
 
 # ---- 日志 / 追踪 ----
 opentelemetry = {version = "0.33.1", features = ["trace", "metrics", "logs"]}
@@ -124,6 +129,7 @@ engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af
 llama-cpp-v3 = "0.1.8"
 
 # ---- Tauri ----
+opus = "0.4.0"
 tauri = {version = "2.12.5", default-features = false, features = ["wry"]}
 tauri-build = {version = "2.7.4", default-features = false}
 tauri-plugin-dialog = "2.8.4"
@@ -132,7 +138,36 @@ tauri-plugin-opener = {version = "2.7.2", default-features = false}
 tauri-plugin-process = "2.4.0"
 tauri-plugin-shell = "2.6.0"
 tauri-plugin-updater = "2.14.1"
-
+webrtc = "0.21.1"
+xattr = "1.7.0"
+# ──────────────────────────────────────────────────────────────────────────────
+# System & Platform
+# ──────────────────────────────────────────────────────────────────────────────
+libc = "0.2"
+os_pipe = "1"
+windows-sys = {version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Media_Audio",
+  "Win32_Media_Multimedia",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_Storage_ProjectedFileSystem",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_Threading",
+]}
+# Transitive-only pin (wired through crates/pi-natives' `cfg(false)` target
+# deps so the constraint participates in resolution without tripping the
+# unused-dependency lint): cc 1.2.x passes
+# FILE_ATTRIBUTE_TEMPORARY to OpenOptionsExt::custom_flags as u32, but
+# find-msvc-tools 0.1.13 retyped that constant to i32, breaking every Windows
+# build. tree-sitter-sequel caps cc at ~1.2.1 so the fixed cc 1.4.x line is
+# out of reach; hold 0.1.12 until upstream ships a compatible release.
+find-msvc-tools = "0.1.15"
+winreg = "0.56"
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 name = "assetsplatform_lib"
@@ -147,13 +182,17 @@ tauri-build = {workspace = true}
 [dependencies]
 # 内部业务 crate（crates/*）
 api.workspace = true
+async-trait.workspace = true
 database.workspace = true
 engine.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
 service.workspace = true
 storage.workspace = true
 utils.workspace = true
+vfs.workspace = true
 workflow.workspace = true
-
 # 序列化 / 异步 / 数据库
 chrono.workspace = true
 getrandom.workspace = true
@@ -170,9 +209,10 @@ jsonwebtoken.workspace = true
 # Agent / Windows 平台兼容
 adk-graph.workspace = true
 adk-rust.workspace = true
+
+libc.workspace = true
 llama-cpp-v3.workspace = true
 winapi.workspace = true
-
 # Tauri 核心（最小特性集）
 tauri-plugin-dialog.workspace = true
 tauri-plugin-fs.workspace = true

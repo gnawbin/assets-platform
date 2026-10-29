@@ -9,7 +9,7 @@ use twitter_snowflake::Snowflake;
 /// # 示例
 ///
 /// ```rust
-/// use assetsplatform_lib::utils::snowflake;
+/// use utils::snowflake;
 ///
 /// let id = snowflake::next_id();
 /// println!("生成的 Snowflake ID: {}", id);
@@ -120,8 +120,8 @@ mod tests {
 
     #[test]
     fn test_generator_new() {
-        let mut gen = SnowflakeGenerator::new(1);
-        let id = gen.next_id();
+        let mut generator = SnowflakeGenerator::new(1);
+        let id = generator.next_id();
         assert!(id > 0);
     }
 }

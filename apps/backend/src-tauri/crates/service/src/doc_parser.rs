@@ -273,7 +273,9 @@ pub fn start_doc_parser() -> Option<std::process::Child> {
 
     // 5. 生成动态认证 token，注入自身进程（DocParserClient 读取）与子进程
     let token = uuid::Uuid::new_v4().to_string();
-    std::env::set_var("DOC_PARSER_TOKEN", &token);
+    // SAFETY: edition 2024 起 set_var 为 unsafe；此处仅在解析器启动阶段注入本进程 token，
+    // 沿用迁移前的调用方式。
+    unsafe { std::env::set_var("DOC_PARSER_TOKEN", &token) };
 
     // 6. PATH 注入 Python 所在目录（保证 ffmpeg/ffprobe 与 uvicorn 依赖可用）
     let python_path = std::path::Path::new(&python);

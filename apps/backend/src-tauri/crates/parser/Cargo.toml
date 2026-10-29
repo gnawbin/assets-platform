@@ -1,5 +1,5 @@
 [package]
-edition = "2021"
+edition = "2024"
 name = "parser"
 version = "0.1.0"
 
@@ -22,7 +22,7 @@ ffmpeg-sidecar.workspace = true
 #      需求相反，且 edition 2021 下成员无法覆盖 default-features。
 # OCR 引擎需构造 image::DynamicImage 喂给 OcrEngine::ocr_image；pdf_oxide 本身已强依赖
 # image 0.25，这里按需显式引入不增加下载量。
-image = { version = "0.25.10", optional = true, default-features = false, features = ["png"] }
+image = {version = "0.25.10", optional = true, default-features = false, features = ["png"]}
 
 [features]
 default = []

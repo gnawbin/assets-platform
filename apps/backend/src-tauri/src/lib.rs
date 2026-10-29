@@ -45,8 +45,11 @@ fn load_env() {
                                     .collect();
                                 if !hosts_str.is_empty() {
                                     let pg_read_hosts = hosts_str.join(",");
-                                    std::env::set_var("PG_READ_HOSTS", &pg_read_hosts);
-                                    std::env::set_var("POSTGRES_READ_HOSTS", &pg_read_hosts);
+                                    // SAFETY: run() 首行调用 load_env()，此时尚无并发读取环境变量的线程。
+                                    unsafe {
+                                        std::env::set_var("PG_READ_HOSTS", &pg_read_hosts);
+                                        std::env::set_var("POSTGRES_READ_HOSTS", &pg_read_hosts);
+                                    }
                                 }
                             }
                         }
@@ -62,14 +65,17 @@ fn load_env() {
                             // 生成标准环境变量名：SECTION_KEY
                             let env_key =
                                 format!("{}_{}", section.to_uppercase(), key.to_uppercase());
-                            std::env::set_var(&env_key, &env_value);
+                            // SAFETY: 同上，启动期配置加载，无并发读取环境变量的线程。
+                            unsafe { std::env::set_var(&env_key, &env_value) };
 
                             // 兼容旧版环境变量名（postgres 段映射为 PG_ 前缀）
                             if section == "postgres" {
                                 let legacy_key = format!("PG_{}", key.to_uppercase());
-                                std::env::set_var(&legacy_key, &env_value);
+                                // SAFETY: 同上，启动期配置加载，无并发读取环境变量的线程。
+                                unsafe { std::env::set_var(&legacy_key, &env_value) };
                             } else if section == "auth" && key == "jwt_secret" {
-                                std::env::set_var("JWT_SECRET", &env_value);
+                                // SAFETY: 同上，启动期配置加载，无并发读取环境变量的线程。
+                                unsafe { std::env::set_var("JWT_SECRET", &env_value) };
                             }
                         }
                     }

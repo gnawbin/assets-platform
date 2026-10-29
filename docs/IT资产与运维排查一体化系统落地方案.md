@@ -87,7 +87,7 @@
 ### 3.1 代码落点（沿用现有 crates 分层规范）
 
 ```
-apps/backend/src-tauri/crates/assets-ops/
+apps/backend/src-tauri/crates/ops/
 ├── Cargo.toml                    # 依赖：bollard、kube-rs、tokio、tracing
 └── src/
     ├── lib.rs                    # CollectorRegistry + 启停统一入口

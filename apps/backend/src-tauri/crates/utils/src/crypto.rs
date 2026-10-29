@@ -118,13 +118,15 @@ mod tests {
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        std::env::set_var("LLM_KEY_ENCRYPT_KEY", "abcdefghijklmnopqrstuvwxyz123456");
+        // SAFETY: edition 2024 起 set_var/remove_var 为 unsafe；本测试只操作自己独占的变量。
+        unsafe { std::env::set_var("LLM_KEY_ENCRYPT_KEY", "abcdefghijklmnopqrstuvwxyz123456") };
         let original = "sk-test-api-key-12345";
         let encrypted = encrypt_api_key(original).unwrap();
         assert_ne!(encrypted, original);
         let decrypted = decrypt_api_key(&encrypted).unwrap();
         assert_eq!(decrypted, original);
-        std::env::remove_var("LLM_KEY_ENCRYPT_KEY");
+        // SAFETY: 同上，清理本测试设置的变量。
+        unsafe { std::env::remove_var("LLM_KEY_ENCRYPT_KEY") };
     }
 
     #[test]

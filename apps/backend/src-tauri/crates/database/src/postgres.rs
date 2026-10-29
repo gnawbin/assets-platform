@@ -977,7 +977,8 @@ mod tests {
     #[test]
     fn test_parse_read_replicas_from_env() {
         // 模拟环境变量
-        std::env::set_var("PG_READ_HOSTS", "192.168.1.101:5432:3,192.168.1.102:5432:1");
+        // SAFETY: edition 2024 起 set_var/remove_var 为 unsafe；本测试只操作自己独占的变量。
+        unsafe { std::env::set_var("PG_READ_HOSTS", "192.168.1.101:5432:3,192.168.1.102:5432:1") };
         let replicas = PostgresConfig::parse_read_replicas_from_env();
         assert_eq!(replicas.len(), 2);
         assert_eq!(replicas[0].host, "192.168.1.101");
@@ -985,12 +986,14 @@ mod tests {
         assert_eq!(replicas[0].weight, 3);
         assert_eq!(replicas[1].host, "192.168.1.102");
         assert_eq!(replicas[1].weight, 1);
-        std::env::remove_var("PG_READ_HOSTS");
+        // SAFETY: 同上，清理本测试设置的变量。
+        unsafe { std::env::remove_var("PG_READ_HOSTS") };
     }
 
     #[test]
     fn test_parse_read_replicas_empty() {
-        std::env::remove_var("PG_READ_HOSTS");
+        // SAFETY: 同上，确保该变量在测试开始时不存在。
+        unsafe { std::env::remove_var("PG_READ_HOSTS") };
         let replicas = PostgresConfig::parse_read_replicas_from_env();
         assert!(replicas.is_empty());
     }

@@ -1,24 +1,24 @@
 [package]
+edition = "2024"
 name = "storage"
 version = "0.1.0"
-edition = "2021"
 
 # 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
 [dependencies]
-database.workspace = true
-utils.workspace = true
-sqlx.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-chrono.workspace = true
-tracing.workspace = true
-uuid.workspace = true
-thiserror.workspace = true
 anyhow.workspace = true
-tokio.workspace = true
 aws-credential-types.workspace = true
 aws-sdk-s3.workspace = true
 aws-smithy-async.workspace = true
+chrono.workspace = true
+database.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+utils.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 # 仅用于 examples/ 探测工具（s3_probe）打印 SDK 请求日志
