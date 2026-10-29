@@ -26,6 +26,8 @@ resolver = "2"
 api = {path = "crates/api"}
 database = {path = "crates/database"}
 engine = {path = "crates/engine"}
+
+iso = {path = "crates/iso"}
 parser = {path = "crates/parser"}
 service = {path = "crates/service"}
 storage = {path = "crates/storage"}
@@ -167,7 +169,38 @@ windows-sys = {version = "0.61", features = [
 # build. tree-sitter-sequel caps cc at ~1.2.1 so the fixed cc 1.4.x line is
 # out of reach; hold 0.1.12 until upstream ships a compatible release.
 find-msvc-tools = "0.1.15"
-winreg = "0.56"
+winreg = "0.56.0"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Data Structures - Collections
+# ──────────────────────────────────────────────────────────────────────────────
+heapless = "0.9"
+phf = {version = "0.14", features = ["macros"]}
+smallvec = {version = "1.16.4", features = [
+  "serde",
+  "write",
+  "union",
+  "const_new",
+]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hashing
+# ──────────────────────────────────────────────────────────────────────────────
+xxhash-rust = {version = "0.8.19", features = ["xxh64", "xxh32"]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI & Configuration
+# ──────────────────────────────────────────────────────────────────────────────
+clap = {version = "4", features = ["derive"]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Text Processing & Parsing
+# ──────────────────────────────────────────────────────────────────────────────
+fontdue = {version = "0.9", default-features = false}
+pdf-inspector = "1"
+regex = "1"
+similar = "3.2.0"
+
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 name = "assetsplatform_lib"
@@ -186,6 +219,7 @@ async-trait.workspace = true
 database.workspace = true
 engine.workspace = true
 futures.workspace = true
+
 parking_lot.workspace = true
 rayon.workspace = true
 service.workspace = true
@@ -196,13 +230,13 @@ workflow.workspace = true
 # 序列化 / 异步 / 数据库
 chrono.workspace = true
 getrandom.workspace = true
+iso.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
-
 # JWT（命令层）
 jsonwebtoken.workspace = true
 
@@ -228,6 +262,24 @@ pdf_oxide.workspace = true
 # 例外：tests/image_tests.rs 需要 png / jpeg / webp 编解码（默认格式特性），
 # 与 crates/parser 的 optional + 仅 png 需求相反，无法共用同一条 workspace 定义。
 image = "0.25.10"
+
+[workspace.lints.rust]
+# ──────────────────────────────────────────────────────────────────────────────
+# Rust Lint Levels
+# ──────────────────────────────────────────────────────────────────────────────
+mismatched_lifetime_syntaxes = "allow"
+
+[workspace.lints.clippy]
+# ──────────────────────────────────────────────────────────────────────────────
+# Base Lint Levels
+# ──────────────────────────────────────────────────────────────────────────────
+all = {level = "warn", priority = -1}
+correctness = {level = "deny", priority = -1}
+nursery = {level = "warn", priority = -1}
+pedantic = {level = "warn", priority = -1}
+perf = {level = "warn", priority = -1}
+style = {level = "warn", priority = -1}
+suspicious = {level = "deny", priority = -1}
 
 # Release模式优化配置
 [profile.release]
