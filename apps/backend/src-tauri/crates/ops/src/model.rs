@@ -40,19 +40,50 @@ pub enum Provider {
     /// Docker Swarm 集群（只连 Manager）
     Swarm,
     /// Kubernetes 集群（只连 APIServer）
+    ///
+    /// `rename` 与 [`Provider::as_str`] 保持一致（`k8s`），同时保留 `kubernetes`
+    /// 作为反序列化别名，兼容既有落库数据与旧接口调用方。
+    #[serde(rename = "k8s", alias = "kubernetes")]
     Kubernetes,
+    /// Redis（原生 / Redis Stack，含 RediSearch、RedisJSON 等模块）
+    #[serde(rename = "redis")]
+    Redis,
+    /// Valkey（Redis 7.2 分叉，RESP 协议与命令兼容，需独立编码以便统计授权差异）
+    #[serde(rename = "valkey")]
+    Valkey,
+    /// PostgreSQL + pgvector（**向量归档权威库**，`vector_role=archive`）
+    #[serde(rename = "pgvector")]
+    PgVector,
+    /// LanceDB（本地目录 / 对象存储的向量副本，**可重建**，`vector_role=replica`）
+    #[serde(rename = "lancedb")]
+    LanceDb,
 }
 
 impl Provider {
     /// 全部取值（界面下拉、批量探测用）
-    pub const ALL: [Self; 3] = [Self::Docker, Self::Swarm, Self::Kubernetes];
+    pub const ALL: [Self; 7] = [
+        Self::Docker,
+        Self::Swarm,
+        Self::Kubernetes,
+        Self::Redis,
+        Self::Valkey,
+        Self::PgVector,
+        Self::LanceDb,
+    ];
 
     /// 落库 / uid 用的稳定编码
+    ///
+    /// 与 `#[serde(rename)]` 必须逐字一致（有 `serde_name_equals_as_str` 单测守护）：
+    /// 落库、`resource_uid`、HTTP 接口、前端下拉全部依赖它。
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Docker => "docker",
             Self::Swarm => "swarm",
             Self::Kubernetes => "k8s",
+            Self::Redis => "redis",
+            Self::Valkey => "valkey",
+            Self::PgVector => "pgvector",
+            Self::LanceDb => "lancedb",
         }
     }
 
@@ -62,12 +93,44 @@ impl Provider {
             Self::Docker => "Docker 单机",
             Self::Swarm => "Docker Swarm",
             Self::Kubernetes => "Kubernetes",
+            Self::Redis => "Redis",
+            Self::Valkey => "Valkey",
+            Self::PgVector => "PostgreSQL + pgvector",
+            Self::LanceDb => "LanceDB",
         }
     }
 
-    /// 对应 `asset_category.category_scope`：三者都属于 IT 逻辑资产
+    /// 对应 `asset_category.category_scope`
+    ///
+    /// 容器 / 集群编排工具属于 **IT 逻辑资产**；缓存与向量库属于 **数据资产**
+    /// （方案 §2.1：数据资产按数据实体而非宿主机计量）。
     pub const fn category_scope(self) -> CategoryScope {
-        CategoryScope::Logical
+        match self {
+            Self::Docker | Self::Swarm | Self::Kubernetes => CategoryScope::Logical,
+            Self::Redis | Self::Valkey | Self::PgVector | Self::LanceDb => CategoryScope::Data,
+        }
+    }
+
+    /// 是否为「数据存储」类来源（缓存 / 向量库）
+    ///
+    /// 采集侧据此决定超时预算与「不做 DDL / 不写数据」的硬约束提示。
+    pub const fn is_data_store(self) -> bool {
+        matches!(
+            self,
+            Self::Redis | Self::Valkey | Self::PgVector | Self::LanceDb
+        )
+    }
+
+    /// 向量库在采集链路中的角色
+    ///
+    /// - `archive`：pgvector，权威副本，**不可**由采集侧重建；
+    /// - `replica`：LanceDB，可由 pgvector 重放重建，允许漂移（见 `attributes.replica_drift`）。
+    pub const fn vector_role(self) -> Option<&'static str> {
+        match self {
+            Self::PgVector => Some("archive"),
+            Self::LanceDb => Some("replica"),
+            _ => None,
+        }
     }
 }
 
@@ -79,6 +142,11 @@ impl FromStr for Provider {
             "docker" => Ok(Self::Docker),
             "swarm" => Ok(Self::Swarm),
             "k8s" | "kubernetes" => Ok(Self::Kubernetes),
+            // 别名只为「人手输入 / 旧配置」兼容，落库一律用 `as_str`
+            "redis" | "redis_stack" => Ok(Self::Redis),
+            "valkey" => Ok(Self::Valkey),
+            "pgvector" | "postgres" | "postgresql" | "pg" => Ok(Self::PgVector),
+            "lancedb" | "lance" => Ok(Self::LanceDb),
             other => Err(OpsError::Parse(format!("未知采集来源：{other}"))),
         }
     }
@@ -158,11 +226,25 @@ pub enum ResourceKind {
     ConfigMap,
     /// Secret（只采元数据，绝不取内容）
     Secret,
+    // ---- Redis / Valkey（缓存与检索） ----
+    /// 缓存实例（独立实例或 Redis Cluster 中的单个节点）
+    CacheInstance,
+    /// 逻辑库（db0 / db1 ...，带 keyspace 键数与内存占用）
+    CacheKeyspace,
+    /// 已加载模块（`MODULE LIST`：search / ReJSON / bf ...）
+    CacheModule,
+    /// 检索索引（RediSearch `FT._LIST`）
+    SearchIndex,
+    // ---- 向量库（pgvector 权威 / LanceDB 副本） ----
+    /// 向量表（pgvector `schema.table`、LanceDB `table`）
+    VectorTable,
+    /// 向量索引（pgvector `pg_index`、LanceDB 的 `list_indices`）
+    VectorIndex,
 }
 
 impl ResourceKind {
     /// 全部取值（自检用，保证 `as_str` / `FromStr` 覆盖一致）
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 27] = [
         Self::Container,
         Self::Image,
         Self::Network,
@@ -184,6 +266,12 @@ impl ResourceKind {
         Self::PersistentVolumeClaim,
         Self::ConfigMap,
         Self::Secret,
+        Self::CacheInstance,
+        Self::CacheKeyspace,
+        Self::CacheModule,
+        Self::SearchIndex,
+        Self::VectorTable,
+        Self::VectorIndex,
     ];
 
     /// 落库 / uid 用的稳定编码
@@ -210,6 +298,12 @@ impl ResourceKind {
             Self::PersistentVolumeClaim => "persistent_volume_claim",
             Self::ConfigMap => "configmap",
             Self::Secret => "secret",
+            Self::CacheInstance => "cache_instance",
+            Self::CacheKeyspace => "cache_keyspace",
+            Self::CacheModule => "cache_module",
+            Self::SearchIndex => "search_index",
+            Self::VectorTable => "vector_table",
+            Self::VectorIndex => "vector_index",
         }
     }
 
@@ -237,6 +331,12 @@ impl ResourceKind {
             Self::PersistentVolumeClaim => "PVC",
             Self::ConfigMap => "ConfigMap",
             Self::Secret => "Secret",
+            Self::CacheInstance => "缓存实例",
+            Self::CacheKeyspace => "逻辑库",
+            Self::CacheModule => "已加载模块",
+            Self::SearchIndex => "检索索引",
+            Self::VectorTable => "向量表",
+            Self::VectorIndex => "向量索引",
         }
     }
 
@@ -266,12 +366,61 @@ impl ResourceKind {
         )
     }
 
-    /// 所属采集来源
-    pub const fn provider(self) -> Provider {
+    /// 所属来源**族**（同族来源共享资源类型）
+    ///
+    /// Redis / Valkey 共用同一批缓存类型，此处以族代表 `Redis` 表示；
+    /// pgvector / LanceDB 共用向量表与索引类型，以 `PgVector` 表示。
+    /// 需要「精确归属」判断时用 [`Self::supports`]。
+    pub const fn family(self) -> Provider {
         match self {
             Self::Container | Self::Image | Self::Network | Self::Volume => Provider::Docker,
             Self::SwarmNode | Self::SwarmService | Self::SwarmTask => Provider::Swarm,
+            Self::CacheInstance | Self::CacheKeyspace | Self::CacheModule | Self::SearchIndex => {
+                Provider::Redis
+            }
+            Self::VectorTable | Self::VectorIndex => Provider::PgVector,
             _ => Provider::Kubernetes,
+        }
+    }
+
+    /// 该资源类型能否由指定来源采集
+    ///
+    /// 对账器只用它做「来源 → 类型」白名单校验，避免把 Valkey 采集出的缓存类型
+    /// 误判成「Redis 专有」，也避免把 LanceDB 副本类型误判成 pgvector 权威数据。
+    pub const fn supports(self, provider: Provider) -> bool {
+        match provider {
+            Provider::Docker => matches!(
+                self,
+                Self::Container | Self::Image | Self::Network | Self::Volume
+            ),
+            Provider::Swarm => matches!(
+                self,
+                Self::SwarmNode | Self::SwarmService | Self::SwarmTask
+            ),
+            Provider::Redis | Provider::Valkey => matches!(
+                self,
+                Self::CacheInstance | Self::CacheKeyspace | Self::CacheModule | Self::SearchIndex
+            ),
+            Provider::PgVector | Provider::LanceDb => {
+                matches!(self, Self::VectorTable | Self::VectorIndex)
+            }
+            Provider::Kubernetes => matches!(
+                self,
+                Self::Namespace
+                    | Self::ClusterNode
+                    | Self::Deployment
+                    | Self::DaemonSet
+                    | Self::StatefulSet
+                    | Self::Job
+                    | Self::CronJob
+                    | Self::Pod
+                    | Self::KubeService
+                    | Self::Ingress
+                    | Self::PersistentVolume
+                    | Self::PersistentVolumeClaim
+                    | Self::ConfigMap
+                    | Self::Secret
+            ),
         }
     }
 }
@@ -551,6 +700,23 @@ impl ResourceRecord {
         self
     }
 
+    /// 设置标签（Docker / K8s labels、Redis keyspace 前缀等）
+    #[must_use]
+    pub fn with_labels(mut self, labels: BTreeMap<String, String>) -> Self {
+        self.labels = labels;
+        self
+    }
+
+    /// 设置扩展属性
+    ///
+    /// 约定：必须是 JSON 对象（`serde_json::json!({...})`）。数据存储类连接器
+    /// 用它承载 `vector_role` / `replica_drift` / `dimensions` 等排查字段。
+    #[must_use]
+    pub fn with_attributes(mut self, attributes: serde_json::Value) -> Self {
+        self.attributes = attributes;
+        self
+    }
+
     /// 是否短时动态资产（容器 / Pod / Swarm Task / Job）
     pub const fn is_short_lived(&self) -> bool {
         self.key.kind.is_short_lived()
@@ -729,7 +895,7 @@ mod tests {
             );
             assert!(!kind.label().is_empty());
         }
-        assert_eq!(ResourceKind::ALL.len(), 21);
+        assert_eq!(ResourceKind::ALL.len(), 27);
         assert!(ResourceKind::Pod.is_namespaced());
         assert!(!ResourceKind::ClusterNode.is_namespaced());
         assert!(!ResourceKind::Image.is_namespaced());
@@ -756,11 +922,90 @@ mod tests {
             Provider::Kubernetes
         );
         assert!("swarm_cluster".parse::<Provider>().is_err());
-        for provider in Provider::ALL {
+        // 数据存储来源的别名（兼容旧配置与人工录入）
+        for alias in ["redis", "redis_stack"] {
+            assert_eq!(alias.parse::<Provider>().expect("解析失败"), Provider::Redis);
+        }
+        for alias in ["pgvector", "postgres", "postgresql", "pg"] {
+            assert_eq!(
+                alias.parse::<Provider>().expect("解析失败"),
+                Provider::PgVector
+            );
+        }
+        for alias in ["lancedb", "lance"] {
+            assert_eq!(
+                alias.parse::<Provider>().expect("解析失败"),
+                Provider::LanceDb
+            );
+        }
+        assert_eq!(
+            "valkey".parse::<Provider>().expect("解析失败"),
+            Provider::Valkey
+        );
+    }
+
+    #[test]
+    fn provider_scope_splits_logical_and_data() {
+        for provider in [Provider::Docker, Provider::Swarm, Provider::Kubernetes] {
             assert_eq!(provider.category_scope(), CategoryScope::Logical);
             assert_eq!(provider.category_scope().as_str(), "logical");
+            assert!(!provider.is_data_store());
+            assert_eq!(provider.vector_role(), None);
+        }
+        for provider in [
+            Provider::Redis,
+            Provider::Valkey,
+            Provider::PgVector,
+            Provider::LanceDb,
+        ] {
+            assert_eq!(provider.category_scope(), CategoryScope::Data);
+            assert_eq!(provider.category_scope().as_str(), "data");
+            assert!(provider.is_data_store());
+        }
+        assert_eq!(Provider::PgVector.vector_role(), Some("archive"));
+        assert_eq!(Provider::LanceDb.vector_role(), Some("replica"));
+        for provider in Provider::ALL {
             assert_eq!(provider.to_string(), provider.as_str());
         }
+        assert_eq!(Provider::ALL.len(), 7);
+    }
+
+    #[test]
+    fn serde_name_equals_as_str() {
+        for provider in Provider::ALL {
+            let json = serde_json::to_value(provider).expect("序列化失败");
+            assert_eq!(
+                json.as_str(),
+                Some(provider.as_str()),
+                "{} 的 serde 名与 as_str 不一致，会导致落库编码与接口编码分叉",
+                provider.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn kind_family_and_supports_cover_new_sources() {
+        for kind in ResourceKind::ALL {
+            assert!(
+                kind.supports(kind.family()),
+                "{} 应被同族来源支持",
+                kind.as_str()
+            );
+        }
+        for kind in [ResourceKind::CacheInstance, ResourceKind::SearchIndex] {
+            assert!(kind.supports(Provider::Redis));
+            assert!(kind.supports(Provider::Valkey));
+            assert!(!kind.supports(Provider::PgVector));
+        }
+        for kind in [ResourceKind::VectorTable, ResourceKind::VectorIndex] {
+            assert!(kind.supports(Provider::PgVector));
+            assert!(kind.supports(Provider::LanceDb));
+            assert!(!kind.supports(Provider::Redis));
+        }
+        // 数据存储类资源是长期资产：不得进入短时动态资产子分类
+        assert!(!ResourceKind::CacheInstance.is_short_lived());
+        assert!(!ResourceKind::VectorTable.is_short_lived());
+        assert!(!ResourceKind::VectorTable.is_namespaced());
     }
 
     #[test]

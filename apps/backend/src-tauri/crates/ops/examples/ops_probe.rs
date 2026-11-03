@@ -227,6 +227,14 @@ fn build_config() -> Result<ConnectionConfig, String> {
     let mut config = match provider {
         Provider::Docker | Provider::Swarm => docker_config(provider, name, &endpoint, &auth)?,
         Provider::Kubernetes => k8s_config(name, &endpoint, &auth)?,
+        // 数据存储（Redis / Valkey / PgVector / LanceDB）的驱动已迁到 crates/vector-*；
+        // 本示例只探测 Docker / Swarm / K8s 三类基础设施。
+        other => {
+            return Err(format!(
+                "OPS_PROVIDER={} 属于向量数据存储，驱动在 crates/vector-*，本示例只探测 docker / swarm / k8s",
+                other.as_str()
+            ));
+        }
     };
 
     if let Some(secs) = env_u64("OPS_TIMEOUT_SECS") {
@@ -375,6 +383,10 @@ async fn build_connector(config: ConnectionConfig) -> Result<Arc<dyn Connector>,
     match config.provider {
         Provider::Docker | Provider::Swarm => build_docker(config),
         Provider::Kubernetes => build_k8s(config).await,
+        other => Err(format!(
+            "{} 由 crates/vector-* 连接器负责，本示例不覆盖（只探测 docker / swarm / k8s）",
+            other.as_str()
+        )),
     }
 }
 

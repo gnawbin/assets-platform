@@ -41,6 +41,11 @@ parser = {path = "crates/parser"}
 service = {path = "crates/service"}
 storage = {path = "crates/storage"}
 utils = {path = "crates/utils"}
+# 向量数据存储：crates/vector 只放 trait 与数据类型，三个实现各自持有驱动、互不依赖
+vector = {path = "crates/vector"}
+vector-lance = {path = "crates/vector-lance"}
+vector-pgvector = {path = "crates/vector-pgvector"}
+vector-redis = {path = "crates/vector-redis"}
 vfs = {path = "crates/vfs"}
 workflow = {path = "crates/workflow"}
 
@@ -81,6 +86,31 @@ parking_lot = "0.13.0"
 rayon = "1.12"
 tokio-util = {version = "0.7.20", features = ["full"]}
 tower-http = {version = "0.7.1", features = ["cors", "trace"]}
+# ──────────────────────────────────────────────────────────────────────────────
+# 向量数据存储（crates/vector-redis、crates/vector-pgvector、crates/vector-lance）
+#   版本与 features 只在此处定义一次；三个实现 crate 各自持有自己的驱动，
+#   crates/vector 只放与驱动无关的 trait 与数据类型。
+# ──────────────────────────────────────────────────────────────────────────────
+# RESP 客户端：tokio-comp = 异步连接，connection-manager = 多路复用 + 自动重连，
+# tokio-rustls-comp = 让 aio::tokio 实现 connect_tcp_tls（仅开 tls-rustls-* 会缺 impl）
+redis = {version = "1.8.1", default-features = false, features = [
+  "tokio-comp",
+  "connection-manager",
+  "tokio-rustls-comp",
+  "tls-rustls-webpki-roots",
+]}
+# rustls 的 CryptoProvider 全仓统一为 ring（与 kube / bollard / sqlx 同源）；
+# 显式声明可避免 "no process-level CryptoProvider" 运行时恐慌。
+rustls = {version = "0.23", default-features = false, features = [
+  "ring",
+  "std",
+  "tls12",
+]}
+# 嵌入式向量库（可重建副本）：default = [] 但 arrow / datafusion / lance 为非可选依赖，
+# 因此开启它的构建成本是确定的（只有 vector-lance 依赖它）。
+lancedb = {version = "0.41.0", default-features = false}
+# LanceDB schema 反射用；版本必须与 lancedb 内部 arrow 同源（58）
+arrow-schema = {version = "58", default-features = false}
 # ──────────────────────────────────────────────────────────────────────────────
 # Search & File Walking
 # ──────────────────────────────────────────────────────────────────────────────

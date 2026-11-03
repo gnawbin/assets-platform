@@ -112,6 +112,17 @@ impl DockerConnector {
             AuthKind::Direct { .. } => {
                 return Err(OpsError::Unsupported("Docker 不支持 K8s 直连认证"));
             }
+            // 向量数据存储的认证方式与 Docker / Swarm 无关：这些连接器分别由
+            // vector-redis / vector-pgvector / vector-lance 构建。
+            AuthKind::RedisAcl { .. }
+            | AuthKind::RedisTls { .. }
+            | AuthKind::PgPassword { .. }
+            | AuthKind::LanceLocal { .. }
+            | AuthKind::LanceCloud { .. } => {
+                return Err(OpsError::Unsupported(
+                    "Docker / Swarm 不支持向量数据存储的认证方式",
+                ));
+            }
         };
         let docker = docker.map_err(map_ctor_error)?;
         Ok(Self {

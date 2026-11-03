@@ -24,6 +24,11 @@ pub mod docker;
 #[cfg(feature = "k8s")]
 pub mod k8s;
 
+// 数据存储（Redis / Valkey、PostgreSQL+pgvector、LanceDB）的采集实现不在这里：
+// 驱动依赖分别归属 crates/vector-redis、crates/vector-pgvector、crates/vector-lance，
+// 它们通过 crates/vector 的 `VectorStore` 抽象对外提供能力，再经 service 组装成本 crate
+// 的 [`Connector`]。本模块只保留协议无关的 [`AuthKind`] / [`ConnectionConfig`]。
+
 /// 连接认证方式
 ///
 /// 刻意手写 `Debug`：凭证字段必须掩码后输出，避免误入日志。
@@ -78,6 +83,50 @@ pub enum AuthKind {
         /// 跳过证书校验（自签集群录入初期常用，落库时需审计）
         insecure_skip_tls_verify: bool,
     },
+    /// Redis / Valkey ACL 用户密码（RESP `AUTH user pass`）
+    ///
+    /// 采集账号必须是**只读**账号（`+@read +@connection +ping +info +config|get`
+    /// 之类的最小 ACL），本 crate 不会执行任何写命令。
+    RedisAcl {
+        /// ACL 用户名（6.0 之前固定为 `default`）
+        username: String,
+        /// ACL 密码
+        password: String,
+    },
+    /// Redis / Valkey TLS（`rediss://`）+ 可选 ACL
+    RedisTls {
+        /// ACL 用户名，`None` 表示无认证（仅内网测试环境）
+        username: Option<String>,
+        /// ACL 密码
+        password: Option<String>,
+        /// CA 证书 PEM 原文（自签证书时需要）
+        ca_pem: Option<String>,
+        /// 跳过证书校验（自签环境，落库时需审计）
+        insecure_skip_tls_verify: bool,
+    },
+    /// PostgreSQL 密码认证（pgvector 采集账号必须是**只读**角色）
+    PgPassword {
+        /// 只读角色名
+        username: String,
+        /// 角色密码
+        password: String,
+    },
+    /// LanceDB 本地目录（后端进程可直接读写的文件系统路径）
+    LanceLocal {
+        /// 数据库目录（`file:///data/lance` 去掉 scheme 后的路径）
+        path: String,
+    },
+    /// LanceDB 对象存储（S3 / MinIO / OSS 兼容 S3 协议）
+    LanceCloud {
+        /// Access Key ID
+        access_key: String,
+        /// Secret Access Key
+        secret_key: String,
+        /// 区域（MinIO 可留空）
+        region: Option<String>,
+        /// 自定义 endpoint（MinIO / 私有网关）
+        endpoint: Option<String>,
+    },
 }
 
 impl AuthKind {
@@ -91,7 +140,35 @@ impl AuthKind {
             Self::KubeconfigFile { .. } => "kubeconfig_file",
             Self::KubeconfigInline { .. } => "kubeconfig_inline",
             Self::Direct { .. } => "direct",
+            Self::RedisAcl { .. } => "redis_acl",
+            Self::RedisTls { .. } => "redis_tls",
+            Self::PgPassword { .. } => "pg_password",
+            Self::LanceLocal { .. } => "lance_local",
+            Self::LanceCloud { .. } => "lance_cloud",
         }
+    }
+
+    /// 该认证方式是否携带需要加密落库的凭证
+    ///
+    /// 与 `service::ops_service::auth_requires_credential` 必须保持一致：
+    /// 前者用于「是否需要加密列」，后者用于「界面上是否提示必填」。
+    pub const fn requires_credential(&self) -> bool {
+        matches!(
+            self,
+            Self::MutualTls { .. }
+                | Self::MutualTlsInline { .. }
+                | Self::KubeconfigInline { .. }
+                | Self::Direct { .. }
+                | Self::RedisAcl { .. }
+                | Self::RedisTls { .. }
+                | Self::PgPassword { .. }
+                | Self::LanceCloud { .. }
+        )
+    }
+
+    /// 是否为「本地路径」认证（不涉网，无需凭证，也不会触发公网告警）
+    pub const fn is_local_path(&self) -> bool {
+        matches!(self, Self::LanceLocal { .. })
     }
 
     /// 是否为本机 socket（决定是否需要「仅本机可采集」提示）
@@ -142,6 +219,37 @@ impl fmt::Debug for AuthKind {
                 .field("client_key_pem", &client_key_pem.as_ref().map(|_| MASK))
                 .field("insecure_skip_tls_verify", insecure_skip_tls_verify)
                 .finish(),
+            Self::RedisAcl { username, .. } => f
+                .debug_struct("RedisAcl")
+                .field("username", username)
+                .field("password", &MASK)
+                .finish(),
+            Self::RedisTls {
+                username,
+                insecure_skip_tls_verify,
+                ..
+            } => f
+                .debug_struct("RedisTls")
+                .field("username", username)
+                .field("password", &MASK)
+                .field("ca_pem", &MASK)
+                .field("insecure_skip_tls_verify", insecure_skip_tls_verify)
+                .finish(),
+            Self::PgPassword { username, .. } => f
+                .debug_struct("PgPassword")
+                .field("username", username)
+                .field("password", &MASK)
+                .finish(),
+            Self::LanceLocal { path } => f.debug_struct("LanceLocal").field("path", path).finish(),
+            Self::LanceCloud {
+                region, endpoint, ..
+            } => f
+                .debug_struct("LanceCloud")
+                .field("access_key", &MASK)
+                .field("secret_key", &MASK)
+                .field("region", region)
+                .field("endpoint", endpoint)
+                .finish(),
         }
     }
 }
@@ -170,7 +278,17 @@ impl ConnectionTier {
 
     /// 由归一化端点猜测层级（仅用于提示，不作为安全决策依据）
     pub fn from_endpoint(endpoint_key: &str) -> Self {
-        let host = strip_port(endpoint_key)
+        let endpoint_key = endpoint_key.trim();
+        // 允许直接传带 scheme 的原始端点（探针 / 界面回显都用得上）
+        let key = endpoint_key
+            .split_once("://")
+            .map_or(endpoint_key, |(_, rest)| rest);
+        // 本地文件路径（LanceDB `file:///data/lance`、Windows `D:\data\lance`）不涉网，
+        // 若按「域名无法判定 → Remote」处理会误报「端点为公网地址」的安全告警。
+        if looks_like_local_path(key) {
+            return Self::Local;
+        }
+        let host = strip_port(key)
             .trim_start_matches('[')
             .trim_end_matches(']');
         if matches!(host, "local" | "localhost" | "127.0.0.1" | "::1") {
@@ -203,6 +321,33 @@ pub fn strip_port(endpoint_key: &str) -> &str {
         Some((host, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => host,
         _ => endpoint_key,
     }
+}
+
+/// 是否为本地文件系统路径
+///
+/// 覆盖四种写法：`file:///data/lance`（已去掉 scheme 后为 `/data/lance`）、
+/// POSIX 绝对路径 `/data/lance`、Windows 盘符 `D:\data\lance` / `D:/data/lance`、
+/// UNC 共享 `\\nas\share\lance`。数据存储来源（LanceDB）用本地目录是**正常形态**，
+/// 不能被判成跨网端点。
+pub fn looks_like_local_path(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    if value
+        .get(..5)
+        .is_some_and(|head| head.eq_ignore_ascii_case("file:"))
+    {
+        return true;
+    }
+    if value.starts_with('/') || value.starts_with('\\') {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    bytes.len() > 2
+        && bytes.first().is_some_and(u8::is_ascii_alphabetic)
+        && bytes.get(1) == Some(&b':')
+        && matches!(bytes.get(2), Some(b'\\' | b'/'))
 }
 
 /// 默认请求超时（秒）
@@ -407,6 +552,10 @@ impl ConnectionConfig {
     ///
     /// 本机 socket 归一化为 `local`，避免 `npipe:////./pipe/...` 里的斜杠破坏 uid 结构；
     /// 远程连接为空串时（kubeconfig 尚未解析出 server）返回空串，由 `validate` 兜底。
+    ///
+    /// **本地路径与对象存储**（LanceDB `file:///data/lance`、`s3://bucket/prefix`）里的 `/`
+    /// 同样会破坏 `provider://endpoint/kind/name` 的段结构，统一改写成 `_`：
+    /// `file:///data/lance` → `_data_lance`（稳定且可重复，保证 uid 幂等）。
     pub fn endpoint_key(&self) -> String {
         if self.auth.is_local_socket() {
             return "local".to_string();
@@ -415,11 +564,20 @@ impl ConnectionConfig {
             .endpoint
             .split_once("://")
             .map_or(self.endpoint.as_str(), |(_, rest)| rest);
-        rest.trim_end_matches('/').to_string()
+        let rest = rest.trim_end_matches('/');
+        if rest.contains('/') {
+            rest.replace('/', "_")
+        } else {
+            rest.to_string()
+        }
     }
 
     /// 连接层级（界面提示用）
     pub fn tier(&self) -> ConnectionTier {
+        // 本地路径在 `endpoint_key()` 里已被改写，这里用原始端点判定
+        if self.auth.is_local_path() || looks_like_local_path(&self.endpoint) {
+            return ConnectionTier::Local;
+        }
         ConnectionTier::from_endpoint(&self.endpoint_key())
     }
 
@@ -480,6 +638,9 @@ impl ConnectionConfig {
         match self.provider {
             Provider::Docker | Provider::Swarm => self.validate_docker()?,
             Provider::Kubernetes => self.validate_kubernetes()?,
+            Provider::Redis | Provider::Valkey => self.validate_cache()?,
+            Provider::PgVector => self.validate_postgres()?,
+            Provider::LanceDb => self.validate_lancedb()?,
         }
         Ok(())
     }
@@ -593,7 +754,126 @@ impl ConnectionConfig {
         Ok(())
     }
 
-    /// 确认本次构建启用了该 provider 需要的 feature
+    /// 缓存（Redis / Valkey）配置校验
+    ///
+    /// 只校验「能否发起一次 AUTH + PING」，**不**校验账号是否只读：
+    /// 只读性由 `vector-redis` 的命令白名单保证，探测结果里再给出 ACL 风险告警。
+    fn validate_cache(&self) -> OpsResult<()> {
+        match &self.auth {
+            AuthKind::RedisAcl { username, password } => {
+                if username.trim().is_empty() {
+                    return Err(OpsError::Config(
+                        "Redis ACL 用户名不能为空（未启用 ACL 的实例请填 default）".to_string(),
+                    ));
+                }
+                if password.is_empty() {
+                    return Err(OpsError::Config("Redis ACL 密码不能为空".to_string()));
+                }
+            }
+            AuthKind::RedisTls {
+                username, password, ..
+            } => {
+                let has_user = username
+                    .as_ref()
+                    .is_some_and(|value| !value.trim().is_empty());
+                let has_password = password.as_ref().is_some_and(|value| !value.is_empty());
+                if has_user != has_password {
+                    return Err(OpsError::Config(
+                        "Redis TLS 的用户名与密码必须同时提供或同时留空".to_string(),
+                    ));
+                }
+            }
+            other => {
+                return Err(OpsError::Config(format!(
+                    "{} 不支持 {} 认证方式",
+                    self.provider.label(),
+                    other.describe()
+                )));
+            }
+        }
+        if self.endpoint.trim().is_empty() {
+            return Err(OpsError::Config(
+                "Redis / Valkey 端点不能为空（形如 redis://10.0.0.7:6379）".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// pgvector 配置校验
+    ///
+    /// 采集账号必须是**只读角色**（`SELECT` + `pg_catalog` 权限），
+    /// 连接器只发 `SELECT`，且整个采集过程包在 `READ ONLY` 事务里（见 `vector-pgvector`）。
+    fn validate_postgres(&self) -> OpsResult<()> {
+        match &self.auth {
+            AuthKind::PgPassword { username, password } => {
+                if username.trim().is_empty() {
+                    return Err(OpsError::Config("pgvector 采集账号不能为空".to_string()));
+                }
+                if password.is_empty() {
+                    return Err(OpsError::Config(
+                        "pgvector 采集账号密码不能为空".to_string(),
+                    ));
+                }
+            }
+            other => {
+                return Err(OpsError::Config(format!(
+                    "{} 不支持 {} 认证方式",
+                    self.provider.label(),
+                    other.describe()
+                )));
+            }
+        }
+        if self.endpoint.trim().is_empty() {
+            return Err(OpsError::Config(
+                "pgvector 端点不能为空（形如 postgresql://10.0.0.8:5432/assets）".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// LanceDB 配置校验（本地目录不需要凭证，对象存储需要 AK/SK）
+    fn validate_lancedb(&self) -> OpsResult<()> {
+        match &self.auth {
+            AuthKind::LanceLocal { path } => {
+                if path.trim().is_empty() && self.endpoint.trim().is_empty() {
+                    return Err(OpsError::Config(
+                        "LanceDB 本地目录不能为空（形如 file:///data/lance）".to_string(),
+                    ));
+                }
+            }
+            AuthKind::LanceCloud {
+                access_key,
+                secret_key,
+                ..
+            } => {
+                if access_key.trim().is_empty() || secret_key.trim().is_empty() {
+                    return Err(OpsError::Config(
+                        "LanceDB 对象存储需要同时提供 Access Key 与 Secret Key".to_string(),
+                    ));
+                }
+                if self.endpoint.trim().is_empty() {
+                    return Err(OpsError::Config(
+                        "LanceDB 对象存储端点不能为空（形如 s3://bucket/prefix）".to_string(),
+                    ));
+                }
+            }
+            other => {
+                return Err(OpsError::Config(format!(
+                    "{} 不支持 {} 认证方式",
+                    self.provider.label(),
+                    other.describe()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// 确认本次构建启用了该 provider 需要的采集实现
+    ///
+    /// Docker / Swarm / K8s 的实现就在本 crate 内，用 feature 开关控制；
+    /// 数据存储（Redis / Valkey、pgvector、LanceDB）的驱动依赖分别归属
+    /// `vector-redis`、`vector-pgvector`、`vector-lance`，本 crate 不做判断——
+    /// 可用性由组合方（`service::ops_service::build_connector`）在其侧断言。
     pub fn ensure_feature(&self) -> OpsResult<()> {
         match self.provider {
             Provider::Docker | Provider::Swarm => {
@@ -616,6 +896,7 @@ impl ConnectionConfig {
                     Err(OpsError::Unsupported("k8s"))
                 }
             }
+            Provider::Redis | Provider::Valkey | Provider::PgVector | Provider::LanceDb => Ok(()),
         }
     }
 }
@@ -625,6 +906,9 @@ impl ConnectionConfig {
 /// - 本机 Docker → `local://`
 /// - Docker/Swarm 明文 → `tcp://host:2375`
 /// - Docker/Swarm mTLS、K8s → `https://host:port`
+/// - Redis / Valkey → `redis://host:6379`（TLS 认证补 `rediss://`）
+/// - pgvector → `postgresql://host:5432/db`（`postgres://` 保留原样）
+/// - LanceDB → `file:///path`（本地）/ `s3://bucket/prefix`（对象存储）
 pub fn normalize_endpoint(provider: Provider, endpoint: &str, auth: &AuthKind) -> String {
     let endpoint = endpoint.trim();
     if endpoint.is_empty() {
@@ -645,6 +929,21 @@ pub fn normalize_endpoint(provider: Provider, endpoint: &str, auth: &AuthKind) -
                 "https"
             } else {
                 "tcp"
+            }
+        }
+        Provider::Redis | Provider::Valkey => {
+            if matches!(auth, AuthKind::RedisTls { .. }) {
+                "rediss"
+            } else {
+                "redis"
+            }
+        }
+        Provider::PgVector => "postgresql",
+        Provider::LanceDb => {
+            if matches!(auth, AuthKind::LanceCloud { .. }) {
+                "s3"
+            } else {
+                "file"
             }
         }
     };
@@ -1251,3 +1550,225 @@ mod pem_inline_tests {
         assert!(debug.contains("<已隐藏>"), "{debug}");
     }
 }
+
+#[cfg(test)]
+mod datastore_tests {
+    use super::*;
+    use crate::model::{ResourceKey, ResourceKind};
+
+    fn cache_config(auth: AuthKind) -> ConnectionConfig {
+        ConnectionConfig::new("缓存", Provider::Redis, "10.0.0.7:6379", auth)
+    }
+
+    #[test]
+    fn cache_endpoint_and_auth_scheme() {
+        let plain = cache_config(AuthKind::RedisAcl {
+            username: "ops_ro".into(),
+            password: "secret".into(),
+        });
+        assert_eq!(plain.endpoint, "redis://10.0.0.7:6379");
+        assert_eq!(plain.auth.describe(), "redis_acl");
+        assert!(plain.auth.requires_credential());
+        assert_eq!(plain.tier(), ConnectionTier::Intranet);
+        assert!(plain.validate().is_ok());
+
+        let tls = cache_config(AuthKind::RedisTls {
+            username: None,
+            password: None,
+            ca_pem: None,
+            insecure_skip_tls_verify: false,
+        });
+        assert_eq!(tls.endpoint, "rediss://10.0.0.7:6379");
+        assert_eq!(tls.auth.describe(), "redis_tls");
+        assert!(tls.validate().is_ok());
+    }
+
+    #[test]
+    fn cache_validation_requires_credentials() {
+        let no_user = cache_config(AuthKind::RedisAcl {
+            username: "  ".into(),
+            password: "p".into(),
+        });
+        assert!(no_user.validate().is_err());
+
+        let no_password = cache_config(AuthKind::RedisAcl {
+            username: "default".into(),
+            password: String::new(),
+        });
+        assert!(no_password.validate().is_err());
+
+        // 用户名与密码必须成对出现
+        let half = cache_config(AuthKind::RedisTls {
+            username: Some("default".into()),
+            password: None,
+            ca_pem: None,
+            insecure_skip_tls_verify: false,
+        });
+        assert!(half.validate().is_err());
+
+        // 端点不能为空
+        let empty = ConnectionConfig::new(
+            "缓存",
+            Provider::Valkey,
+            "",
+            AuthKind::RedisAcl {
+                username: "default".into(),
+                password: "p".into(),
+            },
+        );
+        assert!(empty.validate().is_err());
+    }
+
+    #[test]
+    fn postgres_endpoint_and_validation() {
+        let config = ConnectionConfig::new(
+            "pgvector",
+            Provider::PgVector,
+            "10.0.0.8:5432",
+            AuthKind::PgPassword {
+                username: "ops_ro".into(),
+                password: "p".into(),
+            },
+        );
+        assert_eq!(config.endpoint, "postgresql://10.0.0.8:5432");
+        assert_eq!(config.endpoint_key(), "10.0.0.8:5432");
+        assert_eq!(config.tier(), ConnectionTier::Intranet);
+        assert!(config.validate().is_ok());
+
+        let no_password = ConnectionConfig::new(
+            "pgvector",
+            Provider::PgVector,
+            "10.0.0.8:5432",
+            AuthKind::PgPassword {
+                username: "ops_ro".into(),
+                password: String::new(),
+            },
+        );
+        assert!(no_password.validate().is_err());
+    }
+
+    #[test]
+    fn local_lance_path_is_local_tier() {
+        // 曾经的缺陷：file:///data/lance 被判成 Remote，界面误报「端点为公网地址」
+        let config = ConnectionConfig::new(
+            "向量副本",
+            Provider::LanceDb,
+            "file:///data/lance",
+            AuthKind::LanceLocal {
+                path: "/data/lance".into(),
+            },
+        );
+        assert_eq!(config.endpoint, "file:///data/lance");
+        assert_eq!(config.tier(), ConnectionTier::Local);
+        assert_eq!(config.endpoint_key(), "_data_lance");
+        assert!(config.validate().is_ok());
+
+        // uid 段结构不被路径斜杠破坏，且能反解
+        let key = ResourceKey::new(
+            Provider::LanceDb,
+            config.endpoint_key(),
+            ResourceKind::VectorTable,
+            "chunks",
+        );
+        assert_eq!(key.uid(), "lancedb://_data_lance/vector_table/chunks");
+        assert!(ResourceKey::parse(&key.uid()).is_ok());
+
+        assert_eq!(
+            ConnectionTier::from_endpoint("D:\\data\\lance"),
+            ConnectionTier::Local
+        );
+        assert_eq!(
+            ConnectionTier::from_endpoint("/data/lance"),
+            ConnectionTier::Local
+        );
+        assert_eq!(
+            ConnectionTier::from_endpoint("file:///data/lance"),
+            ConnectionTier::Local
+        );
+        assert!(!looks_like_local_path("10.0.0.7:6379"));
+    }
+
+    #[test]
+    fn lance_cloud_requires_key_pair() {
+        let cloud = ConnectionConfig::new(
+            "向量副本",
+            Provider::LanceDb,
+            "s3://vector-bucket/lance",
+            AuthKind::LanceCloud {
+                access_key: "AKIAEXAMPLE".to_string(),
+                secret_key: "sk-secret".to_string(),
+                region: Some("cn-north-1".to_string()),
+                endpoint: None,
+            },
+        );
+        assert_eq!(cloud.endpoint, "s3://vector-bucket/lance");
+        assert_eq!(cloud.auth.describe(), "lance_cloud");
+        assert_eq!(cloud.tier(), ConnectionTier::Remote);
+        assert!(cloud.validate().is_ok());
+
+        // 只给 AK、SK 为空白：必须报错（否则运行期才会在 SDK 里炸）
+        let half = ConnectionConfig::new(
+            "向量副本",
+            Provider::LanceDb,
+            "s3://vector-bucket/lance",
+            AuthKind::LanceCloud {
+                access_key: "AKIAEXAMPLE".to_string(),
+                secret_key: "   ".to_string(),
+                region: None,
+                endpoint: None,
+            },
+        );
+        assert!(half.validate().is_err());
+
+        // 本地目录既没路径也没端点：必须报错
+        let empty_local = ConnectionConfig::new(
+            "向量副本",
+            Provider::LanceDb,
+            "",
+            AuthKind::LanceLocal {
+                path: String::new(),
+            },
+        );
+        assert!(empty_local.validate().is_err());
+    }
+
+    #[test]
+    fn datastore_debug_masks_secrets() {
+        let cache = cache_config(AuthKind::RedisAcl {
+            username: "ops_ro".to_string(),
+            password: "cache-secret".to_string(),
+        });
+        let rendered = format!("{cache:?}");
+        assert!(!rendered.contains("cache-secret"), "{rendered}");
+        assert!(rendered.contains("ops_ro"), "{rendered}");
+
+        let postgres = ConnectionConfig::new(
+            "pgvector",
+            Provider::PgVector,
+            "10.0.0.8:5432",
+            AuthKind::PgPassword {
+                username: "ops_ro".to_string(),
+                password: "pg-secret".to_string(),
+            },
+        );
+        let rendered = format!("{postgres:?}");
+        assert!(!rendered.contains("pg-secret"), "{rendered}");
+
+        let lance = ConnectionConfig::new(
+            "向量副本",
+            Provider::LanceDb,
+            "s3://vector-bucket/lance",
+            AuthKind::LanceCloud {
+                access_key: "AKIAEXAMPLE".to_string(),
+                secret_key: "sk-secret".to_string(),
+                region: None,
+                endpoint: Some("http://minio:9000".to_string()),
+            },
+        );
+        let rendered = format!("{lance:?}");
+        assert!(!rendered.contains("sk-secret"), "{rendered}");
+        assert!(!rendered.contains("AKIAEXAMPLE"), "{rendered}");
+    }
+}
+
+
