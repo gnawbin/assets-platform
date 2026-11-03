@@ -5,7 +5,7 @@
 use database;
 use database::models::{
     ChatMessage, LLMChatRequest, LLMChatResponse, LLMEmbeddingRequest, LLMEmbeddingResponse,
-    LlmModel, LlmProvider, TokenUsage,
+    LlmProvider, TokenUsage,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;

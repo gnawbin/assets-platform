@@ -307,12 +307,16 @@ pub fn provider_options() -> Vec<OpsProviderOption> {
 }
 
 /// 某来源允许的认证方式（与 ops crate 的 validate 规则一致）
+///
+/// 只声明本模块负责的容器 / 编排来源；数据资产来源（缓存 / 向量库）的
+/// 认证方式由其所属模块负责，见 `Provider::is_data_store`，本模块不声明。
 fn allowed_auth_types(provider: Provider) -> &'static [&'static str] {
     match provider {
         Provider::Docker | Provider::Swarm => {
             &["local_socket", "plain_tcp", "mutual_tls", "mutual_tls_inline"]
         }
         Provider::Kubernetes => &["kubeconfig_file", "kubeconfig_inline", "direct"],
+        _ => &[],
     }
 }
 
@@ -371,8 +375,11 @@ pub fn auth_payload_to_kind(payload: &OpsAuthPayload) -> AuthKind {
 }
 
 /// ops 侧认证方式 → 载荷（落库 / 回读用）
-pub fn auth_kind_to_payload(kind: &AuthKind) -> OpsAuthPayload {
-    match kind {
+///
+/// 只覆盖本模块负责的容器 / 编排来源；数据资产来源（缓存 / 向量库）的认证
+/// 载荷归属各自的模块，这里显式返回 `None`——不猜、不用默认值兜底。
+pub fn auth_kind_to_payload(kind: &AuthKind) -> Option<OpsAuthPayload> {
+    let payload = match kind {
         AuthKind::LocalSocket => OpsAuthPayload::LocalSocket,
         AuthKind::PlainTcp => OpsAuthPayload::PlainTcp,
         AuthKind::MutualTls {
@@ -414,7 +421,9 @@ pub fn auth_kind_to_payload(kind: &AuthKind) -> OpsAuthPayload {
             client_key_pem: client_key_pem.clone(),
             insecure_skip_tls_verify: *insecure_skip_tls_verify,
         },
-    }
+        _ => return None,
+    };
+    Some(payload)
 }
 // ======================== 视图与配置辅助 ========================
 
@@ -497,6 +506,12 @@ fn build_config(
     name: &str,
 ) -> Result<ConnectionConfig, String> {
     let provider = provider_from_str(&input.provider)?;
+    if provider.is_data_store() {
+        return Err(format!(
+            "{} 属于数据资产来源，本模块不负责其采集",
+            provider.label()
+        ));
+    }
     let kind = auth_payload_to_kind(payload);
     if !allowed_auth_types(provider).contains(&kind.describe()) {
         return Err(format!(
@@ -528,6 +543,9 @@ fn build_config(
 }
 
 /// 更新场景下沿用旧认证方式时的端点归一化
+///
+/// 只补本模块负责的来源的 scheme；其它来源（数据资产）的端点原样返回，
+/// 由所属模块自己归一化，本层不猜协议。
 fn normalize_endpoint_for(provider: Provider, auth_type: &str, endpoint: &str) -> String {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.is_empty() {
@@ -541,16 +559,18 @@ fn normalize_endpoint_for(provider: Provider, auth_type: &str, endpoint: &str) -
         return endpoint.to_string();
     }
     let scheme = match provider {
-        Provider::Kubernetes => "https",
-        Provider::Docker | Provider::Swarm => {
-            if auth_type.starts_with("mutual_tls") {
-                "https"
-            } else {
-                "tcp"
-            }
-        }
+        Provider::Kubernetes => Some("https"),
+        Provider::Docker | Provider::Swarm => Some(if auth_type.starts_with("mutual_tls") {
+            "https"
+        } else {
+            "tcp"
+        }),
+        _ => None,
     };
-    format!("{scheme}://{endpoint}")
+    match scheme {
+        Some(scheme) => format!("{scheme}://{endpoint}"),
+        None => endpoint.to_string(),
+    }
 }
 
 /// 连接行 → 视图（不含凭证）
@@ -600,8 +620,14 @@ fn encrypt_auth(payload: &OpsAuthPayload) -> Result<String, String> {
 
 /// 连接行 → `ConnectionConfig`
 fn config_from_row(row: &OpsConnection) -> Result<ConnectionConfig, String> {
-    let payload = decrypt_auth(row)?;
     let provider = provider_from_str(&row.provider)?;
+    if provider.is_data_store() {
+        return Err(format!(
+            "{} 属于数据资产来源，本模块不负责其采集",
+            provider.label()
+        ));
+    }
+    let payload = decrypt_auth(row)?;
     let kind = auth_payload_to_kind(&payload);
     let mut config = ConnectionConfig::new(
         row.connection_name.clone(),
@@ -843,6 +869,9 @@ pub async fn delete_connection(id: i64) -> Result<(), String> {
 // ======================== 连通性探测 ========================
 
 /// 按来源构建只读连接器
+///
+/// 只覆盖本模块负责的容器 / 编排来源。数据资产来源（缓存 / 向量库）的采集
+/// 实现归属各自的 vector 侧 crate，本模块显式拒绝，绝不「静默当作成功」。
 async fn build_connector(config: ConnectionConfig) -> Result<Arc<dyn Connector>, String> {
     match config.provider {
         Provider::Docker | Provider::Swarm => DockerConnector::connect(config)
@@ -852,6 +881,10 @@ async fn build_connector(config: ConnectionConfig) -> Result<Arc<dyn Connector>,
             .await
             .map(|connector| Arc::new(connector) as Arc<dyn Connector>)
             .map_err(|err| format!("初始化 Kubernetes 连接器失败：{err}")),
+        other => Err(format!(
+            "{} 采集尚未接入（当前版本仅支持 Docker / Swarm / Kubernetes）",
+            other.label()
+        )),
     }
 }
 
@@ -1287,7 +1320,7 @@ mod tests {
     fn auth_payload_round_trips_through_auth_kind() {
         for payload in all_payloads() {
             let kind = auth_payload_to_kind(&payload);
-            let back = auth_kind_to_payload(&kind);
+            let back = auth_kind_to_payload(&kind).expect("容器 / 编排认证方式必须可回写");
             assert_eq!(payload, back);
         }
     }

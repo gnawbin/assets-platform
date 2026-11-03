@@ -54,10 +54,12 @@ pub async fn get_knowledge_asset(id: i64) -> Result<KnowledgeAsset, String> {
     Ok(item)
 }
 
-/// 获取知识资产列表（按 okf_type 和 tags 过滤）
+/// 获取知识资产列表（当前仅按 okf_type 过滤）
+///
+/// `_tags` 预留给后续标签过滤，暂未参与 SQL 条件。
 pub async fn list_knowledge_assets(
     okf_type: Option<&str>,
-    tags: Option<Vec<String>>,
+    _tags: Option<Vec<String>>,
 ) -> Result<Vec<KnowledgeAsset>, String> {
     let pool = database::get_read_pool().map_err(|e| format!("获取数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
