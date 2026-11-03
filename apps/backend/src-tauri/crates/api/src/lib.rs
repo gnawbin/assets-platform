@@ -9,6 +9,7 @@ pub mod category_routes;
 pub mod chat_routes;
 pub mod department_routes;
 pub mod knowledge_routes;
+pub mod ops_routes;
 pub mod process_routes;
 pub mod register_routes;
 pub mod response;
@@ -341,6 +342,18 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             delete(process_routes::delete_purchase),
         )
         // 应用认证中间件
+        // 运维采集（Docker / Swarm / K8s，只读）
+        .route("/api/ops/providers", get(ops_routes::providers))
+        .route("/api/ops/connections", get(ops_routes::list_connections))
+        .route("/api/ops/connections", post(ops_routes::create_connection))
+        .route("/api/ops/connections/test", post(ops_routes::test_draft))
+        .route("/api/ops/connections/{id}", get(ops_routes::get_connection))
+        .route("/api/ops/connections/{id}", put(ops_routes::update_connection))
+        .route("/api/ops/connections/{id}", delete(ops_routes::delete_connection))
+        .route("/api/ops/connections/{id}/test", post(ops_routes::test_connection))
+        .route("/api/ops/connections/{id}/collect", post(ops_routes::collect_now))
+        .route("/api/ops/links", get(ops_routes::list_links))
+        .route("/api/ops/links/{linkId}/bind", post(ops_routes::bind_link))
         .layer(middleware::from_fn(auth_middleware));
 
     // Skill 路由（使用独立的 SkillRouterState）

@@ -1184,3 +1184,61 @@ pub struct MemoryItem {
     pub category: Option<String>,
     pub importance: Option<f64>,
 }
+
+/// 运维采集连接配置实体
+/// 对应表：{schema}.ops_connection
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct OpsConnection {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64, //主键
+    pub connection_name: String, //连接名称（同租户内唯一）
+    pub provider: String, //采集来源：docker / swarm / k8s
+    pub endpoint: String, //端点（带 scheme）
+    pub auth_type: String, //认证方式稳定编码
+    /// 凭证密文：只进不出，禁止序列化下发
+    #[serde(skip)]
+    pub auth_config_enc: Option<String>,
+    pub credential_hint: Option<String>, //凭证提示（绝不含明文）
+    pub namespace: Option<String>, //K8s 命名空间过滤
+    pub timeout_secs: i32, //连接超时（秒）
+    pub docker_api_version: Option<String>, //Docker API 版本，留空用默认
+    pub max_items: i32, //单类资源采集上限
+    pub poll_interval_secs: i32, //轮询间隔（秒），供调度器后续使用
+    pub enabled: i16, //启用标记：1=启用 0=停用
+    pub last_collect_at: Option<DateTime<Utc>>, //最近一次采集时间
+    pub last_error: Option<String>, //最近一次失败原因
+    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: Option<i16>, //软删除标记：0=未删除 1=已删除
+}
+
+/// 采集资源 ↔ 资产台账桥表实体
+/// 对应表：{schema}.asset_ops_link
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AssetOpsLink {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub connection_id: i64, //所属采集连接
+    pub provider: String, //采集来源
+    pub resource_uid: String, //资源唯一标识（ResourceRecord::uid()）
+    pub resource_kind: String, //归一化资源类型
+    pub display_name: Option<String>, //资源展示名
+    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    pub asset_id: Option<i64>, //关联的资产台账主键，未归档为 NULL
+    pub status_snapshot: Option<String>, //最近一次采集的归一化状态
+    pub raw_state: Option<String>, //原始状态（Docker state / K8s phase）
+    pub parent_uid: Option<String>, //父资源 uid
+    pub attributes: Option<serde_json::Value>, //关键属性（端口/镜像摘要/副本数等）
+    pub first_seen_at: Option<DateTime<Utc>>, //首次发现时间
+    pub last_seen_at: Option<DateTime<Utc>>, //最近发现时间
+    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: Option<i16>, //软删除标记
+}

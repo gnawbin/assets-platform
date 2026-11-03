@@ -11,6 +11,7 @@ pub mod knowledge_asset_commands;
 pub mod knowledge_commands;
 pub mod llm_provider_commands;
 pub mod numbering_commands;
+pub mod ops_commands;
 pub mod process_commands;
 pub mod rag_commands;
 pub mod register_commands;

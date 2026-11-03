@@ -342,6 +342,18 @@ pub fn run() {
             commands::workflow_commands::cancel_execution,
             commands::workflow_commands::list_pending_tasks,
             commands::workflow_commands::complete_user_task,
+            // 运维采集（Docker / Swarm / K8s，只读）
+            commands::ops_commands::get_ops_providers,
+            commands::ops_commands::get_ops_connections,
+            commands::ops_commands::get_ops_connection,
+            commands::ops_commands::create_ops_connection,
+            commands::ops_commands::update_ops_connection,
+            commands::ops_commands::delete_ops_connection,
+            commands::ops_commands::test_ops_connection_draft,
+            commands::ops_commands::test_ops_connection,
+            commands::ops_commands::collect_ops_resources,
+            commands::ops_commands::get_ops_links,
+            commands::ops_commands::bind_ops_link,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

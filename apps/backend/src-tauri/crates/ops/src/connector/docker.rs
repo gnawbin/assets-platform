@@ -13,8 +13,11 @@
 //! 因此 [`ConnectionConfig::timeout_secs`] 与 [`client_version`] 负责把配置翻译成 bollard 的口径。
 
 use std::collections::BTreeMap;
-use std::path::Path;
-use std::time::Instant;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bollard::Docker;
@@ -37,6 +40,12 @@ use crate::model::{
 pub struct DockerConnector {
     docker: Docker,
     config: ConnectionConfig,
+    /// 内联 PEM 物化出的临时证书目录：**必须**与连接器同生命周期
+    ///
+    /// bollard 的 TLS 传输层只在握手时才从磁盘读 cert/key（`connect_with_ssl` 仅预读
+    /// CA），因此由本字段持有守卫，随连接器一起释放并清理临时文件。
+    #[allow(dead_code)] // 仅作临时证书目录的生命周期守卫，Drop 时清理
+    cert_material: Option<CertMaterial>,
 }
 
 impl DockerConnector {
@@ -56,42 +65,202 @@ impl DockerConnector {
         config.ensure_feature()?;
         let version = client_version(config.docker_api_version.as_deref())?;
         let timeout = config.timeout_secs();
-        let docker = match &config.auth {
-            AuthKind::LocalSocket => Docker::connect_with_local_defaults(),
-            AuthKind::PlainTcp => Docker::connect_with_http(&config.endpoint, timeout, &version),
+        let (docker, cert_material) = match &config.auth {
+            AuthKind::LocalSocket => (Docker::connect_with_local_defaults(), None),
+            AuthKind::PlainTcp => (
+                Docker::connect_with_http(&config.endpoint, timeout, &version),
+                None,
+            ),
             AuthKind::MutualTls {
                 ca_path,
                 cert_path,
                 key_path,
-            } => Docker::connect_with_ssl(
-                &config.endpoint,
-                Path::new(key_path),
-                Path::new(cert_path),
-                Path::new(ca_path),
-                timeout,
-                &version,
+            } => (
+                Docker::connect_with_ssl(
+                    &config.endpoint,
+                    Path::new(key_path),
+                    Path::new(cert_path),
+                    Path::new(ca_path),
+                    timeout,
+                    &version,
+                ),
+                None,
             ),
+            AuthKind::MutualTlsInline {
+                ca_pem,
+                cert_pem,
+                key_pem,
+            } => {
+                // bollard 只接受路径参数，且证书/私钥要到握手时才读：
+                // 先把 PEM 落成私有临时文件，再由守卫保证连接器存活期间文件存在。
+                let material = CertMaterial::create(ca_pem, cert_pem, key_pem)?;
+                (
+                    Docker::connect_with_ssl(
+                        &config.endpoint,
+                        material.key_path(),
+                        material.cert_path(),
+                        material.ca_path(),
+                        timeout,
+                        &version,
+                    ),
+                    Some(material),
+                )
+            }
             AuthKind::KubeconfigFile { .. } | AuthKind::KubeconfigInline { .. } => {
                 return Err(OpsError::Unsupported("Docker 不支持 kubeconfig 认证"));
             }
             AuthKind::Direct { .. } => {
                 return Err(OpsError::Unsupported("Docker 不支持 K8s 直连认证"));
             }
-        }
-        .map_err(map_ctor_error)?;
-        Ok(Self { docker, config })
+        };
+        let docker = docker.map_err(map_ctor_error)?;
+        Ok(Self {
+            docker,
+            config,
+            cert_material,
+        })
     }
 
     /// 用已有的 [`Docker`] 构造（测试注入假 transport 时使用）
     pub fn with_docker(docker: Docker, config: ConnectionConfig) -> OpsResult<Self> {
         config.validate()?;
-        Ok(Self { docker, config })
+        Ok(Self {
+            docker,
+            config,
+            cert_material: None,
+        })
     }
 
     /// 底层 bollard 客户端
     pub fn docker(&self) -> &Docker {
         &self.docker
     }
+}
+
+/// 内联 PEM 物化出的临时证书目录
+///
+/// bollard 0.21 的 `connect_with_ssl` 只接受文件路径，且客户端证书/私钥由
+/// `DockerClientCertResolver` **在每次 TLS 握手时**才从磁盘读取，因此临时文件
+/// 必须活到连接器被丢弃为止；本类型就是这段生命周期的唯一持有者（`Drop` 清理）。
+///
+/// 目录名只含随机数，不含任何凭证信息；unix 下目录 0700、文件 0600。
+struct CertMaterial {
+    dir: PathBuf,
+    ca: PathBuf,
+    cert: PathBuf,
+    key: PathBuf,
+}
+
+/// 临时目录序号，避免同一进程内纳秒级碰撞
+static CERT_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+impl CertMaterial {
+    /// 把三段 PEM 写成临时文件
+    fn create(ca_pem: &str, cert_pem: &str, key_pem: &str) -> OpsResult<Self> {
+        for (label, pem) in [
+            ("CA 证书", ca_pem),
+            ("客户端证书", cert_pem),
+            ("客户端私钥", key_pem),
+        ] {
+            if pem.trim().is_empty() {
+                return Err(OpsError::Config(format!("内联 mTLS 缺少{label} PEM")));
+            }
+        }
+
+        let dir = unique_cert_dir()?;
+        let material = Self {
+            ca: dir.join("ca.pem"),
+            cert: dir.join("cert.pem"),
+            key: dir.join("key.pem"),
+            dir,
+        };
+        for (path, pem) in [
+            (&material.ca, ca_pem),
+            (&material.cert, cert_pem),
+            (&material.key, key_pem),
+        ] {
+            write_private_file(path, pem)?;
+        }
+        Ok(material)
+    }
+
+    fn ca_path(&self) -> &Path {
+        &self.ca
+    }
+
+    fn cert_path(&self) -> &Path {
+        &self.cert
+    }
+
+    fn key_path(&self) -> &Path {
+        &self.key
+    }
+}
+
+impl std::fmt::Debug for CertMaterial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 只暴露临时目录，绝不输出 PEM 内容
+        f.debug_struct("CertMaterial")
+            .field("dir", &self.dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for CertMaterial {
+    fn drop(&mut self) {
+        // 尽力清理：失败只记 debug，绝不在 Drop 里 panic
+        if let Err(err) = fs::remove_dir_all(&self.dir) {
+            tracing::debug!(
+                error = %err,
+                dir = %self.dir.display(),
+                "清理运维临时证书目录失败"
+            );
+        }
+    }
+}
+
+/// 生成并创建唯一的临时证书目录
+fn unique_cert_dir() -> OpsResult<PathBuf> {
+    let base = std::env::temp_dir();
+    for _ in 0..8 {
+        let seq = CERT_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|delta| delta.as_nanos())
+            .unwrap_or_default();
+        let dir = base.join(format!("assets-ops-{}-{seq}-{nanos:x}", std::process::id()));
+        match fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(OpsError::Config(format!(
+                    "创建运维临时证书目录失败：{err}"
+                )));
+            }
+        }
+    }
+    Err(OpsError::Config(
+        "创建运维临时证书目录失败：重名次数过多".to_string(),
+    ))
+}
+
+/// 写入私有 PEM 文件（unix 下 0600，Windows 依赖用户临时目录 ACL）
+fn write_private_file(path: &Path, pem: &str) -> OpsResult<()> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|err| OpsError::Config(format!("写入运维临时证书失败：{err}")))?;
+    file.write_all(pem.trim_end().as_bytes())
+        .and_then(|()| file.write_all(b"\n"))
+        .and_then(|()| file.sync_all())
+        .map_err(|err| OpsError::Config(format!("写入运维临时证书失败：{err}")))?;
+    Ok(())
 }
 
 /// 把配置里的 API 版本字符串翻译成 bollard 的 [`ClientVersion`]
@@ -1226,5 +1395,61 @@ mod tests {
             connector.config().endpoint_key()
         );
         assert_eq!(task.parent_uid.as_deref(), Some(expected_parent.as_str()));
+    }
+}
+
+#[cfg(test)]
+mod cert_material_tests {
+    use super::*;
+
+    const CA: &str = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+    const CERT: &str = "-----BEGIN CERTIFICATE-----\nMIIC\n-----END CERTIFICATE-----\n";
+    const KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n";
+
+    #[test]
+    fn rejects_empty_pem() {
+        let err = CertMaterial::create("", CERT, KEY).expect_err("空 CA 必须被拒绝");
+        assert!(format!("{err}").contains("CA 证书"), "{err}");
+        let err = CertMaterial::create(CA, CERT, "   ").expect_err("空私钥必须被拒绝");
+        assert!(format!("{err}").contains("客户端私钥"), "{err}");
+    }
+
+    #[test]
+    fn writes_files_and_cleans_up() {
+        let material = CertMaterial::create(CA, CERT, KEY).expect("物化证书失败");
+        let dir = material.dir.clone();
+        assert!(dir.is_dir(), "临时目录应已创建: {}", dir.display());
+        assert_eq!(fs::read_to_string(material.ca_path()).expect("读 CA"), CA);
+        assert_eq!(fs::read_to_string(material.cert_path()).expect("读证书"), CERT);
+        assert_eq!(fs::read_to_string(material.key_path()).expect("读私钥"), KEY);
+        drop(material);
+        assert!(!dir.exists(), "Drop 后临时目录必须被清理: {}", dir.display());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn key_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let material = CertMaterial::create(CA, CERT, KEY).expect("物化证书失败");
+        let mode = fs::metadata(material.key_path())
+            .expect("读权限")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "私钥权限必须是 0600");
+    }
+
+    #[test]
+    fn connect_with_inline_pem_keeps_files_alive() {
+        let config = ConnectionConfig::docker_tls_inline("内联 mTLS", "127.0.0.1:2376", CA, CERT, KEY);
+        let connector = DockerConnector::connect(config).expect("构造连接器不应触网");
+        let material = connector
+            .cert_material
+            .as_ref()
+            .expect("内联模式必须持有临时证书守卫");
+        assert!(
+            material.key_path().is_file(),
+            "连接器存活期间私钥文件必须存在（bollard 握手期才读取）"
+        );
+        assert_eq!(connector.config().auth.describe(), "mutual_tls_inline");
     }
 }

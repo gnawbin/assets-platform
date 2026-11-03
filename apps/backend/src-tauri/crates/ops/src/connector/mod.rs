@@ -42,6 +42,15 @@ pub enum AuthKind {
         /// 客户端私钥路径
         key_path: String,
     },
+    /// 双向 TLS，证书以 PEM 原文内联（远程录入场景：不要求后端主机上存在证书文件）
+    MutualTlsInline {
+        /// CA 证书 PEM 原文
+        ca_pem: String,
+        /// 客户端证书 PEM 原文
+        cert_pem: String,
+        /// 客户端私钥 PEM 原文
+        key_pem: String,
+    },
     /// 读取本机 kubeconfig 文件
     KubeconfigFile {
         /// kubeconfig 路径
@@ -78,6 +87,7 @@ impl AuthKind {
             Self::LocalSocket => "local_socket",
             Self::PlainTcp => "plain_tcp",
             Self::MutualTls { .. } => "mutual_tls",
+            Self::MutualTlsInline { .. } => "mutual_tls_inline",
             Self::KubeconfigFile { .. } => "kubeconfig_file",
             Self::KubeconfigInline { .. } => "kubeconfig_inline",
             Self::Direct { .. } => "direct",
@@ -101,6 +111,12 @@ impl fmt::Debug for AuthKind {
                 .field("ca_path", ca_path)
                 .field("cert_path", &MASK)
                 .field("key_path", &MASK)
+                .finish(),
+            Self::MutualTlsInline { .. } => f
+                .debug_struct("MutualTlsInline")
+                .field("ca_pem", &MASK)
+                .field("cert_pem", &MASK)
+                .field("key_pem", &MASK)
                 .finish(),
             Self::KubeconfigFile { path, context } => f
                 .debug_struct("KubeconfigFile")
@@ -272,6 +288,46 @@ impl ConnectionConfig {
                 ca_path: ca_path.into(),
                 cert_path: cert_path.into(),
                 key_path: key_path.into(),
+            },
+        )
+    }
+
+    /// 远程 Docker（mTLS，证书以 PEM 原文内联）
+    pub fn docker_tls_inline(
+        name: impl Into<String>,
+        endpoint: &str,
+        ca_pem: impl Into<String>,
+        cert_pem: impl Into<String>,
+        key_pem: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            name,
+            Provider::Docker,
+            endpoint,
+            AuthKind::MutualTlsInline {
+                ca_pem: ca_pem.into(),
+                cert_pem: cert_pem.into(),
+                key_pem: key_pem.into(),
+            },
+        )
+    }
+
+    /// 远程 Swarm Manager（mTLS，证书以 PEM 原文内联）
+    pub fn swarm_tls_inline(
+        name: impl Into<String>,
+        endpoint: &str,
+        ca_pem: impl Into<String>,
+        cert_pem: impl Into<String>,
+        key_pem: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            name,
+            Provider::Swarm,
+            endpoint,
+            AuthKind::MutualTlsInline {
+                ca_pem: ca_pem.into(),
+                cert_pem: cert_pem.into(),
+                key_pem: key_pem.into(),
             },
         )
     }
@@ -449,6 +505,24 @@ impl ConnectionConfig {
                     }
                 }
             }
+            AuthKind::MutualTlsInline {
+                ca_pem,
+                cert_pem,
+                key_pem,
+            } => {
+                for (label, pem) in [
+                    ("CA 证书", ca_pem.as_str()),
+                    ("客户端证书", cert_pem.as_str()),
+                    ("客户端私钥", key_pem.as_str()),
+                ] {
+                    if pem.trim().is_empty() {
+                        return Err(OpsError::Config(format!(
+                            "{} 认证缺少{label} PEM",
+                            self.provider.label()
+                        )));
+                    }
+                }
+            }
             other => {
                 return Err(OpsError::Config(format!(
                     "{} 不支持 {} 认证方式",
@@ -567,7 +641,7 @@ pub fn normalize_endpoint(provider: Provider, endpoint: &str, auth: &AuthKind) -
     let scheme = match provider {
         Provider::Kubernetes => "https",
         Provider::Docker | Provider::Swarm => {
-            if matches!(auth, AuthKind::MutualTls { .. }) {
+            if matches!(auth, AuthKind::MutualTls { .. } | AuthKind::MutualTlsInline { .. }) {
                 "https"
             } else {
                 "tcp"
@@ -1123,5 +1197,57 @@ impl ConnectionHealth {
                 self.failure.hint()
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod pem_inline_tests {
+    use super::*;
+
+    fn sample_pem(label: &str) -> String {
+        format!("-----BEGIN {label}-----\nMIIB\n-----END {label}-----\n")
+    }
+
+    #[test]
+    fn inline_mtls_endpoint_uses_https() {
+        let config = ConnectionConfig::docker_tls_inline(
+            "远程 Docker",
+            "10.0.0.5:2376",
+            sample_pem("CA"),
+            sample_pem("CERT"),
+            sample_pem("KEY"),
+        );
+        assert_eq!(config.endpoint, "https://10.0.0.5:2376");
+        assert!(config.validate().is_ok(), "内联 mTLS 配置应当校验通过");
+        assert_eq!(config.auth.describe(), "mutual_tls_inline");
+    }
+
+    #[test]
+    fn inline_mtls_requires_all_pem() {
+        for (ca, cert, key, label) in [
+            (String::new(), sample_pem("CERT"), sample_pem("KEY"), "CA 证书"),
+            (sample_pem("CA"), String::new(), sample_pem("KEY"), "客户端证书"),
+            (sample_pem("CA"), sample_pem("CERT"), String::new(), "客户端私钥"),
+        ] {
+            let config =
+                ConnectionConfig::docker_tls_inline("远程 Docker", "10.0.0.5:2376", ca, cert, key);
+            let err = config.validate().expect_err("空 PEM 必须被拒绝");
+            assert!(
+                err.to_string().contains(label),
+                "错误信息应包含缺失项 {label}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_mtls_debug_is_masked() {
+        let auth = AuthKind::MutualTlsInline {
+            ca_pem: sample_pem("CA"),
+            cert_pem: sample_pem("CERT"),
+            key_pem: sample_pem("KEY"),
+        };
+        let debug = format!("{auth:?}");
+        assert!(!debug.contains("BEGIN"), "PEM 不得出现在 Debug 输出: {debug}");
+        assert!(debug.contains("<已隐藏>"), "{debug}");
     }
 }

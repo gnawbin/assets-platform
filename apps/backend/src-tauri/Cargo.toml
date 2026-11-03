@@ -152,9 +152,11 @@ kube = {version = "4.2.0", default-features = false, features = [
   "rustls-tls",
   "ring",
 ]}
-# k8s-openapi 0.27 提供 v1_31 ~ v1_35，且 kube 要求「恰好一个」版本 feature。
+# k8s-openapi 0.28 提供 v1_32 ~ v1_36，且 kube 要求「恰好一个」版本 feature。
+# 注意：kube-client 4.2.0 依赖 k8s-openapi ^0.28；这里若写 0.27 会解析出双版本，
+# 0.28 那份没有 v1_* feature，build script 会直接 panic。升级时两处必须同版本。
 # 目标集群版本未知时取 v1_32 以获得较宽兼容性；确认集群版本后改这一行即可。
-k8s-openapi = {version = "0.27.0", default-features = false, features = [
+k8s-openapi = {version = "0.28.0", default-features = false, features = [
   "std",
   "v1_32",
 ]}

@@ -8,6 +8,7 @@ pub mod knowledge_service;
 pub mod llm_gateway_service;
 pub mod llm_provider_service;
 pub mod numbering_service;
+pub mod ops_service;
 pub mod process_service;
 pub mod rag_service;
 pub mod register_service;

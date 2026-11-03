@@ -3513,3 +3513,38 @@ WHERE
             ut.user_id = 1
             AND ut.tenant_id = t.id
     );
+-- ==============================
+-- 11. 运维采集模块菜单（目录 + 菜单 + 按钮）
+-- 说明：不改 assets / asset_category，仅新增菜单与权限点
+-- ==============================
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 7, '运维采集', NULL, NULL, NULL, 'IconServer', 7, true, NULL, 1, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 7);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 60, '连接管理', 7, '/ops/connections', '/ops/connections/page', 'IconServer', 1, true, 'ops:connection:list', 2, false, 'get_ops_connections', 'GET', '/api/ops/connections', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 60);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 61, '资源清单', 7, '/ops/resources', '/ops/resources/page', 'IconStack2', 2, true, 'ops:resource:list', 2, false, 'get_ops_links', 'GET', '/api/ops/links', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 61);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 160, '新增连接', 60, NULL, NULL, NULL, 1, true, 'ops:connection:create', 3, true, 'create_ops_connection', 'POST', '/api/ops/connections', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 160);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 161, '编辑连接', 60, NULL, NULL, NULL, 2, true, 'ops:connection:update', 3, true, 'update_ops_connection', 'PUT', '/api/ops/connections/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 161);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 162, '删除连接', 60, NULL, NULL, NULL, 3, true, 'ops:connection:delete', 3, true, 'delete_ops_connection', 'DELETE', '/api/ops/connections/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 162);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 163, '测试连接', 60, NULL, NULL, NULL, 4, true, 'ops:connection:test', 3, true, 'test_ops_connection', 'POST', '/api/ops/connections/{id}/test', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 163);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 164, '立即采集', 60, NULL, NULL, NULL, 5, true, 'ops:connection:collect', 3, true, 'collect_ops_resources', 'POST', '/api/ops/connections/{id}/collect', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 164);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 165, '绑定资产', 60, NULL, NULL, NULL, 6, true, 'ops:link:bind', 3, true, 'bind_ops_link', 'POST', '/api/ops/links/{linkId}/bind', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 165);
