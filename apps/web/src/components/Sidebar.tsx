@@ -23,6 +23,8 @@ import {
   IconListCheck,
   IconChartBar,
   IconSettings,
+  IconServer,
+  IconStack2,
   IconHierarchy,
   IconChevronDown,
 } from '@tabler/icons-react';
@@ -42,6 +44,8 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   IconChartBar: <IconChartBar size={18} />,
   IconSettings: <IconSettings size={18} />,
   IconHierarchy: <IconHierarchy size={18} />,
+  IconServer: <IconServer size={18} />,
+  IconStack2: <IconStack2 size={18} />,
 };
 
 

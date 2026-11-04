@@ -78,6 +78,19 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     update_intangible_asset: { method: 'PUT', path: '/api/assets/intangible/{id}' },
     delete_intangible_asset: { method: 'DELETE', path: '/api/assets/intangible/{id}' },
 
+    // ======================== 运维采集（Docker / Swarm / K8s，只读） ========================
+    get_ops_providers: { method: 'GET', path: '/api/ops/providers' },
+    get_ops_connections: { method: 'GET', path: '/api/ops/connections' },
+    get_ops_connection: { method: 'GET', path: '/api/ops/connections/{id}' },
+    create_ops_connection: { method: 'POST', path: '/api/ops/connections' },
+    update_ops_connection: { method: 'PUT', path: '/api/ops/connections/{id}' },
+    delete_ops_connection: { method: 'DELETE', path: '/api/ops/connections/{id}' },
+    test_ops_connection_draft: { method: 'POST', path: '/api/ops/connections/test' },
+    test_ops_connection: { method: 'POST', path: '/api/ops/connections/{id}/test' },
+    collect_ops_resources: { method: 'POST', path: '/api/ops/connections/{id}/collect' },
+    get_ops_links: { method: 'GET', path: '/api/ops/links' },
+    bind_ops_link: { method: 'POST', path: '/api/ops/links/{linkId}/bind' },
+
     // ======================== 部门 ========================
     get_departments: { method: 'GET', path: '/api/departments' },
     insert_department: { method: 'POST', path: '/api/departments' },

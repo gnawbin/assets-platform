@@ -190,6 +190,7 @@ apps/backend/src-tauri/crates/ops/
 | `asset_category` | 新增 5 大一级分类及二级/三级子类预置数据（IT 逻辑资产各分类含 Docker/Swarm/K8s 资源类型） | 迁移 SQL + tenant_initial 数据 |
 | `assets` 增列 | §2.2 运维核心字段（一次性 `ALTER` 加齐） | 迁移 SQL |
 | `ops_connection` | 采集连接配置：provider（docker/swarm/k8s/cloud）、endpoint、auth_type、**加密凭证**、轮询间隔、启用开关、最近采集时间/错误、归属租户 | 新表 |
+| `asset_ops_link` | 采集资源 ↔ 资产台账桥表：connection_id、resource_uid、resource_kind、asset_id（未归档为空）、status_snapshot、first/last_seen_at；唯一键 `(connection_id, resource_uid)`。**台账表 zero 结构变更**（详见《运维采集模块实施方案》§2.2） | 新表 |
 | `ops_history` | 资产运维历史子表：关联资产 ID、操作类型（故障排查/启停/变更/巡检/AI总结）、操作人/时间、关联工单 ID、AI 结论、备注 | 新表 |
 | `ops_audit_log` | 高危操作审计（append-only）：用户、租户、动作、目标类型/ID、脱敏请求参数、结果、耗时、IP/UA | 新表 |
 | `ops_discovery_event` | 采集流水（新增/变更/已下线），用于采集审计与排查，定期归档清理 | 新表 |
@@ -241,6 +242,8 @@ apps/backend/src-tauri/crates/ops/
 4. `ops_connection` 连接管理 + 连通性测试（UI + API）。
 5. `assets-ops` crate 骨架 + **Docker 采集**（容器/镜像/网络/卷）。
 6. **Swarm / K8s 采集** + 对账入库 + 台账展示 + 链路溯源基础。
+> 上述第 4~6 条的首批落地（连接接口层 + PEM 内联 mTLS + `asset_ops_link` + 两个前端页面）见
+> [运维采集模块实施方案](./运维采集模块/运维采集模块实施方案.md)，按 S0~S9 分阶段推进。
 7. 编译/集成验证：bollard + kube-rs 特性裁剪进桌面包体积评估。
 
 ### V1.1 —— 日志排查 + AI 总结 + 审计
