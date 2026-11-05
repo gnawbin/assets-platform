@@ -1,0 +1,19 @@
+[package]
+edition = "2024"
+name = "llm-anthropic"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# Anthropic Messages 协议实现（Claude）。
+# 驱动（reqwest）只属于本 crate：crates/llm 与 crates/llm-openai 都不感知它。
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+llm.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true

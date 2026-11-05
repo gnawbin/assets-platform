@@ -1,0 +1,18 @@
+[package]
+edition = "2024"
+name = "llm"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# 契约 crate：只放类型、错误与 trait，刻意「零 HTTP 依赖」。
+# OpenAI Chat Completions 与 Anthropic Messages 的具体实现分别在
+# crates/llm-openai、crates/llm-anthropic，各自持有 reqwest，互不牵连。
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

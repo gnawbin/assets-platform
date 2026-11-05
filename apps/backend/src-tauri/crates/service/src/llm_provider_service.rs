@@ -4,8 +4,8 @@
 
 use database;
 use database::models::{LlmModel, LlmProvider, UserLLmSetting};
-use crate::llm_gateway_service::adapters::OpenAIAdapter;
-use crate::llm_gateway_service::LLMProviderAdapter;
+
+use crate::llm_factory::{create_provider as build_provider, resolve_api_key};
 
 // ======================== 厂商 CRUD ========================
 
@@ -251,44 +251,38 @@ pub async fn delete_model(id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// 从 OpenAI 兼容接口拉取模型列表并批量保存
+/// 从厂商接口拉取模型列表并批量保存
+///
+/// 走 [`build_provider`] 构造的协议实现：OpenAI 兼容厂商用 `/models`，
+/// Anthropic 用 `/v1/models`（端点不存在时回落到默认模型）。
 pub async fn fetch_models_from_api(provider_id: i64) -> Result<Vec<LlmModel>, String> {
     let provider = get_provider(provider_id).await?;
 
-    // 解密 API Key
-    let api_key = match &provider.api_key {
-        Some(key) if !key.is_empty() && key.len() > 20 => {
-            match utils::crypto::decrypt_api_key(key) {
-                Ok(k) => k,
-                Err(_) => key.clone(),
-            }
-        }
-        Some(key) => key.clone(),
-        None => return Err("厂商未配置 API Key".to_string()),
-    };
+    if resolve_api_key(provider.api_key.as_ref()).is_empty() {
+        return Err("厂商未配置 API Key".to_string());
+    }
 
-    let base_url = provider.base_url.clone().unwrap_or_else(|| {
-        crate::llm_gateway_service::get_default_base_url(&provider.provider_code)
-    });
+    let implementation = build_provider(&provider, None)
+        .map_err(|error| format!("{}: {}", error.kind(), error))?;
+    let models = implementation
+        .list_models()
+        .await
+        .map_err(|error| format!("{}: {}", error.kind(), error))?;
 
-    // 创建适配器并调用 list_models
-    let adapter = OpenAIAdapter::new(&api_key, &base_url, &provider.provider_code, "");
-    let model_names = adapter.list_models().await?;
-
-    if model_names.is_empty() {
+    if models.is_empty() {
         return Err("API 返回的模型列表为空".to_string());
     }
 
     // 分类并批量保存
     let mut saved = Vec::new();
-    for name in &model_names {
-        let model_type = classify_model_name(name);
-        let context_window = estimate_context_window(name);
+    for info in &models {
+        let model_type = classify_model_name(&info.id);
+        let context_window = estimate_context_window(&info.id);
 
         let model = create_model(
             provider_id,
-            name,
-            name,
+            &info.id,
+            &info.id,
             model_type,
             context_window,
             None, // temperature_default
@@ -302,14 +296,31 @@ pub async fn fetch_models_from_api(provider_id: i64) -> Result<Vec<LlmModel>, St
     Ok(saved)
 }
 
-/// 根据模型名称猜测类型（chat / embedding）
+/// 根据模型名称猜测类型（chat / embedding / vision）
 fn classify_model_name(name: &str) -> &'static str {
     let lower = name.to_lowercase();
-    if lower.contains("embedding") || lower.contains("ada") {
-        "embedding"
-    } else {
-        "chat"
+
+    let is_embedding = lower.contains("embedding")
+        || lower.contains("ada")
+        || lower.contains("bge")
+        || lower.contains("m3e")
+        || lower.contains("text-embedding");
+    if is_embedding {
+        return "embedding";
     }
+
+    let is_vision = lower.contains("vision")
+        || lower.contains("-vl")
+        || lower.contains("vl-")
+        || lower.contains("omni")
+        || lower.contains("llava")
+        || lower.contains("glm-4v")
+        || lower.ends_with("-v");
+    if is_vision {
+        return "vision";
+    }
+
+    "chat"
 }
 
 /// 根据常见模型名估算上下文窗口

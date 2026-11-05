@@ -9,10 +9,16 @@ version = "0.1.0"
 database.workspace = true
 storage.workspace = true
 utils.workspace = true
+# LLM 协议适配：契约 + 两套协议实现（OpenAI Chat Completions / Anthropic Messages）
+llm.workspace = true
+llm-anthropic.workspace = true
+llm-openai.workspace = true
 # 本地解析后端（DOC_PARSER_BACKEND=local），设计文档：docs/Rust原生多模态解析后端设计方案.md
 async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
+# 流式事件消费（LLMRouter::chat_stream 返回 ChatStream）
+futures.workspace = true
 jsonwebtoken.workspace = true
 parser.workspace = true
 # 运维采集（Docker / Swarm / K8s 只读连接器）；feature 在这里一次打开，api 与 tauri 层共用

@@ -5,6 +5,7 @@ pub mod department_service;
 pub mod doc_parser;
 pub mod knowledge_asset_service;
 pub mod knowledge_service;
+pub mod llm_factory;
 pub mod llm_gateway_service;
 pub mod llm_provider_service;
 pub mod numbering_service;

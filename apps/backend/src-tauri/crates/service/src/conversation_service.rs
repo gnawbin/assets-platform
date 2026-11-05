@@ -37,6 +37,13 @@ pub struct TokenUsageInfo {
     pub cost: f64,
 }
 
+/// 流式回答的累积结果（边推 token 边累积，结束后落库）
+struct StreamAnswer {
+    answer: String,
+    cited_ids: Vec<i64>,
+    usage: TokenUsageInfo,
+}
+
 /// 聊天附件参数（前端传入）
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1076,13 +1083,86 @@ impl ConversationService {
 
     // ======================== 流式对话方法（用于 SSE） ========================
 
-    /// 执行 RAG 检索并通过 SSE 推送生成结果（按行切分，模拟流式）
+    /// 流式调用 LLM：边推 token 边累积完整回答
+    ///
+    /// - `content_parts` 非空时走 vision 模型（图片 / 视频关键帧）；
+    /// - `Ok`：正常结束（前端断开时 answer 只包含已推送部分）；
+    /// - `Err`：建立流失败或流内报错，由调用方决定降级策略。
+    async fn stream_llm_answer(
+        router: &LLMRouter,
+        system_prompt: &str,
+        user_message: &str,
+        content_parts: Option<Vec<ContentPart>>,
+        tx: &mpsc::Sender<String>,
+    ) -> Result<(String, TokenUsageInfo), String> {
+        use futures::StreamExt;
+
+        let multimodal = content_parts.filter(|parts| !parts.is_empty());
+        let model_type = if multimodal.is_some() { "vision" } else { "chat" };
+
+        let request = LLMChatRequest {
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt.to_string(),
+                    content_parts: None,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: user_message.to_string(),
+                    content_parts: multimodal,
+                },
+            ],
+            model: None,
+            temperature: Some(0.7),
+            max_tokens: Some(2048),
+            stream: Some(true),
+            user_id: None,
+            conv_id: None,
+        };
+
+        let mut stream = router.chat_stream(&request, None, model_type).await?;
+
+        let mut answer = String::new();
+        let mut usage = TokenUsageInfo {
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            cost: 0.0,
+        };
+
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(llm::StreamEvent::TextDelta { text }) => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    answer.push_str(&text);
+                    // 前端断开（AbortController）时停止消费，丢弃剩余流
+                    if tx.send(text).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(llm::StreamEvent::Usage(reported)) => {
+                    usage.input_tokens = reported.input_tokens;
+                    usage.output_tokens = reported.output_tokens;
+                    usage.total_tokens = reported.total();
+                }
+                Ok(_) => {}
+                Err(error) => return Err(format!("{}: {}", error.kind(), error)),
+            }
+        }
+
+        Ok((answer, usage))
+    }
+
+    /// 执行 RAG 检索并通过 SSE 流式推送生成结果
     async fn retrieve_and_answer_stream(
         question: &str,
         bind_tree_node_id: Option<i64>,
         router: &LLMRouter,
         tx: mpsc::Sender<String>,
-    ) -> Result<(String, Vec<i64>), String> {
+    ) -> Result<StreamAnswer, String> {
         // 1. RAG 检索（复用现有逻辑）
         let params = RetrieveParams {
             question: question.to_string(),
@@ -1093,34 +1173,37 @@ impl ConversationService {
             min_similarity: 0.0,
         };
         let chunks = RAGRetriever::retrieve(&params).await?;
-        let cited_ids: Vec<i64> = chunks.iter().map(|c| c.asset_id).collect();
+        let cited_ids: Vec<i64> = chunks.iter().map(|chunk| chunk.asset_id).collect();
 
         // 2. 刷新 Provider
         let _ = router.refresh_providers().await;
 
-        // 3. 构建 Prompt 并调用 LLM（当前使用非流式接口，后续可改为真正流式）
+        // 3. 流式调用 LLM（真流式：首 token 即推送）
         let (system_prompt, user_msg) = Self::build_rag_prompt(question, &chunks);
-        let answer =
-            match Self::generate_answer_with_llm(router, &system_prompt, &user_msg, None, None)
-                .await
-            {
-                Ok(content) => content,
-                Err(e) => {
-                    error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
-                    Self::build_rag_answer(question, &chunks)
-                }
-            };
 
-        // 4. 逐行推送（模拟流式效果）
-        for line in answer.lines() {
-            if tx.send(format!("{}\n", line)).await.is_err() {
-                break;
+        match Self::stream_llm_answer(router, &system_prompt, &user_msg, None, &tx).await {
+            Ok((answer, usage)) => Ok(StreamAnswer {
+                answer,
+                cited_ids,
+                usage,
+            }),
+            Err(error) => {
+                error!("流式 LLM 调用失败，降级到 RAG 拼接模式: {}", error);
+                let answer = Self::build_rag_answer(question, &chunks);
+                let _ = tx.send(answer.clone()).await;
+                let usage = TokenUsageInfo {
+                    input_tokens: question.len() as i32,
+                    output_tokens: answer.len() as i32,
+                    total_tokens: (question.len() + answer.len()) as i32,
+                    cost: 0.0,
+                };
+                Ok(StreamAnswer {
+                    answer,
+                    cited_ids,
+                    usage,
+                })
             }
-            // 每行间隔 5ms，让前端有逐字渲染的效果
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-
-        Ok((answer, cited_ids))
     }
 
     /// 创建新会话并回答（流式 SSE 版）
@@ -1138,9 +1221,12 @@ impl ConversationService {
         // 2. 保存用户消息
         Self::insert_message(conv.id, "user", question, None, None, 0, 0).await?;
 
-        // 3. 流式 RAG + LLM
-        let (answer, cited_ids) =
-            Self::retrieve_and_answer_stream(question, bind_tree_node_id, router, tx).await?;
+        // 3. 流式 RAG + LLM（真流式：边推 token 边累积）
+        let StreamAnswer {
+            answer,
+            cited_ids,
+            usage,
+        } = Self::retrieve_and_answer_stream(question, bind_tree_node_id, router, tx).await?;
 
         // 4. 引用信息
         let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
@@ -1151,7 +1237,17 @@ impl ConversationService {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let answer_len = answer.len();
+        // 有真实用量用真实用量，否则退回字符数估算
+        let input_tokens = if usage.input_tokens > 0 {
+            usage.input_tokens
+        } else {
+            question.len() as i32
+        };
+        let output_tokens = if usage.output_tokens > 0 {
+            usage.output_tokens
+        } else {
+            answer.len() as i32
+        };
         Self::insert_message(
             conv.id,
             "assistant",
@@ -1162,8 +1258,8 @@ impl ConversationService {
                 Some(&cited_str)
             },
             None,
-            question.len() as i32,
-            answer_len as i32,
+            input_tokens,
+            output_tokens,
         )
         .await?;
 
@@ -1171,12 +1267,7 @@ impl ConversationService {
             conv_id: conv.id.to_string(),
             answer,
             cited_assets,
-            usage: TokenUsageInfo {
-                input_tokens: question.len() as i32,
-                output_tokens: answer_len as i32,
-                total_tokens: (question.len() + answer_len) as i32,
-                cost: 0.0,
-            },
+            usage,
         })
     }
 
@@ -1197,10 +1288,13 @@ impl ConversationService {
         // 保存用户消息
         Self::insert_message(conv_id, "user", question, None, None, 0, 0).await?;
 
-        // 流式 RAG + LLM
+        // 流式 RAG + LLM（真流式：边推 token 边累积）
         let bind_tree_node_id = conv.bind_knowledge_tree_id;
-        let (answer, cited_ids) =
-            Self::retrieve_and_answer_stream(question, bind_tree_node_id, router, tx).await?;
+        let StreamAnswer {
+            answer,
+            cited_ids,
+            usage,
+        } = Self::retrieve_and_answer_stream(question, bind_tree_node_id, router, tx).await?;
 
         let cited_assets = Self::get_cited_asset_info(&cited_ids).await?;
 
@@ -1210,7 +1304,16 @@ impl ConversationService {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let answer_len = answer.len();
+        let input_tokens = if usage.input_tokens > 0 {
+            usage.input_tokens
+        } else {
+            question.len() as i32
+        };
+        let output_tokens = if usage.output_tokens > 0 {
+            usage.output_tokens
+        } else {
+            answer.len() as i32
+        };
         Self::insert_message(
             conv_id,
             "assistant",
@@ -1221,8 +1324,8 @@ impl ConversationService {
                 Some(&cited_str)
             },
             None,
-            question.len() as i32,
-            answer_len as i32,
+            input_tokens,
+            output_tokens,
         )
         .await?;
 
@@ -1230,22 +1333,17 @@ impl ConversationService {
             conv_id: conv_id.to_string(),
             answer,
             cited_assets,
-            usage: TokenUsageInfo {
-                input_tokens: question.len() as i32,
-                output_tokens: answer_len as i32,
-                total_tokens: (question.len() + answer_len) as i32,
-                cost: 0.0,
-            },
+            usage,
         })
     }
-    /// 附件感知的流式 RAG + LLM 生成（按行模拟流式）
+    /// 附件感知的流式 RAG + LLM 生成（真流式）
     async fn retrieve_and_answer_with_attachments_stream(
         question: &str,
         bind_tree_node_id: Option<i64>,
         router: &LLMRouter,
         tx: mpsc::Sender<String>,
         attachments: &[AttachmentParam],
-    ) -> Result<(String, Vec<i64>), String> {
+    ) -> Result<StreamAnswer, String> {
         // 1. 处理附件 → 文本上下文 + 图片 content parts
         let (attach_text, content_parts, _meta) = Self::process_attachments(attachments).await?;
 
@@ -1259,7 +1357,7 @@ impl ConversationService {
             min_similarity: 0.0,
         };
         let chunks = RAGRetriever::retrieve(&params).await?;
-        let cited_ids: Vec<i64> = chunks.iter().map(|c| c.asset_id).collect();
+        let cited_ids: Vec<i64> = chunks.iter().map(|chunk| chunk.asset_id).collect();
 
         // 3. 刷新 Provider
         let _ = router.refresh_providers().await;
@@ -1270,49 +1368,39 @@ impl ConversationService {
             user_msg = format!("{}\n\n{}", user_msg, attach_text);
         }
 
-        // 5. 调用 LLM（有图片→vision，否则 chat），失败降级
-        let answer = if !content_parts.is_empty() {
-            match Self::generate_answer_with_llm_multimodal(
-                router,
-                &system_prompt,
-                &user_msg,
-                content_parts,
-                None,
-                None,
-            )
-            .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("视觉 LLM 调用失败，降级到 RAG 拼接模式: {}", e);
-                    let mut fallback = Self::build_rag_answer(question, &chunks);
-                    if !attach_text.is_empty() {
-                        fallback = format!("{}\n\n【附件内容】\n{}", fallback, attach_text);
-                    }
-                    fallback
-                }
-            }
+        // 5. 流式调用 LLM（有图片 → vision，否则 chat），失败降级
+        let parts = if content_parts.is_empty() {
+            None
         } else {
-            match Self::generate_answer_with_llm(router, &system_prompt, &user_msg, None, None)
-                .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("LLM 调用失败，降级到 RAG 拼接模式: {}", e);
-                    Self::build_rag_answer(question, &chunks)
-                }
-            }
+            Some(content_parts)
         };
 
-        // 6. 逐行推送（模拟流式）
-        for line in answer.lines() {
-            if tx.send(format!("{}\n", line)).await.is_err() {
-                break;
+        match Self::stream_llm_answer(router, &system_prompt, &user_msg, parts, &tx).await {
+            Ok((answer, usage)) => Ok(StreamAnswer {
+                answer,
+                cited_ids,
+                usage,
+            }),
+            Err(error) => {
+                error!("流式 LLM 调用失败，降级到 RAG 拼接模式: {}", error);
+                let mut answer = Self::build_rag_answer(question, &chunks);
+                if !attach_text.is_empty() {
+                    answer = format!("{}\n\n【附件内容】\n{}", answer, attach_text);
+                }
+                let _ = tx.send(answer.clone()).await;
+                let usage = TokenUsageInfo {
+                    input_tokens: question.len() as i32,
+                    output_tokens: answer.len() as i32,
+                    total_tokens: (question.len() + answer.len()) as i32,
+                    cost: 0.0,
+                };
+                Ok(StreamAnswer {
+                    answer,
+                    cited_ids,
+                    usage,
+                })
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-
-        Ok((answer, cited_ids))
     }
 
     /// 创建新会话并回答（流式 SSE 版，支持附件）
@@ -1336,8 +1424,12 @@ impl ConversationService {
         };
         Self::insert_message(conv.id, "user", question, None, user_meta.as_deref(), 0, 0).await?;
 
-        // 3. 流式 RAG + 附件 + LLM
-        let (answer, cited_ids) = Self::retrieve_and_answer_with_attachments_stream(
+        // 3. 流式 RAG + 附件 + LLM（真流式）
+        let StreamAnswer {
+            answer,
+            cited_ids,
+            usage,
+        } = Self::retrieve_and_answer_with_attachments_stream(
             question,
             bind_tree_node_id,
             router,
@@ -1355,7 +1447,16 @@ impl ConversationService {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let answer_len = answer.len();
+        let input_tokens = if usage.input_tokens > 0 {
+            usage.input_tokens
+        } else {
+            question.len() as i32
+        };
+        let output_tokens = if usage.output_tokens > 0 {
+            usage.output_tokens
+        } else {
+            answer.len() as i32
+        };
         Self::insert_message(
             conv.id,
             "assistant",
@@ -1366,8 +1467,8 @@ impl ConversationService {
                 Some(&cited_str)
             },
             None,
-            question.len() as i32,
-            answer_len as i32,
+            input_tokens,
+            output_tokens,
         )
         .await?;
 
@@ -1375,12 +1476,7 @@ impl ConversationService {
             conv_id: conv.id.to_string(),
             answer,
             cited_assets,
-            usage: TokenUsageInfo {
-                input_tokens: question.len() as i32,
-                output_tokens: answer_len as i32,
-                total_tokens: (question.len() + answer_len) as i32,
-                cost: 0.0,
-            },
+            usage,
         })
     }
 
@@ -1407,9 +1503,13 @@ impl ConversationService {
         };
         Self::insert_message(conv_id, "user", question, None, user_meta.as_deref(), 0, 0).await?;
 
-        // 流式 RAG + 附件 + LLM
+        // 流式 RAG + 附件 + LLM（真流式）
         let bind_tree_node_id = conv.bind_knowledge_tree_id;
-        let (answer, cited_ids) = Self::retrieve_and_answer_with_attachments_stream(
+        let StreamAnswer {
+            answer,
+            cited_ids,
+            usage,
+        } = Self::retrieve_and_answer_with_attachments_stream(
             question,
             bind_tree_node_id,
             router,
@@ -1425,7 +1525,16 @@ impl ConversationService {
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let answer_len = answer.len();
+        let input_tokens = if usage.input_tokens > 0 {
+            usage.input_tokens
+        } else {
+            question.len() as i32
+        };
+        let output_tokens = if usage.output_tokens > 0 {
+            usage.output_tokens
+        } else {
+            answer.len() as i32
+        };
         Self::insert_message(
             conv_id,
             "assistant",
@@ -1436,8 +1545,8 @@ impl ConversationService {
                 Some(&cited_str)
             },
             None,
-            question.len() as i32,
-            answer_len as i32,
+            input_tokens,
+            output_tokens,
         )
         .await?;
 
@@ -1445,12 +1554,7 @@ impl ConversationService {
             conv_id: conv_id.to_string(),
             answer,
             cited_assets,
-            usage: TokenUsageInfo {
-                input_tokens: question.len() as i32,
-                output_tokens: answer_len as i32,
-                total_tokens: (question.len() + answer_len) as i32,
-                cost: 0.0,
-            },
+            usage,
         })
     }
 

@@ -7102,6 +7102,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "llm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "llm-anthropic"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "llm",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "llm-openai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "llm",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10460,7 +10497,11 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "database",
+ "futures",
  "jsonwebtoken",
+ "llm",
+ "llm-anthropic",
+ "llm-openai",
  "ops",
  "parser",
  "rand 0.10.3",
