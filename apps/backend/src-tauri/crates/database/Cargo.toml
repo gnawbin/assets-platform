@@ -17,3 +17,5 @@ sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# HTTP 文档的响应 schema（#[derive(ToSchema)]），由 crates/apidoc 汇总
+utoipa.workspace = true

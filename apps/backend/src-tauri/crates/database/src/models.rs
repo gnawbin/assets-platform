@@ -5,6 +5,7 @@ use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 use sqlx::FromRow;
 use std::fmt;
+use utoipa::ToSchema;
 
 // 把 i64 序列化为字符串的辅助函数（防止前端 JS 精度丢失）
 pub fn i64_to_string<S>(value: &i64, serializer: S) -> Result<S::Ok, S::Error>
@@ -135,7 +136,7 @@ where
     deserializer.deserialize_any(OptI64Visitor)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetCategory {
     #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
     pub id: i64,
@@ -253,7 +254,7 @@ pub struct SysUser {
     pub deleted: Option<i16>, //删除标志，记录用户是否被删除，0=未删除，1=已删除，软删除使用
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Department {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64, //主键,唯一标识一条部门记录
@@ -351,7 +352,7 @@ pub struct SysMenu {
     /// 软删除标志（0=未删除，1=已删除）
     pub deleted: i16,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct Role {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64, //主键，唯一标识一条角色记录
@@ -433,7 +434,7 @@ pub struct AssetDocuments {
     pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>, //删除标志，记录文档是否被删除，0=未删除，1=已删除，软删除使用
 }
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetKnowledge {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -465,7 +466,7 @@ pub struct AssetKnowledge {
 }
 
 /// 知识树节点（AIFlowy 风格树形导航）
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct KnowledgeTree {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -494,7 +495,7 @@ pub struct KnowledgeTree {
 }
 
 /// 知识树节点（带子节点，用于前端渲染）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct KnowledgeTreeNode {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -513,11 +514,12 @@ pub struct KnowledgeTreeNode {
     pub icon: Option<String>,
     pub sort_order: i32,
     pub is_expanded: bool,
+    #[schema(no_recursion)]
     pub children: Vec<KnowledgeTreeNode>,
 }
 
 // ======================== 【1】资产领用申请表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetReceive {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -545,7 +547,7 @@ pub struct AssetReceive {
 }
 
 // ======================== 【2】资产归还确认表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetReturn {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -572,7 +574,7 @@ pub struct AssetReturn {
 }
 
 // ======================== 【3】资产调拨表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetTransfer {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -603,7 +605,7 @@ pub struct AssetTransfer {
 }
 
 // ======================== 【4】资产维修表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetRepair {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -662,7 +664,7 @@ pub struct Assets {
 }
 
 // ======================== 【5】资产报废表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetScrap {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -687,7 +689,7 @@ pub struct AssetScrap {
 }
 
 // ======================== 【6】资产采购申请表 ========================
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, ToSchema)]
 pub struct AssetPurchase {
     #[serde(serialize_with = "i64_to_string")]
     pub id: i64,
@@ -735,10 +737,11 @@ pub struct AssetApproval {
     pub created_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MantineTree {
     pub value: String,                      // 必须：id 转字符串
     pub label: String,                      // 必须：显示名称
+    #[schema(no_recursion)]
     pub children: Option<Vec<MantineTree>>, // 子节点
     pub checked: Option<bool>,              // 可选：是否选中（权限分配时使用）
 }
@@ -787,7 +790,7 @@ pub struct SysUserTenant {
 }
 
 /// 租户信息（登录响应中使用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TenantInfo {
     #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
     pub id: i64,
@@ -797,11 +800,12 @@ pub struct TenantInfo {
 }
 
 /// 侧边栏菜单项（用于前端动态渲染）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SidebarMenuItem {
-    pub label: String,                          // 菜单名称
-    pub path: Option<String>,                   // 路由路径
-    pub icon: Option<String>,                   // 图标名称
+    pub label: String,        // 菜单名称
+    pub path: Option<String>, // 路由路径
+    pub icon: Option<String>, // 图标名称
+    #[schema(no_recursion)]
     pub children: Option<Vec<SidebarMenuItem>>, // 子菜单
 }
 

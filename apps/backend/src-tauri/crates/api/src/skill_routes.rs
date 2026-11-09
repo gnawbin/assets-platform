@@ -28,6 +28,14 @@ pub fn skill_routes() -> Router<Arc<SkillRouterState>> {
 }
 
 /// 获取所有 Skill 列表
+#[utoipa::path(
+    get,
+    path = "/api/skills",
+    tag = "技能",
+    responses(
+        (status = 200, description = "Skill 元数据数组（结构与 engine::skill_registry::SkillMeta 一致）", body = Vec<serde_json::Value>),
+    )
+)]
 async fn list_skills_handler(State(state): State<Arc<SkillRouterState>>) -> Json<Vec<SkillMeta>> {
     let registry = state.registry.lock().await;
     let skills: Vec<SkillMeta> = registry.list_skills().into_iter().cloned().collect();
@@ -35,6 +43,15 @@ async fn list_skills_handler(State(state): State<Arc<SkillRouterState>>) -> Json
 }
 
 /// 获取单个 Skill
+#[utoipa::path(
+    get,
+    path = "/api/skills/{skill_id}",
+    tag = "技能",
+    responses(
+        (status = 200, description = "Skill 元数据", body = serde_json::Value),
+        (status = 400, description = "Skill 未找到（返回纯文本错误信息）"),
+    )
+)]
 async fn get_skill_handler(
     State(state): State<Arc<SkillRouterState>>,
     axum::extract::Path(skill_id): axum::extract::Path<String>,
@@ -48,16 +65,31 @@ async fn get_skill_handler(
 }
 
 /// 执行 Skill 请求体
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ExecuteSkillRequest {
+    /// Skill 标识
     pub skill_id: String,
+    /// 输入文本
     pub input_text: String,
+    /// Skill 配置（自由结构）
     pub config: HashMap<String, serde_json::Value>,
+    /// 用户 ID（雪花 ID）
     pub user_id: i64,
+    /// 租户 ID（雪花 ID）
     pub tenant_id: i64,
 }
 
 /// 执行 Skill
+#[utoipa::path(
+    post,
+    path = "/api/skills/execute",
+    tag = "技能",
+    request_body = ExecuteSkillRequest,
+    responses(
+        (status = 200, description = "执行结果（结构与 engine::skill_context::SkillResult 一致）", body = serde_json::Value),
+        (status = 400, description = "Skill 未找到（返回纯文本错误信息）"),
+    )
+)]
 async fn execute_skill_handler(
     State(state): State<Arc<SkillRouterState>>,
     Json(req): Json<ExecuteSkillRequest>,
@@ -81,6 +113,15 @@ async fn execute_skill_handler(
 }
 
 /// 注册自定义 Skill
+#[utoipa::path(
+    post,
+    path = "/api/skills/register",
+    tag = "技能",
+    request_body = serde_json::Value,
+    responses(
+        (status = 200, description = "注册成功（`data` 为 null）"),
+    )
+)]
 async fn register_skill_handler(
     State(state): State<Arc<SkillRouterState>>,
     Json(skill_meta): Json<SkillMeta>,
@@ -91,6 +132,14 @@ async fn register_skill_handler(
 }
 
 /// 移除 Skill
+#[utoipa::path(
+    delete,
+    path = "/api/skills/{skill_id}",
+    tag = "技能",
+    responses(
+        (status = 200, description = "是否移除成功", body = bool),
+    )
+)]
 async fn unregister_skill_handler(
     State(state): State<Arc<SkillRouterState>>,
     axum::extract::Path(skill_id): axum::extract::Path<String>,
@@ -100,6 +149,14 @@ async fn unregister_skill_handler(
 }
 
 /// 获取 Skill 数量
+#[utoipa::path(
+    get,
+    path = "/api/skills/count",
+    tag = "技能",
+    responses(
+        (status = 200, description = "已注册 Skill 数量", body = usize),
+    )
+)]
 async fn get_skill_count_handler(State(state): State<Arc<SkillRouterState>>) -> Json<usize> {
     let registry = state.registry.lock().await;
     Json(registry.skill_count())

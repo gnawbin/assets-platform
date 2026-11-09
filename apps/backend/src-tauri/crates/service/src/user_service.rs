@@ -1,8 +1,9 @@
+use chrono::{DateTime, Duration, Utc};
 use database::models::{SysTenant, SysUser, TenantInfo};
 use database::{get_read_pool, get_write_pool};
 use utils::password_secret::{hash_password, verify_password};
 use utils::snowflake::next_id;
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tracing::{error, info, warn};
@@ -18,6 +19,12 @@ pub struct Claims {
     pub exp: usize,
     /// 签发时间（时间戳）
     pub iat: usize,
+    /// 令牌类型：access / refresh（历史令牌没有该字段，按 access 处理）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub typ: Option<String>,
+    /// 刷新令牌白名单主键（雪花 ID 字符串），仅 refresh 令牌携带
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jti: Option<String>,
 }
 
 /// 登录响应（包含 JWT Token）
@@ -39,12 +46,388 @@ pub struct LoginResponse {
     pub tenant_id: Option<i64>,
     /// JWT Token，用于后续请求的身份验证
     pub token: String,
+    /// 刷新令牌（有效期默认 30 天，每次刷新都会轮换）
+    pub refresh_token: String,
+    /// 访问令牌有效期（秒）
+    pub expires_in: i64,
     /// 用户可访问的租户列表
     pub available_tenants: Vec<TenantInfo>,
 }
 
+// ======================== 令牌签发 / 刷新 / 撤销 ========================
+
+/// 访问令牌默认有效期：7 天（与历史行为一致，可用 `JWT_ACCESS_TTL_SECS` 覆盖）
+const DEFAULT_ACCESS_TTL_SECS: i64 = 86_400 * 7;
+/// 刷新令牌默认有效期：30 天（可用 `JWT_REFRESH_TTL_SECS` 覆盖）
+const DEFAULT_REFRESH_TTL_SECS: i64 = 86_400 * 30;
+
+/// 访问令牌 / 刷新令牌对
+#[derive(Debug, Clone)]
+pub struct TokenPair {
+    /// 访问令牌（放入 `Authorization: Bearer <token>`）
+    pub token: String,
+    /// 刷新令牌（仅用于 `POST /api/auth/refresh`）
+    pub refresh_token: String,
+    /// 访问令牌有效期（秒）
+    pub expires_in: i64,
+}
+
+/// JWT 签名密钥（与 api 层校验共用 `JWT_SECRET`）
+fn jwt_secret() -> String {
+    std::env::var("JWT_SECRET").unwrap_or_else(|_| "assets-platform-default-secret-key".to_string())
+}
+
+/// 读取有效期配置（非法值 / 非正数回落默认值）
+fn env_ttl_secs(key: &str, default: i64) -> i64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<i64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(default)
+}
+
+/// 当前时间戳（秒）
+fn now_secs() -> Result<usize, String> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as usize)
+        .map_err(|e| format!("获取时间戳失败: {}", e))
+}
+
+/// 签发 JWT（HS256）
+fn sign_claims(claims: &Claims) -> Result<String, String> {
+    encode(
+        &Header::default(),
+        claims,
+        &EncodingKey::from_secret(jwt_secret().as_bytes()),
+    )
+    .map_err(|e| format!("生成令牌失败: {}", e))
+}
+
+/// 生成 access / refresh 令牌对，并把 refresh 的 jti 写入白名单
+async fn issue_token_pair(
+    pool: &PgPool,
+    user_id: i64,
+    username: &str,
+    family_id: i64,
+) -> Result<TokenPair, String> {
+    let access_ttl = env_ttl_secs("JWT_ACCESS_TTL_SECS", DEFAULT_ACCESS_TTL_SECS);
+    let refresh_ttl = env_ttl_secs("JWT_REFRESH_TTL_SECS", DEFAULT_REFRESH_TTL_SECS);
+    let now = now_secs()?;
+
+    let access_claims = Claims {
+        sub: user_id,
+        username: username.to_string(),
+        exp: now + access_ttl as usize,
+        iat: now,
+        typ: Some("access".to_string()),
+        jti: None,
+    };
+    let token = sign_claims(&access_claims)?;
+
+    let jti = next_id() as i64;
+    let refresh_claims = Claims {
+        sub: user_id,
+        username: username.to_string(),
+        exp: now + refresh_ttl as usize,
+        iat: now,
+        typ: Some("refresh".to_string()),
+        jti: Some(jti.to_string()),
+    };
+    let refresh_token = sign_claims(&refresh_claims)?;
+
+    sqlx::query(
+        "INSERT INTO public.sys_user_refresh_token (jti, user_id, family_id, expires_at) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(jti)
+    .bind(user_id)
+    .bind(family_id)
+    .bind(Utc::now() + Duration::seconds(refresh_ttl))
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        error!("保存刷新令牌失败: user_id={}, error={}", user_id, e);
+        format!("保存刷新令牌失败: {}", e)
+    })?;
+
+    Ok(TokenPair {
+        token,
+        refresh_token,
+        expires_in: access_ttl,
+    })
+}
+
+/// 刷新令牌：校验 → 轮换 → 返回新的令牌对
+///
+/// 安全要点：
+/// - 只接受 `typ = "refresh"` 的令牌（access token 不能用来续期）；
+/// - 每次刷新都轮换（旧 jti 置 `revoked_at`，新 jti 写入白名单，同 `family_id`）；
+/// - 已撤销的 jti 再次出现视为**令牌重放**，直接撤销整个轮换族；
+/// - 用户被禁用 / 删除后不再续期。
+pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
+    let claims = decode::<Claims>(
+        refresh_token,
+        &DecodingKey::from_secret(jwt_secret().as_bytes()),
+        &Validation::default(),
+    )
+    .map_err(|e| {
+        warn!("刷新令牌解析失败: {}", e);
+        "刷新令牌无效，请重新登录".to_string()
+    })?
+    .claims;
+
+    if claims.typ.as_deref() != Some("refresh") {
+        warn!("拒绝使用非 refresh 令牌续期: sub={}", claims.sub);
+        return Err("请使用刷新令牌（refresh token）".to_string());
+    }
+
+    let jti: i64 = claims
+        .jti
+        .as_deref()
+        .ok_or_else(|| "刷新令牌缺少 jti".to_string())?
+        .parse()
+        .map_err(|_| "刷新令牌 jti 格式非法".to_string())?;
+
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    // 1. 查白名单（行锁，避免同一令牌被并发刷新两次）
+    let record = sqlx::query_as::<_, (i64, i64, Option<DateTime<Utc>>, DateTime<Utc>)>(
+        "SELECT user_id, family_id, revoked_at, expires_at
+           FROM public.sys_user_refresh_token
+          WHERE jti = $1
+            FOR UPDATE",
+    )
+    .bind(jti)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("查询刷新令牌失败: {}", e))?;
+
+    let Some((user_id, family_id, revoked_at, expires_at)) = record else {
+        warn!("刷新令牌不在白名单中: jti={}", jti);
+        return Err("刷新令牌无效，请重新登录".to_string());
+    };
+
+    if user_id != claims.sub {
+        warn!(
+            "刷新令牌与用户不匹配: jti={}, token_user={}, claim_user={}",
+            jti, user_id, claims.sub
+        );
+        return Err("刷新令牌无效，请重新登录".to_string());
+    }
+
+    // 2. 重放检测：已撤销的令牌再次出现 → 整族撤销
+    if revoked_at.is_some() {
+        sqlx::query(
+            "UPDATE public.sys_user_refresh_token
+                SET revoked_at = CURRENT_TIMESTAMP
+              WHERE family_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(family_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("撤销刷新令牌族失败: {}", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| format!("提交事务失败: {}", e))?;
+
+        warn!(
+            "检测到刷新令牌重放，已撤销整个轮换族: jti={}, user_id={}, family_id={}",
+            jti, user_id, family_id
+        );
+        return Err("刷新令牌已失效，请重新登录".to_string());
+    }
+
+    // 3. 过期检查
+    if expires_at <= Utc::now() {
+        sqlx::query(
+            "UPDATE public.sys_user_refresh_token SET revoked_at = CURRENT_TIMESTAMP WHERE jti = $1",
+        )
+        .bind(jti)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("撤销过期刷新令牌失败: {}", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| format!("提交事务失败: {}", e))?;
+
+        warn!("刷新令牌已过期: jti={}, user_id={}", jti, user_id);
+        return Err("刷新令牌已过期，请重新登录".to_string());
+    }
+
+    // 4. 用户状态：禁用 / 删除后不再续期
+    let user = sqlx::query_as::<_, (String, i16, Option<i16>)>(
+        "SELECT username, status, deleted FROM public.sys_user WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| format!("查询用户失败: {}", e))?;
+
+    let Some((username, status, deleted)) = user else {
+        warn!("刷新令牌对应的用户不存在: user_id={}", user_id);
+        return Err("用户不存在，请重新登录".to_string());
+    };
+    if status != 1 || deleted.unwrap_or(0) != 0 {
+        sqlx::query(
+            "UPDATE public.sys_user_refresh_token
+                SET revoked_at = CURRENT_TIMESTAMP
+              WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("撤销刷新令牌失败: {}", e))?;
+        tx.commit()
+            .await
+            .map_err(|e| format!("提交事务失败: {}", e))?;
+
+        warn!("账号已禁用，拒绝续期: user_id={}", user_id);
+        return Err("账号已被禁用，请联系管理员".to_string());
+    }
+
+    // 5. 轮换：旧 jti 撤销 + 新 jti 落库（同族）
+    let access_ttl = env_ttl_secs("JWT_ACCESS_TTL_SECS", DEFAULT_ACCESS_TTL_SECS);
+    let refresh_ttl = env_ttl_secs("JWT_REFRESH_TTL_SECS", DEFAULT_REFRESH_TTL_SECS);
+    let now = now_secs()?;
+
+    let access_claims = Claims {
+        sub: user_id,
+        username: username.clone(),
+        exp: now + access_ttl as usize,
+        iat: now,
+        typ: Some("access".to_string()),
+        jti: None,
+    };
+    let token = sign_claims(&access_claims)?;
+
+    let new_jti = next_id() as i64;
+    let refresh_claims = Claims {
+        sub: user_id,
+        username: username.clone(),
+        exp: now + refresh_ttl as usize,
+        iat: now,
+        typ: Some("refresh".to_string()),
+        jti: Some(new_jti.to_string()),
+    };
+    let new_refresh_token = sign_claims(&refresh_claims)?;
+
+    sqlx::query(
+        "UPDATE public.sys_user_refresh_token
+            SET revoked_at = CURRENT_TIMESTAMP, replaced_by = $2
+          WHERE jti = $1",
+    )
+    .bind(jti)
+    .bind(new_jti)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("撤销旧刷新令牌失败: {}", e))?;
+
+    sqlx::query(
+        "INSERT INTO public.sys_user_refresh_token (jti, user_id, family_id, expires_at) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(new_jti)
+    .bind(user_id)
+    .bind(family_id)
+    .bind(Utc::now() + Duration::seconds(refresh_ttl))
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("保存新刷新令牌失败: {}", e))?;
+
+    // 6. 顺手清理 7 天前已过期的历史记录
+    sqlx::query(
+        "DELETE FROM public.sys_user_refresh_token WHERE expires_at < CURRENT_TIMESTAMP - INTERVAL '7 days'",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| format!("清理过期刷新令牌失败: {}", e))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("提交事务失败: {}", e))?;
+
+    info!(
+        "刷新令牌轮换成功: user_id={}, old_jti={}, new_jti={}",
+        user_id, jti, new_jti
+    );
+
+    Ok(TokenPair {
+        token,
+        refresh_token: new_refresh_token,
+        expires_in: access_ttl,
+    })
+}
+
+/// 撤销单个刷新令牌（登出；幂等：令牌非法也视为成功）
+pub async fn revoke_refresh_token(refresh_token: &str) -> Result<(), String> {
+    let Ok(decoded) = decode::<Claims>(
+        refresh_token,
+        &DecodingKey::from_secret(jwt_secret().as_bytes()),
+        &Validation::default(),
+    ) else {
+        warn!("登出时刷新令牌解析失败，忽略");
+        return Ok(());
+    };
+
+    let Some(jti) = decoded
+        .claims
+        .jti
+        .as_deref()
+        .and_then(|raw| raw.parse::<i64>().ok())
+    else {
+        return Ok(());
+    };
+
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    sqlx::query(
+        "UPDATE public.sys_user_refresh_token
+            SET revoked_at = CURRENT_TIMESTAMP
+          WHERE jti = $1 AND revoked_at IS NULL",
+    )
+    .bind(jti)
+    .execute(&pool)
+    .await
+    .map_err(|e| {
+        error!("撤销刷新令牌失败: jti={}, error={}", jti, e);
+        format!("撤销刷新令牌失败: {}", e)
+    })?;
+
+    info!("已撤销刷新令牌: jti={}", jti);
+    Ok(())
+}
+
+/// 撤销某用户全部未失效的刷新令牌（改密 / 禁用 / 删除时调用）
+pub async fn revoke_all_user_refresh_tokens(user_id: i64) -> Result<u64, String> {
+    let pool = get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+    let result = sqlx::query(
+        "UPDATE public.sys_user_refresh_token
+            SET revoked_at = CURRENT_TIMESTAMP
+          WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .map_err(|e| {
+        error!("吊销用户刷新令牌失败: user_id={}, error={}", user_id, e);
+        format!("吊销用户刷新令牌失败: {}", e)
+    })?;
+
+    if result.rows_affected() > 0 {
+        info!(
+            "已吊销用户全部刷新令牌: user_id={}, count={}",
+            user_id,
+            result.rows_affected()
+        );
+    }
+    Ok(result.rows_affected())
+}
+
 /// 用户列表响应（不包含密码）
-#[derive(Debug, Serialize)]
+/// 用户列表 / 当前用户响应（HTTP 文档 schema 由 crates/apidoc 汇总）
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct UserResponse {
     #[serde(serialize_with = "database::models::i64_to_string")]
     pub id: i64,
@@ -225,28 +608,9 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         username, user.id, user.real_name
     );
 
-    // 生成 JWT Token
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "assets-platform-default-secret-key".to_string());
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("获取时间戳失败: {}", e))?
-        .as_secs() as usize;
-    let exp = now + 86400 * 7; // 7天过期
-
-    let claims = Claims {
-        sub: user.id,
-        username: user.username.clone(),
-        exp,
-        iat: now,
-    };
-
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(jwt_secret.as_bytes()),
-    )
-    .map_err(|e| format!("生成Token失败: {}", e))?;
+    // 签发访问令牌 + 刷新令牌（刷新令牌写入白名单，供 /api/auth/refresh 轮换）
+    let family_id = next_id() as i64;
+    let token_pair = issue_token_pair(&pool, user.id, &user.username, family_id).await?;
 
     // 返回用户信息（不含密码）+ JWT Token + available_tenants
     Ok(LoginResponse {
@@ -261,7 +625,9 @@ pub async fn login(username: &str, password: &str) -> Result<LoginResponse, Stri
         nickname: user.nickname,
         avatar: user.avatar,
         tenant_id: user.tenant_id,
-        token,
+        token: token_pair.token,
+        refresh_token: token_pair.refresh_token,
+        expires_in: token_pair.expires_in,
         available_tenants,
     })
 }
@@ -542,6 +908,13 @@ pub async fn update_user(
         format!("更新用户失败: {}", e)
     })?;
 
+    // 禁用用户时立即吊销其全部刷新令牌（已签发的访问令牌到期后自然失效）
+    if status != 1 {
+        if let Err(e) = revoke_all_user_refresh_tokens(id).await {
+            warn!("禁用用户后吊销刷新令牌失败: id={}, error={}", id, e);
+        }
+    }
+
     info!("更新用户成功: id={}, username={}", id, username);
     Ok(user.into())
 }
@@ -625,6 +998,11 @@ pub async fn delete_user(
             format!("删除用户失败: {}", e)
         })?;
 
+    // 删除用户后吊销其全部刷新令牌
+    if let Err(e) = revoke_all_user_refresh_tokens(id).await {
+        warn!("删除用户后吊销刷新令牌失败: id={}, error={}", id, e);
+    }
+
     info!("删除用户成功: id={}", id);
     Ok(())
 }
@@ -674,6 +1052,11 @@ pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
             error!("重置密码失败: id={}, error={}", id, e);
             format!("重置密码失败: {}", e)
         })?;
+
+    // 密码变更后吊销全部刷新令牌，强制重新登录
+    if let Err(e) = revoke_all_user_refresh_tokens(id).await {
+        warn!("重置密码后吊销刷新令牌失败: id={}, error={}", id, e);
+    }
 
     info!("重置用户密码成功: id={}", id);
     Ok(())

@@ -6,7 +6,8 @@ use tracing::{error, info, warn};
 
 // ======================== 固定资产（JOIN 视图） ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 固定资产视图（HTTP 文档 schema 由 crates/apidoc 汇总）
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct HardwareAssetView {
     // assets 主表字段
     #[serde(
@@ -65,7 +66,8 @@ pub struct HardwareAssetView {
 
 // ======================== 无形资产（JOIN 视图） ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 无形资产视图
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IntangibleAssetView {
     // assets 主表字段
     #[serde(
@@ -133,7 +135,8 @@ pub struct IntangibleAssetView {
 
 // ======================== 新增/修改请求体 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 新增/更新固定资产请求
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct HardwareAssetInput {
     // assets 主表字段
     #[serde(deserialize_with = "database::models::i64_from_string")]
@@ -162,7 +165,8 @@ pub struct HardwareAssetInput {
     pub fault_desc: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 新增/更新无形资产请求
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct IntangibleAssetInput {
     // assets 主表字段
     #[serde(deserialize_with = "database::models::i64_from_string")]

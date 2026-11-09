@@ -15,6 +15,17 @@ use super::response::{ApiError, ApiResponse};
 // ======================== 固定资产 ========================
 
 /// 获取所有固定资产
+#[utoipa::path(
+    get,
+    path = "/api/assets/hardware",
+    tag = "固定资产",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "固定资产列表", body = ApiResponse<Vec<service::assets_service::HardwareAssetView>>),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_hardware_assets() -> Result<Json<ApiResponse<Vec<HardwareAssetView>>>, ApiError> {
     match service::assets_service::get_hardware_assets().await {
         Ok(assets) => Ok(Json(ApiResponse::success(assets))),
@@ -23,6 +34,19 @@ pub async fn get_hardware_assets() -> Result<Json<ApiResponse<Vec<HardwareAssetV
 }
 
 /// 新增固定资产
+#[utoipa::path(
+    post,
+    path = "/api/assets/hardware",
+    tag = "固定资产",
+    security(("bearer_auth" = [])),
+    request_body = service::assets_service::HardwareAssetInput,
+    responses(
+        (status = 200, description = "创建成功", body = ApiResponse<service::assets_service::HardwareAssetView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn insert_hardware_asset(
     Extension(ctx): Extension<UserContext>,
     Json(input): Json<HardwareAssetInput>,
@@ -34,6 +58,19 @@ pub async fn insert_hardware_asset(
 }
 
 /// 更新固定资产
+#[utoipa::path(
+    put,
+    path = "/api/assets/hardware/{id}",
+    tag = "固定资产",
+    security(("bearer_auth" = [])),
+    request_body = service::assets_service::HardwareAssetInput,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<service::assets_service::HardwareAssetView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn update_hardware_asset(
     Extension(ctx): Extension<UserContext>,
     Path(id): Path<String>,
@@ -50,6 +87,18 @@ pub async fn update_hardware_asset(
 }
 
 /// 删除固定资产
+#[utoipa::path(
+    delete,
+    path = "/api/assets/hardware/{id}",
+    tag = "固定资产",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "删除成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn delete_hardware_asset(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, ApiError> {
@@ -66,6 +115,17 @@ pub async fn delete_hardware_asset(
 // ======================== 无形资产 ========================
 
 /// 获取所有无形资产
+#[utoipa::path(
+    get,
+    path = "/api/assets/intangible",
+    tag = "无形资产",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "无形资产列表", body = ApiResponse<Vec<service::assets_service::IntangibleAssetView>>),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_intangible_assets() -> Result<Json<ApiResponse<Vec<IntangibleAssetView>>>, ApiError>
 {
     match service::assets_service::get_intangible_assets().await {
@@ -75,6 +135,19 @@ pub async fn get_intangible_assets() -> Result<Json<ApiResponse<Vec<IntangibleAs
 }
 
 /// 新增无形资产
+#[utoipa::path(
+    post,
+    path = "/api/assets/intangible",
+    tag = "无形资产",
+    security(("bearer_auth" = [])),
+    request_body = service::assets_service::IntangibleAssetInput,
+    responses(
+        (status = 200, description = "创建成功", body = ApiResponse<service::assets_service::IntangibleAssetView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn insert_intangible_asset(
     Extension(ctx): Extension<UserContext>,
     Json(input): Json<IntangibleAssetInput>,
@@ -86,6 +159,19 @@ pub async fn insert_intangible_asset(
 }
 
 /// 更新无形资产
+#[utoipa::path(
+    put,
+    path = "/api/assets/intangible/{id}",
+    tag = "无形资产",
+    security(("bearer_auth" = [])),
+    request_body = service::assets_service::IntangibleAssetInput,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<service::assets_service::IntangibleAssetView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn update_intangible_asset(
     Extension(ctx): Extension<UserContext>,
     Path(id): Path<String>,
@@ -102,6 +188,18 @@ pub async fn update_intangible_asset(
 }
 
 /// 删除无形资产
+#[utoipa::path(
+    delete,
+    path = "/api/assets/intangible/{id}",
+    tag = "无形资产",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "删除成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn delete_intangible_asset(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, ApiError> {

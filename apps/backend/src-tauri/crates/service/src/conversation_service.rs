@@ -45,7 +45,7 @@ struct StreamAnswer {
 }
 
 /// 聊天附件参数（前端传入）
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentParam {
     /// 附件类型：image / video / audio / document

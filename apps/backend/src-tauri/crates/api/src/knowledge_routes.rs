@@ -13,18 +13,22 @@ use super::response::{ApiError, ApiResponse};
 
 // ======================== 请求 DTO ========================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct InsertNodeRequest {
+    /// 关联知识条目 ID（folder 可为空）
     pub knowledge_id: Option<String>,
+    /// 父节点 ID（顶级节点为空）
     pub parent_id: Option<String>,
+    /// 节点类型：folder / document / link
     pub node_type: String,
+    /// 节点显示名称
     pub title: String,
     pub icon: Option<String>,
     pub sort_order: Option<i32>,
     pub created_by: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateNodeRequest {
     pub title: Option<String>,
     pub icon: Option<String>,
@@ -33,23 +37,30 @@ pub struct UpdateNodeRequest {
     pub updated_by: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct MoveNodeRequest {
+    /// 新的父节点 ID（null 表示移到顶级）
     pub new_parent_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct InsertKnowledgeRequest {
+    /// 关联资产 ID（可选）
     pub asset_id: Option<String>,
+    /// 来源：manual / asset / hardware / intangible / document
     pub doc_source: Option<String>,
+    /// 知识类型：basic 等
     pub knowledge_type: Option<String>,
+    /// 标题
     pub title: String,
+    /// 正文内容
     pub content: String,
+    /// 权限级别：internal 等
     pub permission_level: Option<String>,
     pub created_by: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateKnowledgeRequest {
     pub title: Option<String>,
     pub content: Option<String>,
@@ -58,15 +69,28 @@ pub struct UpdateKnowledgeRequest {
     pub updated_by: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct KnowledgeListQuery {
+    /// 知识树节点 ID（过滤该节点下的条目）
     pub knowledge_id: Option<String>,
+    /// 标题 / 内容关键词
     pub keyword: Option<String>,
 }
 
 // ======================== 知识树节点路由 ========================
 
 /// GET /api/knowledge/tree - 获取完整知识树
+#[utoipa::path(
+    get,
+    path = "/api/knowledge/tree",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "知识树（含 children 递归）", body = ApiResponse<Vec<database::models::KnowledgeTreeNode>>),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_tree() -> Result<Json<ApiResponse<Vec<KnowledgeTreeNode>>>, ApiError> {
     info!("[HTTP] GET /api/knowledge/tree");
     match service::knowledge_service::get_knowledge_tree().await {
@@ -76,6 +100,19 @@ pub async fn get_tree() -> Result<Json<ApiResponse<Vec<KnowledgeTreeNode>>>, Api
 }
 
 /// POST /api/knowledge/node - 新增知识树节点
+#[utoipa::path(
+    post,
+    path = "/api/knowledge/node",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    request_body = InsertNodeRequest,
+    responses(
+        (status = 200, description = "创建成功", body = ApiResponse<database::models::KnowledgeTree>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn insert_node(
     Json(req): Json<InsertNodeRequest>,
 ) -> Result<Json<ApiResponse<KnowledgeTree>>, ApiError> {
@@ -102,6 +139,19 @@ pub async fn insert_node(
 }
 
 /// PUT /api/knowledge/node/{id} - 更新知识树节点
+#[utoipa::path(
+    put,
+    path = "/api/knowledge/node/{id}",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    request_body = UpdateNodeRequest,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<database::models::KnowledgeTree>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn update_node(
     Path(id): Path<String>,
     Json(req): Json<UpdateNodeRequest>,
@@ -129,6 +179,18 @@ pub async fn update_node(
 }
 
 /// DELETE /api/knowledge/node/{id} - 删除知识树节点
+#[utoipa::path(
+    delete,
+    path = "/api/knowledge/node/{id}",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "删除成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn delete_node(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>, ApiError> {
     info!("[HTTP] DELETE /api/knowledge/node/{}", id);
 
@@ -143,6 +205,19 @@ pub async fn delete_node(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>
 }
 
 /// PUT /api/knowledge/node/{id}/move - 移动知识树节点
+#[utoipa::path(
+    put,
+    path = "/api/knowledge/node/{id}/move",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    request_body = MoveNodeRequest,
+    responses(
+        (status = 200, description = "移动成功", body = ApiResponse<database::models::KnowledgeTree>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn move_node(
     Path(id): Path<String>,
     Json(req): Json<MoveNodeRequest>,
@@ -163,6 +238,18 @@ pub async fn move_node(
 // ======================== 知识条目路由 ========================
 
 /// GET /api/knowledge/list - 获取知识条目列表
+#[utoipa::path(
+    get,
+    path = "/api/knowledge/list",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "知识条目列表", body = ApiResponse<Vec<database::models::AssetKnowledge>>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_list(
     Query(query): Query<KnowledgeListQuery>,
 ) -> Result<Json<ApiResponse<Vec<AssetKnowledge>>>, ApiError> {
@@ -177,6 +264,18 @@ pub async fn get_list(
 }
 
 /// GET /api/knowledge/{id} - 获取单条知识条目
+#[utoipa::path(
+    get,
+    path = "/api/knowledge/{id}",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "知识条目", body = ApiResponse<database::models::AssetKnowledge>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_by_id(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<AssetKnowledge>>, ApiError> {
@@ -193,6 +292,19 @@ pub async fn get_by_id(
 }
 
 /// POST /api/knowledge - 新增知识条目
+#[utoipa::path(
+    post,
+    path = "/api/knowledge",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    request_body = InsertKnowledgeRequest,
+    responses(
+        (status = 200, description = "创建成功", body = ApiResponse<database::models::AssetKnowledge>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn insert_knowledge(
     Json(req): Json<InsertKnowledgeRequest>,
 ) -> Result<Json<ApiResponse<AssetKnowledge>>, ApiError> {
@@ -218,6 +330,19 @@ pub async fn insert_knowledge(
 }
 
 /// PUT /api/knowledge/{id} - 更新知识条目
+#[utoipa::path(
+    put,
+    path = "/api/knowledge/{id}",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    request_body = UpdateKnowledgeRequest,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<database::models::AssetKnowledge>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn update_knowledge(
     Path(id): Path<String>,
     Json(req): Json<UpdateKnowledgeRequest>,
@@ -245,6 +370,18 @@ pub async fn update_knowledge(
 }
 
 /// DELETE /api/knowledge/{id} - 删除知识条目
+#[utoipa::path(
+    delete,
+    path = "/api/knowledge/{id}",
+    tag = "知识库",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "删除成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn delete_knowledge(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>, ApiError> {
     info!("[HTTP] DELETE /api/knowledge/{}", id);
 

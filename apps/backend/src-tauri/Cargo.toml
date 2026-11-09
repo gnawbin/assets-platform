@@ -31,6 +31,8 @@ path = "src/main.rs"
 [workspace.dependencies]
 # ---- 内部业务 crate ----
 api = {path = "crates/api"}
+# OpenAPI 规范汇总 + Swagger UI：依赖 api（只读其 handler 标注），api 不反向依赖它
+apidoc = {path = "crates/apidoc"}
 database = {path = "crates/database"}
 engine = {path = "crates/engine"}
 
@@ -57,7 +59,7 @@ workflow = {path = "crates/workflow"}
 chrono = {version = "0.4.45", default-features = false, features = ["serde"]}
 serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
 serde_json = {version = "1.0.154", default-features = false, features = ["alloc"]}
-toml = "1.1.8+spec-1.1.0"
+toml = "1.2.1+spec-1.1.0"
 
 # ---- 异步运行时 / 数据库 ----
 async-trait = "0.1.92"
@@ -65,6 +67,16 @@ axum = {version = "0.8.9", features = ["macros"]}
 dashmap = "6.1.0"
 futures = "0.3.34"
 once_cell = "1.21.4"
+# OpenAPI / Swagger UI
+#   utoipa-swagger-ui 10.x 依赖 utoipa ^6（两个大版本并存会让 SwaggerUi::url 的
+#   OpenApi 参数类型不匹配），因此两者版本必须成对升级。
+#   chrono / decimal 供 database::models 里的 NaiveDateTime、rust_decimal::Decimal
+#   参与 ToSchema 推导（api / service / database 三层的规范都从这两个 crate 引入）。
+utoipa = {version = "6.0.0", features = ["axum_extras", "chrono", "decimal"]}
+# axum 是 Cargo 由 optional 依赖生成的隐式特性（10.0.2 的 Cargo.toml 未显式声明 feature 表）；
+# 注意键名是 features（复数）。构建期默认联网下载 Swagger UI 资源（Windows 走 reqwest），
+# 离线构建时改成 features = ["axum", "vendored"]。
+utoipa-swagger-ui = {version = "10.0.2", features = ["axum"]}
 # stream：SSE 流式对话需要 Response::bytes_stream()（llm-openai / llm-anthropic 共用）
 reqwest = {version = "0.13.5", default-features = false, features = [
   "json",
@@ -92,7 +104,7 @@ tokio = {version = "1.54.1", default-features = false, features = [
 ]}
 
 parking_lot = "0.13.0"
-rayon = "1.12"
+rayon = "1.12.0"
 tokio-util = {version = "0.7.20", features = ["full"]}
 tower-http = {version = "0.7.1", features = ["cors", "trace"]}
 # ──────────────────────────────────────────────────────────────────────────────
@@ -346,6 +358,7 @@ tauri-build = {workspace = true}
 [dependencies]
 # 内部业务 crate（crates/*）
 api.workspace = true
+apidoc.workspace = true
 ast.workspace = true
 async-trait.workspace = true
 database.workspace = true
@@ -377,8 +390,8 @@ adk-rust.workspace = true
 
 libc.workspace = true
 llama-cpp-v3.workspace = true
-winapi.workspace = true
 pdf_oxide.workspace = true
+winapi.workspace = true
 # Tauri 核心（最小特性集）
 ast-grep-core.workspace = true
 tauri-plugin-dialog.workspace = true

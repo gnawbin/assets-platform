@@ -184,7 +184,7 @@ fn invalidate_broken_tenant_cache(tenant_id: i64, schema_name: &str) {
 }
 
 /// 租户响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct TenantResponse {
     #[serde(serialize_with = "database::models::i64_to_string")]
     pub id: i64,

@@ -10,7 +10,7 @@ use serde::Serialize;
 use tracing::{error, info, warn};
 
 /// 注册申请响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct RegisterResponse {
     #[serde(serialize_with = "database::models::i64_to_string")]
     pub id: i64,

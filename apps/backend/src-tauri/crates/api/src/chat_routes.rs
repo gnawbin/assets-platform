@@ -17,10 +17,13 @@ use service::conversation_service::{
 };
 
 /// SSE 流式对话请求体
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ChatStreamRequest {
+    /// 用户 ID（雪花 ID 字符串）
     pub user_id: String,
+    /// 用户问题
     pub question: String,
+    /// 续聊的会话 ID（雪花 ID 字符串），为空则新建会话
     pub conv_id: Option<String>,
     /// 附件列表（图片走 dataUrl，视频/音频/文档走 S3 url）
     #[serde(default)]
@@ -41,6 +44,20 @@ pub struct ChatRouterState {
 /// event: token → { "text": "..." }
 /// event: done → { "convId": "...", "citedAssets": [...], "usage": {...} }
 /// event: error → { "message": "..." }
+#[utoipa::path(
+    post,
+    path = "/api/chat/stream",
+    tag = "智能问答",
+    request_body = ChatStreamRequest,
+    responses(
+        (
+            status = 200,
+            description = "SSE 事件流：`event: token`（增量文本）、`event: done`（会话 ID / 引用资产 / token 用量）、`event: error`（错误信息）",
+            content_type = "text/event-stream",
+            body = String
+        )
+    )
+)]
 pub async fn chat_stream(
     State(state): State<Arc<ChatRouterState>>,
     Json(params): Json<ChatStreamRequest>,

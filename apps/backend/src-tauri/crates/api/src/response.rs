@@ -15,12 +15,16 @@ use axum::{
     Json,
 };
 use serde::Serialize;
+use utoipa::ToSchema;
 
 /// 统一 API 响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ApiResponse<T: Serialize> {
+    /// 业务码：0=成功，其它为 HTTP 语义错误码（400/401/404/500）
     pub code: i32,
+    /// 提示信息，成功固定为 `success`
     pub message: String,
+    /// 业务数据（无数据时不返回该字段）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
 }
@@ -49,9 +53,11 @@ impl<T: Serialize> ApiResponse<T> {
 }
 
 /// 错误响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ApiError {
+    /// 错误码，与 HTTP 状态码一致（400/401/404/500）
     pub code: i32,
+    /// 错误描述
     pub message: String,
 }
 

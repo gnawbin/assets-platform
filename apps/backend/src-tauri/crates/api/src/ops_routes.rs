@@ -17,15 +17,17 @@ use super::auth::UserContext;
 use super::response::{ApiError, ApiResponse};
 
 /// 资源清单查询参数（`connectionId` 来自前端 args，兼容下划线写法）
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct LinkQuery {
+    /// 连接 ID（雪花 ID 字符串），缺省返回全部连接下的资源
     #[serde(default, rename = "connectionId", alias = "connection_id")]
     pub connection_id: Option<String>,
 }
 
 /// 绑定资产的请求体
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct BindRequest {
+    /// 目标资产 ID（雪花 ID，字符串或数字均可）
     #[serde(
         alias = "assetId",
         deserialize_with = "database::models::i64_from_string"
@@ -39,11 +41,32 @@ fn parse_id(raw: &str) -> Result<i64, ApiError> {
 }
 
 /// 来源 / 认证方式下拉数据
+#[utoipa::path(
+    get,
+    path = "/api/ops/providers",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "可选来源与认证方式", body = ApiResponse<Vec<service::ops_service::OpsProviderOption>>),
+        (status = 401, description = "未认证", body = ApiError),
+    )
+)]
 pub async fn providers() -> Result<Json<ApiResponse<Vec<OpsProviderOption>>>, ApiError> {
     Ok(Json(ApiResponse::success(ops_service::provider_options())))
 }
 
 /// 连接列表
+#[utoipa::path(
+    get,
+    path = "/api/ops/connections",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "连接列表", body = ApiResponse<Vec<service::ops_service::OpsConnectionView>>),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn list_connections() -> Result<Json<ApiResponse<Vec<OpsConnectionView>>>, ApiError> {
     match ops_service::list_connections().await {
         Ok(list) => Ok(Json(ApiResponse::success(list))),
@@ -52,6 +75,18 @@ pub async fn list_connections() -> Result<Json<ApiResponse<Vec<OpsConnectionView
 }
 
 /// 单条连接
+#[utoipa::path(
+    get,
+    path = "/api/ops/connections/{id}",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "连接详情", body = ApiResponse<service::ops_service::OpsConnectionView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 404, description = "连接不存在", body = ApiError),
+    )
+)]
 pub async fn get_connection(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<OpsConnectionView>>, ApiError> {
@@ -63,6 +98,19 @@ pub async fn get_connection(
 }
 
 /// 新建连接
+#[utoipa::path(
+    post,
+    path = "/api/ops/connections",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    request_body = service::ops_service::OpsConnectionInput,
+    responses(
+        (status = 200, description = "创建成功", body = ApiResponse<service::ops_service::OpsConnectionView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn create_connection(
     Extension(ctx): Extension<UserContext>,
     Json(input): Json<OpsConnectionInput>,
@@ -74,6 +122,19 @@ pub async fn create_connection(
 }
 
 /// 更新连接
+#[utoipa::path(
+    put,
+    path = "/api/ops/connections/{id}",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    request_body = service::ops_service::OpsConnectionInput,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<service::ops_service::OpsConnectionView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn update_connection(
     Extension(ctx): Extension<UserContext>,
     Path(id): Path<String>,
@@ -87,6 +148,18 @@ pub async fn update_connection(
 }
 
 /// 删除连接（软删）
+#[utoipa::path(
+    delete,
+    path = "/api/ops/connections/{id}",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "删除成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn delete_connection(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>, ApiError> {
     let id = parse_id(&id)?;
     match ops_service::delete_connection(id).await {
@@ -96,6 +169,18 @@ pub async fn delete_connection(Path(id): Path<String>) -> Result<Json<ApiRespons
 }
 
 /// 草稿探测（不落库）
+#[utoipa::path(
+    post,
+    path = "/api/ops/connections/test",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    request_body = service::ops_service::OpsConnectionInput,
+    responses(
+        (status = 200, description = "探测结果（`ok=false` 表示不可达，仍返回 200）", body = ApiResponse<service::ops_service::OpsHealthView>),
+        (status = 400, description = "配置错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+    )
+)]
 pub async fn test_draft(
     Json(input): Json<OpsConnectionInput>,
 ) -> Result<Json<ApiResponse<OpsHealthView>>, ApiError> {
@@ -106,6 +191,17 @@ pub async fn test_draft(
 }
 
 /// 已存连接探测
+#[utoipa::path(
+    post,
+    path = "/api/ops/connections/{id}/test",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "探测结果（`ok=false` 表示不可达，仍返回 200）", body = ApiResponse<service::ops_service::OpsHealthView>),
+        (status = 400, description = "配置错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+    )
+)]
 pub async fn test_connection(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<OpsHealthView>>, ApiError> {
@@ -117,6 +213,17 @@ pub async fn test_connection(
 }
 
 /// 立即采集一次
+#[utoipa::path(
+    post,
+    path = "/api/ops/connections/{id}/collect",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "本次采集结果", body = ApiResponse<service::ops_service::OpsCollectResult>),
+        (status = 400, description = "配置或采集错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+    )
+)]
 pub async fn collect_now(
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<OpsCollectResult>>, ApiError> {
@@ -128,6 +235,18 @@ pub async fn collect_now(
 }
 
 /// 资源清单
+#[utoipa::path(
+    get,
+    path = "/api/ops/links",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "观测到的资源清单", body = ApiResponse<Vec<service::ops_service::OpsResourceLinkView>>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn list_links(
     Query(query): Query<LinkQuery>,
 ) -> Result<Json<ApiResponse<Vec<OpsResourceLinkView>>>, ApiError> {
@@ -142,6 +261,19 @@ pub async fn list_links(
 }
 
 /// 把观测资源归档到已有资产
+#[utoipa::path(
+    post,
+    path = "/api/ops/links/{linkId}/bind",
+    tag = "运维采集",
+    security(("bearer_auth" = [])),
+    request_body = BindRequest,
+    responses(
+        (status = 200, description = "绑定后的资源条目", body = ApiResponse<service::ops_service::OpsResourceLinkView>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn bind_link(
     Extension(ctx): Extension<UserContext>,
     Path(link_id): Path<String>,

@@ -170,7 +170,11 @@ pub fn run() {
                     tracing::info!("准备启动 HTTP API 服务...");
                     tauri::async_runtime::spawn(async move {
                         tracing::info!("正在启动 HTTP API 服务...");
-                        if let Err(e) = api::start_http_server(pool, Some(llm_router_clone)).await {
+                        // OpenAPI / Swagger UI 文档路由（API_DOCS_ENABLED=false 可关闭）
+                        let docs = apidoc::docs_enabled().then(apidoc::docs_router);
+                        if let Err(e) =
+                            api::start_http_server_with(pool, Some(llm_router_clone), docs).await
+                        {
                             tracing::error!("HTTP API 服务异常退出: {:?}", e);
                         } else {
                             tracing::info!("HTTP API 服务已停止");

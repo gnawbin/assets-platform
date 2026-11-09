@@ -13,23 +13,39 @@ use super::auth;
 use super::response::{ApiError, ApiResponse};
 
 /// 创建租户请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreateTenantRequest {
+    /// 租户名称
     pub tenant_name: String,
+    /// 父租户 ID（雪花 ID 字符串）
     pub parent_id: Option<String>,
+    /// 是否叶子租户
     pub is_leaf: bool,
+    /// 独立 schema 名称（缺省自动生成）
     pub schema_name: Option<String>,
+    /// 是否启用
     pub enable: bool,
 }
 
 /// 更新租户请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateTenantRequest {
     pub tenant_name: String,
     pub enable: bool,
 }
 
 /// 获取所有租户
+#[utoipa::path(
+    get,
+    path = "/api/tenants",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "租户列表", body = ApiResponse<Vec<service::tenant_service::TenantResponse>>),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_tenants() -> Result<Json<ApiResponse<Vec<TenantResponse>>>, ApiError> {
     match service::tenant_service::get_tenants().await {
         Ok(tenants) => Ok(Json(ApiResponse::success(tenants))),
@@ -38,6 +54,19 @@ pub async fn get_tenants() -> Result<Json<ApiResponse<Vec<TenantResponse>>>, Api
 }
 
 /// 新增租户
+#[utoipa::path(
+    post,
+    path = "/api/tenants",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    request_body = CreateTenantRequest,
+    responses(
+        (status = 200, description = "创建成功", body = ApiResponse<service::tenant_service::TenantResponse>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn insert_tenant(
     Extension(claims): Extension<auth::Claims>,
     Json(req): Json<CreateTenantRequest>,
@@ -65,6 +94,19 @@ pub async fn insert_tenant(
 }
 
 /// 更新租户
+#[utoipa::path(
+    put,
+    path = "/api/tenants/{id}",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    request_body = UpdateTenantRequest,
+    responses(
+        (status = 200, description = "更新成功", body = ApiResponse<service::tenant_service::TenantResponse>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn update_tenant(
     Path(id): Path<String>,
     Json(req): Json<UpdateTenantRequest>,
@@ -80,6 +122,18 @@ pub async fn update_tenant(
 }
 
 /// 删除租户（禁用租户）
+#[utoipa::path(
+    delete,
+    path = "/api/tenants/{id}",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "已禁用（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn delete_tenant(Path(id): Path<String>) -> Result<Json<ApiResponse<()>>, ApiError> {
     let id: i64 = id
         .parse()
@@ -92,12 +146,26 @@ pub async fn delete_tenant(Path(id): Path<String>) -> Result<Json<ApiResponse<()
 }
 
 /// 切换租户请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct SwitchTenantRequest {
+    /// 目标租户 ID（雪花 ID 字符串）
     pub tenant_id: String,
 }
 
 /// 切换租户
+#[utoipa::path(
+    post,
+    path = "/api/tenants/switch",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    request_body = SwitchTenantRequest,
+    responses(
+        (status = 200, description = "切换成功，返回当前租户信息", body = ApiResponse<database::models::TenantInfo>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn switch_tenant(
     Extension(ctx): Extension<auth::UserContext>,
     Json(req): Json<SwitchTenantRequest>,
@@ -114,13 +182,28 @@ pub async fn switch_tenant(
 }
 
 /// 分配租户请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct AssignTenantsRequest {
+    /// 用户 ID（雪花 ID 字符串）
     pub user_id: String,
+    /// 可访问的租户 ID 列表（雪花 ID 字符串）
     pub tenant_ids: Vec<String>,
 }
 
 /// 为用户分配租户（覆盖式）
+#[utoipa::path(
+    post,
+    path = "/api/tenants/assign",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    request_body = AssignTenantsRequest,
+    responses(
+        (status = 200, description = "分配成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn assign_tenants(
     Extension(ctx): Extension<auth::UserContext>,
     Json(req): Json<AssignTenantsRequest>,
@@ -143,6 +226,18 @@ pub async fn assign_tenants(
 }
 
 /// 获取用户可访问的租户列表
+#[utoipa::path(
+    get,
+    path = "/api/users/{user_id}/tenants",
+    tag = "租户",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "用户可访问的租户", body = ApiResponse<Vec<database::models::TenantInfo>>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 401, description = "未认证", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_user_tenants(
     Path(user_id): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<TenantInfo>>>, ApiError> {

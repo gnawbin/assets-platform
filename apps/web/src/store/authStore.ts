@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { api } from '@/utils/api';
+import { refreshAccessToken, revokeRefreshTokenOnServer } from '@/utils/adapters/httpAdapter';
 
 export interface TenantInfo {
   id: string;
@@ -27,6 +28,8 @@ export interface UserInfo {
 
 export interface LoginResult extends UserInfo {
   token: string;
+  /** 刷新令牌：访问令牌过期后由 httpAdapter 自动使用（默认有效期 30 天，每次刷新轮换） */
+  refresh_token?: string;
   available_tenants: TenantInfo[];
 }
 
@@ -70,8 +73,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   selectedTenantId: null,
 
   login: (result: LoginResult) => {
-    const { token, available_tenants, ...user } = result;
+    const { token, refresh_token, available_tenants, ...user } = result;
     localStorage.setItem('auth_token', token);
+    if (refresh_token) {
+      localStorage.setItem('refresh_token', refresh_token);
+    }
     localStorage.setItem('auth_user', JSON.stringify(user));
     localStorage.setItem('available_tenants', JSON.stringify(available_tenants || []));
 
@@ -104,7 +110,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    // 先通知后端撤销刷新令牌（失败不影响本地登出）
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (refreshToken) {
+      void revokeRefreshTokenOnServer(refreshToken);
+    }
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
     localStorage.removeItem('auth_user');
     localStorage.removeItem('available_tenants');
     localStorage.removeItem('selected_tenant_id');
@@ -125,28 +137,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   init: async () => {
     set({ isInitializing: true });
 
-    const storedToken = localStorage.getItem('auth_token');
+    let storedToken = localStorage.getItem('auth_token');
     const storedUser = localStorage.getItem('auth_user');
     const storedTenants = localStorage.getItem('available_tenants');
     const storedSelectedTenant = localStorage.getItem('selected_tenant_id');
 
     if (storedToken && storedUser) {
-      // 验证 token 是否过期
+      // 访问令牌过期 → 先用 refresh token 静默续期，失败才清理登录态
       if (isTokenExpired(storedToken)) {
-        // token 已过期，清除登录状态
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('auth_user');
-        localStorage.removeItem('available_tenants');
-        localStorage.removeItem('selected_tenant_id');
-        set({
-          user: null,
-          token: null,
-          isLoggedIn: false,
-          isInitializing: false,
-          availableTenants: [],
-          selectedTenantId: null,
-        });
-        return;
+        const renewedToken = await refreshAccessToken();
+        if (!renewedToken) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('auth_user');
+          localStorage.removeItem('available_tenants');
+          localStorage.removeItem('selected_tenant_id');
+          set({
+            user: null,
+            token: null,
+            isLoggedIn: false,
+            isInitializing: false,
+            availableTenants: [],
+            selectedTenantId: null,
+          });
+          return;
+        }
+        storedToken = renewedToken;
       }
 
       try {
@@ -186,6 +202,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       } catch {
         // 后端服务不可用（未启动 / 故障 / 重启），清除缓存，直接走登录页
         localStorage.removeItem('auth_token');
+        localStorage.removeItem('refresh_token');
         localStorage.removeItem('auth_user');
         localStorage.removeItem('available_tenants');
         localStorage.removeItem('selected_tenant_id');
@@ -203,3 +220,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isInitializing: false });
   },
 }));
+
+// 访问令牌被自动续期后，同步 zustand 内存中的 token（由 httpAdapter 派发 CustomEvent）
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:tokens-refreshed', (event) => {
+    const detail = (event as CustomEvent<{ token?: string }>).detail;
+    if (detail?.token) {
+      useAuthStore.setState({ token: detail.token });
+    }
+  });
+}

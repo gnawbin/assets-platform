@@ -157,3 +157,31 @@ COMMENT ON COLUMN public.sys_user.person_code IS '工号';
 COMMENT ON COLUMN public.sys_user.super_user_id IS '上级用户ID';
 
 COMMENT ON COLUMN public.sys_user.deleted IS '删除标志：0=未删除，1=已删除';
+
+-- ==============================
+-- 刷新令牌表（JWT refresh token 白名单 / 轮换链 / 重放检测）
+-- 说明：老库启动时通过 migrate_public_tables 补齐；IF NOT EXISTS 保证幂等
+-- ==============================
+CREATE TABLE IF NOT EXISTS public.sys_user_refresh_token (
+    jti BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    family_id BIGINT NOT NULL,
+    issued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    replaced_by BIGINT
+);
+
+COMMENT ON TABLE public.sys_user_refresh_token IS '刷新令牌白名单（每次刷新轮换，支持重放检测）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.jti IS '令牌唯一ID（雪花ID，写入 JWT 的 jti）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.family_id IS '轮换族ID（检测到重放时整族撤销）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.revoked_at IS '撤销时间（非空表示已失效）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.replaced_by IS '轮换后的新 jti';
+
+CREATE INDEX IF NOT EXISTS idx_public_sys_user_refresh_token_user ON public.sys_user_refresh_token (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_public_sys_user_refresh_token_family ON public.sys_user_refresh_token (family_id);

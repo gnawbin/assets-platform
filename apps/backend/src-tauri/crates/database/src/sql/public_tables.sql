@@ -273,3 +273,36 @@ CREATE INDEX IF NOT EXISTS idx_public_sys_user_register_status ON public.sys_use
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_tenant_user_id ON public.sys_user_tenant (user_id);
 
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_tenant_tenant_id ON public.sys_user_tenant (tenant_id);
+
+-- ==============================
+-- 刷新令牌表（JWT refresh token 白名单 / 轮换链 / 重放检测）
+-- ==============================
+CREATE TABLE IF NOT EXISTS public.sys_user_refresh_token (
+    jti BIGINT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    family_id BIGINT NOT NULL,
+    issued_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    replaced_by BIGINT
+);
+
+COMMENT ON TABLE public.sys_user_refresh_token IS '刷新令牌白名单（每次刷新轮换，支持重放检测）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.jti IS '令牌唯一ID（雪花ID，写入 JWT 的 jti）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.user_id IS '所属用户ID';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.family_id IS '轮换族ID（同一次登录派生，检测到重放时整族撤销）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.issued_at IS '签发时间';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.expires_at IS '过期时间';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.revoked_at IS '撤销时间（非空表示已失效）';
+
+COMMENT ON COLUMN public.sys_user_refresh_token.replaced_by IS '轮换后的新 jti';
+
+CREATE INDEX IF NOT EXISTS idx_public_sys_user_refresh_token_user ON public.sys_user_refresh_token (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_public_sys_user_refresh_token_family ON public.sys_user_refresh_token (family_id);

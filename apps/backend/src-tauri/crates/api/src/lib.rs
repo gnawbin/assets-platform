@@ -38,9 +38,25 @@ use engine::skill_registry::SkillRegistry;
 ///
 /// 在 Tauri 的 setup 回调中调用此函数，通过 spawn 在后台运行。
 /// 返回 Result，方便调用方记录错误日志。
+///
+/// 等价于 [`start_http_server_with`] 且不注入额外路由。
 pub async fn start_http_server(
     pool: sqlx::PgPool,
     llm_router: Option<std::sync::Arc<service::llm_gateway_service::LLMRouter>>,
+) -> anyhow::Result<()> {
+    start_http_server_with(pool, llm_router, None).await
+}
+
+/// 启动 HTTP API 服务（可注入额外路由）
+///
+/// `extra_routes` 在顶层 `merge`，与上传 / SSE 路由一样位于 `auth_middleware` 之外，
+/// 供 `crates/apidoc` 注入 `/swagger-ui` 与 `/api-docs/openapi.json`。
+/// 之所以用「注入」而不是让 `api` 依赖 `apidoc`，是为了避免
+/// `apidoc → api` 的反向依赖成环。
+pub async fn start_http_server_with(
+    pool: sqlx::PgPool,
+    llm_router: Option<std::sync::Arc<service::llm_gateway_service::LLMRouter>>,
+    extra_routes: Option<Router>,
 ) -> anyhow::Result<()> {
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
@@ -100,14 +116,18 @@ pub async fn start_http_server(
             .with_state(state)
     };
 
-    // 构建路由
-    let app = create_router(pool)
-        .merge(upload_router)
-        .merge(chat_router)
-        .layer(cors)
-        .layer(TraceLayer::new_for_http());
+    // 构建路由（外部注入的路由与上传 / SSE 一样在顶层合并，不经过 auth_middleware）
+    let has_extra_routes = extra_routes.is_some();
+    let mut app = create_router(pool).merge(upload_router).merge(chat_router);
+    if let Some(extra) = extra_routes {
+        app = app.merge(extra);
+    }
+    let app = app.layer(cors).layer(TraceLayer::new_for_http());
 
     info!("HTTP API 服务启动于 http://{}", addr);
+    if has_extra_routes {
+        info!("OpenAPI 文档已挂载：/swagger-ui、/api-docs/openapi.json");
+    }
 
     // 启动 HTTP 服务
     let listener = tokio::net::TcpListener::bind(addr)
@@ -128,7 +148,10 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     // 公开路由（无需认证）
     let public_routes = Router::new()
         .route("/api/auth/login", post(user_routes::login))
-        .route("/api/auth/register", post(register_routes::register));
+        .route("/api/auth/register", post(register_routes::register))
+        // 刷新 / 登出：访问令牌可能已过期，必须公开（靠 refresh token 自身校验）
+        .route("/api/auth/refresh", post(user_routes::refresh))
+        .route("/api/auth/logout", post(user_routes::logout));
 
     // 需要认证的路由
     let protected_routes = Router::new()

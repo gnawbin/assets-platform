@@ -30,4 +30,6 @@ serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# HTTP 文档的 DTO schema（#[derive(ToSchema)]），由 crates/apidoc 汇总
+utoipa.workspace = true
 uuid.workspace = true

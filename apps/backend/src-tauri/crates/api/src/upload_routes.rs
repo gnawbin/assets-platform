@@ -21,7 +21,7 @@ use storage::upload::UploadManager;
 // ======================== 请求/响应类型 ========================
 
 /// 初始化上传请求（占位）
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct InitUploadRequest {
     pub filename: String,
     pub file_size: i64,
@@ -32,21 +32,21 @@ pub struct InitUploadRequest {
 }
 
 /// 提交上传请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CommitUploadRequest {
     pub context_type: String,
     pub context_id: i64,
 }
 
 /// 上报分片请求
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct ReportChunkRequest {
     pub part_number: i32,
     pub etag: String,
 }
 
 /// 开始上传响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct StartUploadResponse {
     pub upload_id: String,
     pub s3_upload_id: String,
@@ -56,7 +56,7 @@ pub struct StartUploadResponse {
 }
 
 /// 上传进度响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct UploadProgressResponse {
     pub status: String,
     pub received_chunks: Vec<i32>,
@@ -65,7 +65,7 @@ pub struct UploadProgressResponse {
 }
 
 /// 完成上传响应
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct CompleteUploadResponse {
     pub file_url: String,
     pub etag: String,
@@ -84,6 +84,17 @@ pub struct UploadRouterState {
 ///
 /// 只创建数据库记录（status=pending），不调用 S3。
 /// 后续需调用 start_upload 才开始真正的 S3 分片上传。
+#[utoipa::path(
+    post,
+    path = "/api/upload/init",
+    tag = "大文件上传",
+    request_body = InitUploadRequest,
+    responses(
+        (status = 200, description = "创建成功，返回 `{ upload_id, need_start }`", body = ApiResponse<serde_json::Value>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn init_upload(
     State(state): State<Arc<UploadRouterState>>,
     Json(req): Json<InitUploadRequest>,
@@ -131,6 +142,16 @@ pub async fn init_upload(
 /// 开始上传（从 pending 转 uploading）
 ///
 /// 创建 S3 MultipartUpload，返回 presigned URLs 供前端直传。
+#[utoipa::path(
+    post,
+    path = "/api/upload/{id}/start",
+    tag = "大文件上传",
+    responses(
+        (status = 200, description = "分片计划与预签名 URL", body = ApiResponse<StartUploadResponse>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn start_upload(
     State(state): State<Arc<UploadRouterState>>,
     Path(upload_id): Path<String>,
@@ -159,6 +180,17 @@ pub async fn start_upload(
 /// 提交上传（from completed to committed）
 ///
 /// 关联业务实体，标记上传为已提交。
+#[utoipa::path(
+    post,
+    path = "/api/upload/{id}/commit",
+    tag = "大文件上传",
+    request_body = CommitUploadRequest,
+    responses(
+        (status = 200, description = "提交成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn commit_upload(
     State(state): State<Arc<UploadRouterState>>,
     Path(upload_id): Path<String>,
@@ -183,6 +215,17 @@ pub async fn commit_upload(
 /// 上报分片上传完成
 ///
 /// 前端上传某个分片到 S3 后，调用此接口告知后端该分片已完成。
+#[utoipa::path(
+    post,
+    path = "/api/upload/{id}/chunk",
+    tag = "大文件上传",
+    request_body = ReportChunkRequest,
+    responses(
+        (status = 200, description = "上报成功（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn report_chunk(
     State(state): State<Arc<UploadRouterState>>,
     Path(upload_id): Path<String>,
@@ -207,6 +250,16 @@ pub async fn report_chunk(
 /// 查询上传进度
 ///
 /// 返回已接收的分片列表和进度百分比，用于前端断点续传。
+#[utoipa::path(
+    get,
+    path = "/api/upload/{id}/progress",
+    tag = "大文件上传",
+    responses(
+        (status = 200, description = "上传进度", body = ApiResponse<UploadProgressResponse>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn get_progress(
     State(state): State<Arc<UploadRouterState>>,
     Path(upload_id): Path<String>,
@@ -234,6 +287,16 @@ pub async fn get_progress(
 /// 完成上传（合并分片）
 ///
 /// 所有分片上传完成后调用此接口，后端执行 S3 CompleteMultipartUpload。
+#[utoipa::path(
+    post,
+    path = "/api/upload/{id}/complete",
+    tag = "大文件上传",
+    responses(
+        (status = 200, description = "合并完成，返回文件 URL", body = ApiResponse<CompleteUploadResponse>),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn complete_upload(
     State(state): State<Arc<UploadRouterState>>,
     Path(upload_id): Path<String>,
@@ -259,6 +322,16 @@ pub async fn complete_upload(
 /// 取消上传
 ///
 /// 取消进行中的分片上传，清理 S3 上的临时数据。
+#[utoipa::path(
+    delete,
+    path = "/api/upload/{id}",
+    tag = "大文件上传",
+    responses(
+        (status = 200, description = "已取消（`data` 为 null）"),
+        (status = 400, description = "参数错误", body = ApiError),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
 pub async fn abort_upload(
     State(state): State<Arc<UploadRouterState>>,
     Path(upload_id): Path<String>,

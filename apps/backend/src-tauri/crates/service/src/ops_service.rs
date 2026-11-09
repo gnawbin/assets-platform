@@ -30,7 +30,7 @@ use utils::snowflake::next_id;
 /// 认证方式载荷（前端 ↔ service）
 ///
 /// `tag = "type"` 与 `AuthKind::describe()` 的稳定编码一致，前端据此做表单联动。
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OpsAuthPayload {
     /// 本机 socket / Windows named pipe
@@ -120,7 +120,7 @@ impl fmt::Debug for OpsAuthPayload {
 }
 
 /// 新建 / 更新连接的入参
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsConnectionInput {
     pub name: String,
     pub provider: String,
@@ -144,7 +144,7 @@ pub struct OpsConnectionInput {
 // ======================== 出参 DTO ========================
 
 /// 连接视图（**不含任何凭证明文**）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsConnectionView {
     pub id: String,
     pub name: String,
@@ -171,7 +171,7 @@ pub struct OpsConnectionView {
 }
 
 /// 连通性探测结果（探测失败也返回本结构，`ok=false`）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsHealthView {
     pub ok: bool,
     pub provider: String,
@@ -194,14 +194,14 @@ pub struct OpsHealthView {
 }
 
 /// 单类资源的采集数量
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsKindCount {
     pub kind: String,
     pub count: usize,
 }
 
 /// 一次手动采集的结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsCollectResult {
     pub connection_id: String,
     pub provider: String,
@@ -222,7 +222,7 @@ pub struct OpsCollectResult {
 }
 
 /// 资源清单视图（LEFT JOIN 台账取 asset_no）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsResourceLinkView {
     pub id: String,
     pub connection_id: String,
@@ -242,7 +242,7 @@ pub struct OpsResourceLinkView {
 }
 
 /// 来源下拉项
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsProviderOption {
     pub value: String,
     pub label: String,
@@ -250,7 +250,7 @@ pub struct OpsProviderOption {
 }
 
 /// 认证方式下拉项
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OpsAuthTypeOption {
     pub value: String,
     pub label: String,

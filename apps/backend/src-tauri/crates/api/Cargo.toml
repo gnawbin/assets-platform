@@ -19,3 +19,5 @@ storage.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
+# OpenAPI 标注（#[utoipa::path] / ToSchema）：规范由 crates/apidoc 汇总并对外提供
+utoipa.workspace = true

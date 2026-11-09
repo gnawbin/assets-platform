@@ -13,7 +13,7 @@ use tracing::{error, info};
 
 // ======================== 领用管理 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetReceiveInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -26,7 +26,7 @@ pub struct AssetReceiveInput {
     pub status: Option<i8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetReceiveUpdateInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -172,7 +172,7 @@ pub async fn delete_receive(id: i64) -> Result<(), String> {
 
 // ======================== 归还管理 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetReturnInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub receive_id: i64,
@@ -188,7 +188,7 @@ pub struct AssetReturnInput {
     pub confirm_time: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetReturnUpdateInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub receive_id: i64,
@@ -339,7 +339,7 @@ pub async fn delete_return(id: i64) -> Result<(), String> {
 
 // ======================== 调拨管理 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetTransferInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -356,7 +356,7 @@ pub struct AssetTransferInput {
     pub status: Option<i8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetTransferUpdateInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -508,7 +508,7 @@ pub async fn delete_transfer(id: i64) -> Result<(), String> {
 
 // ======================== 维修管理 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetRepairInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -528,7 +528,7 @@ pub struct AssetRepairInput {
     pub status: Option<i8>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetRepairUpdateInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -692,7 +692,7 @@ pub async fn delete_repair(id: i64) -> Result<(), String> {
 
 // ======================== 报废管理 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetScrapInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -703,7 +703,7 @@ pub struct AssetScrapInput {
     pub handle_user: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetScrapUpdateInput {
     #[serde(deserialize_with = "database::models::i64_from_string")]
     pub asset_id: i64,
@@ -836,7 +836,7 @@ pub async fn delete_scrap(id: i64) -> Result<(), String> {
 
 // ======================== 采购管理 ========================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetPurchaseInput {
     pub asset_name: String,
     #[serde(deserialize_with = "database::models::i64_from_string")]
@@ -857,7 +857,7 @@ pub struct AssetPurchaseInput {
     pub arrive_date: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AssetPurchaseUpdateInput {
     pub asset_name: String,
     #[serde(deserialize_with = "database::models::i64_from_string")]

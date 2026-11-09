@@ -22,6 +22,12 @@ pub struct Claims {
     pub username: String,
     pub exp: usize,
     pub iat: usize,
+    /// 令牌类型：access / refresh（历史令牌没有该字段，按 access 处理）
+    #[serde(default)]
+    pub typ: Option<String>,
+    /// 刷新令牌白名单主键（雪花 ID 字符串），仅 refresh 令牌携带
+    #[serde(default)]
+    pub jti: Option<String>,
 }
 
 /// 用户上下文（注入到每个请求的 Extension 中）
@@ -47,7 +53,17 @@ pub fn verify_token(token: &str) -> Result<Claims, ApiError> {
         ApiError::unauthorized("无效的认证令牌")
     })?;
 
-    Ok(token_data.claims)
+    // refresh token 只能用于 /api/auth/refresh，不能当作访问令牌使用
+    // （历史令牌没有 typ 字段，按 access 处理，避免升级后强制全员重新登录）
+    let claims = token_data.claims;
+    if claims.typ.as_deref().unwrap_or("access") != "access" {
+        tracing::warn!("拒绝使用非访问令牌调用接口: sub={}", claims.sub);
+        return Err(ApiError::unauthorized(
+            "请使用访问令牌（access token），刷新令牌仅可用于 /api/auth/refresh",
+        ));
+    }
+
+    Ok(claims)
 }
 
 /// 查询用户当前选中的 schema 名称
