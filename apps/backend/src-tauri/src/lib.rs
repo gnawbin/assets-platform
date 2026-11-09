@@ -123,28 +123,35 @@ pub fn run() {
 
             // 应用启动时自动初始化数据库
             tauri::async_runtime::block_on(async {
-                match database::init_database().await {
-                    Ok(()) => {
-                        tracing::info!("数据库初始化完成");
-                        // 初始化默认租户 schema（Tauri 模式下 GLOBAL_SCHEMA 的默认值）
-                        if let Ok(pool) = database::get_pool() {
-                            let schema: Option<String> = sqlx::query_scalar(
-                                "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true"
-                            )
-                            .fetch_optional(&pool)
-                            .await
-                            .ok()
-                            .flatten();
-                            if let Some(sn) = schema {
-                                database::set_global_schema(sn);
-                                tracing::info!("已设置默认租户 schema");
-                            }
+                let init_result = database::init_database().await;
+                match &init_result {
+                    Ok(()) => tracing::info!("数据库初始化完成"),
+                    // 不 panic，让 HTTP API 服务尝试启动（如果连接池可用）
+                    Err(e) => tracing::error!("数据库初始化失败: {:?}", e),
+                }
+
+                // 无论初始化是否全部成功，只要连接池可用就绑定默认租户 schema。
+                // 否则 GLOBAL_SCHEMA 会停留在默认值 public，Tauri 模式下
+                // schema_prefix() 退化为空串，业务表查询落到 public 并报
+                // `relation "xxx" does not exist`。
+                if let Ok(pool) = database::get_pool() {
+                    let schema: Option<String> = sqlx::query_scalar(
+                        "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true",
+                    )
+                    .fetch_optional(&pool)
+                    .await
+                    .ok()
+                    .flatten();
+
+                    match schema {
+                        Some(sn) => {
+                            database::set_global_schema(sn);
+                            tracing::info!("已设置默认租户 schema");
                         }
+                        None => tracing::warn!("未找到默认租户 schema，GLOBAL_SCHEMA 保持 public"),
                     }
-                    Err(e) => {
-                        tracing::error!("数据库初始化失败: {:?}", e);
-                        // 不 panic，让 HTTP API 服务尝试启动（如果连接池可用）
-                    }
+                } else {
+                    tracing::warn!("数据库连接池不可用，跳过默认租户 schema 设置");
                 }
             });
 

@@ -62,6 +62,41 @@ node script/fix-pnpm-native-binary.cjs --force
 不想改缓存的话，也可以直接用 npm 安装同一版本的 pnpm：`npm install -g pnpm@12.15.0`。npm 会把
 `@pnpm/exe.*` 一起装好，之后 `pnpm` 启动时不会再联网下载。
 
+## dev-clean.cjs
+
+清理「挂起 / 僵死」的 Tauri + Next.js 开发进程。典型症状：上一次 `pnpm tauri-dev` 被
+`Ctrl+Z`（SIGTSTP）或终端/IDE 挂起，进程停在 `T` 状态但**仍然占用** `:1480` 端口和
+`~/.cargo/.package-cache` 文件锁，于是下一次启动必然失败：
+
+```text
+    Blocking waiting for file lock on package cache
+Error: listen EADDRINUSE: address already in use :::1480
+       Error The "beforeDevCommand" terminated with a non-zero status code.
+```
+
+### 使用方法
+
+```bash
+# 清理本项目残留的开发进程
+pnpm dev:kill
+
+# 只想看看会清理哪些进程
+node script/dev-clean.cjs --dry-run
+```
+
+脚本会：
+
+- 只匹配与本仓库相关的进程：`tauri dev` 链路、绑定本端口的 `next dev`、
+  `pnpm --prefix ../web dev`，以及工作目录在本仓库内的 `cargo run/build/metadata`
+  （被包缓存锁卡住的孤儿进程）；
+- 先发 `SIGCONT` 再发 `SIGTERM`——处于 stopped（`T`）状态的进程收到 `SIGTERM` 也不会退出，
+  必须先恢复；
+- 等 5 秒后对残留进程补 `SIGKILL`；
+- 最后打印端口与 Cargo 包缓存锁是否已释放。
+
+端口默认从 `apps/web/package.json` 的 `dev` 脚本里解析（当前为 `1480`），也可用
+`DEV_PORT` 环境变量覆盖。脚本不会改动项目里的任何文件，可以随时重复执行。
+
 ## update-version.js
 
 版本升级脚本，用于自动更新项目版本号并创建 git 标签。

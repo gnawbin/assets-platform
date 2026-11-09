@@ -18,6 +18,7 @@
     "build-storybook": "cd apps/web && pnpm build-storybook",
     "tauri-dev": "cd apps/backend && pnpm dev",
     "tauri-build": "cd apps/backend && pnpm build",
+    "dev:kill": "node script/dev-clean.cjs",
     "setup": "node script/install-deps.cjs"
   },
   "dependencies": {},

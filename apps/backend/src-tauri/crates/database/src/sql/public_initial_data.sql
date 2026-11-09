@@ -3446,27 +3446,10 @@ WHERE
 -- ==============================
 -- 8. 默认角色菜单关联（super_admin 角色 → 所有菜单）
 -- ==============================
-INSERT INTO
-    public.sys_role_menu (
-        id,
-        role_id,
-        menu_id,
-        created_by,
-        created_at,
-        deleted
-    )
-SELECT row_number() OVER (
-        ORDER BY m.id
-    ) + 1000, 1, m.id, 1, NOW(), 0
-FROM public.sys_menu m
-WHERE
-    NOT EXISTS (
-        SELECT 1
-        FROM public.sys_role_menu rm
-        WHERE
-            rm.role_id = 1
-            AND rm.menu_id = m.id
-    );
+-- 该语句依赖「所有菜单已插入」，因此移动到文件末尾执行：
+-- 运维采集等菜单是后续追加在文件末尾的，若放在这里会漏授权
+-- （表现为 sys_menu 75 条、sys_role_menu 只有 66 条）。
+-- 见文件末尾「12. 默认角色菜单关联」。
 
 -- ==============================
 -- 9. 默认用户角色关联（admin 用户 → super_admin 角色）
@@ -3500,9 +3483,13 @@ INSERT INTO
         tenant_id,
         created_by
     )
-SELECT row_number() OVER (
+-- 同 sys_role_menu：主键从现有最大值续编，避免增量重跑时重复分配 2001
+SELECT (
+        SELECT COALESCE(MAX(id), 2000)
+        FROM public.sys_user_tenant
+    ) + row_number() OVER (
         ORDER BY t.id
-    ) + 2000, 1, t.id, 1
+    ), 1, t.id, 1
 FROM public.sys_tenant t
 WHERE
     t.enable = true
@@ -3548,3 +3535,38 @@ WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 164);
 INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
 SELECT 165, '绑定资产', 60, NULL, NULL, NULL, 6, true, 'ops:link:bind', 3, true, 'bind_ops_link', 'POST', '/api/ops/links/{linkId}/bind', 1, NOW(), NULL, NULL, 0
 WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 165);
+
+-- ==============================
+-- 12. 默认角色菜单关联（super_admin 角色 → 所有菜单）
+-- ==============================
+-- 必须放在**所有** sys_menu INSERT 之后执行，否则后续追加的菜单
+-- （如运维采集 7/60/61/160-165）不会被授权，超级管理员看不到这些菜单。
+--
+-- 主键必须从当前最大 id 续编，不能直接用 row_number() + 1000：
+-- 窗口函数在 WHERE 之后求值，只对「尚未授权」的菜单重新从 1 编号，
+-- 老库增量重跑时会把 1001 等已存在的 id 再分配一次，触发
+-- duplicate key value violates unique constraint "sys_role_menu_pkey"。
+INSERT INTO
+    public.sys_role_menu (
+        id,
+        role_id,
+        menu_id,
+        created_by,
+        created_at,
+        deleted
+    )
+SELECT (
+        SELECT COALESCE(MAX(id), 1000)
+        FROM public.sys_role_menu
+    ) + row_number() OVER (
+        ORDER BY m.id
+    ), 1, m.id, 1, NOW(), 0
+FROM public.sys_menu m
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_role_menu rm
+        WHERE
+            rm.role_id = 1
+            AND rm.menu_id = m.id
+    );

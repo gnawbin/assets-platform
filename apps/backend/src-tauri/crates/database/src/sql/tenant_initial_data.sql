@@ -35,9 +35,14 @@ INSERT INTO
         created_at,
         deleted
     )
-SELECT row_number() OVER (
+-- 主键必须从当前最大 id 续编（原因同 public_initial_data.sql：窗口函数在
+-- WHERE 之后求值，只对缺失的菜单重新从 1 编号，会撞上已存在的 1001）。
+SELECT (
+        SELECT COALESCE(MAX(id), 1000)
+        FROM public.sys_role_menu
+    ) + row_number() OVER (
         ORDER BY m.id
-    ) + 1000, 1, m.id, 1, NOW(), 0
+    ), 1, m.id, 1, NOW(), 0
 FROM public.sys_menu m
 WHERE
     NOT EXISTS (

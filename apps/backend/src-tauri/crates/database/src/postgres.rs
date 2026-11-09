@@ -677,8 +677,16 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 }
 
 /// 执行 SQL 文件内容（通过 include_str! 编译时嵌入）
+///
+/// 整个文件在**单个事务**中执行：任一语句失败则回滚本文件的全部改动，
+/// 不会留下"半个文件已生效"的中间状态；是否中断整体初始化由调用方决定。
 async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()> {
     let statements = split_sql_statements(sql);
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| anyhow!("开启事务失败（{}）: {}", label, e))?;
 
     for (i, sql_to_execute) in statements.iter().enumerate() {
         // 跳过纯注释行
@@ -692,7 +700,7 @@ async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()
         }
 
         sqlx::query(sqlx::AssertSqlSafe(sql_to_execute.to_string()))
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| {
                 anyhow!(
@@ -704,6 +712,11 @@ async fn execute_sql_content(pool: &PgPool, sql: &str, label: &str) -> Result<()
                 )
             })?;
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| anyhow!("提交事务失败（{}）: {}", label, e))?;
+
     tracing::info!(
         "SQL 文件 '{}' 执行成功: {} statements",
         label,
@@ -892,7 +905,34 @@ pub async fn init_default_admin(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
+/// 执行单个初始化步骤：失败时只记录告警并登记，不中断后续步骤。
+///
+/// 数据库初始化各步骤之间基本独立（建表 / 种子数据 / 迁移），
+/// 之前任一步失败就 `?` 直接返回，会导致后续所有步骤静默跳过
+/// （例如 public 默认数据失败 → 租户种子数据一条都不写入）。
+async fn run_init_step(
+    failures: &mut Vec<String>,
+    name: &str,
+    step: impl std::future::Future<Output = Result<()>>,
+) -> bool {
+    match step.await {
+        Ok(()) => {
+            tracing::info!("初始化步骤「{}」完成", name);
+            true
+        }
+        Err(e) => {
+            tracing::warn!("初始化步骤「{}」失败，已跳过并继续后续步骤: {:#}", name, e);
+            failures.push(name.to_string());
+            false
+        }
+    }
+}
+
 /// 完整的 PostgreSQL 数据库初始化（多租户 schema 模式）
+///
+/// 除连接池与 public schema 创建外，其余步骤均独立容错：
+/// 单步失败只登记到 failures 并继续，最后统一汇总返回，
+/// 避免一条种子数据语句失败导致整条初始化链静默跳过。
 #[allow(dead_code)]
 pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     // 1. 初始化连接池
@@ -901,82 +941,149 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     // 获取写连接池
     let pool = get_write_pool()?;
 
-    // 2. 确保 public schema 存在
+    // 2. 确保 public schema 存在（失败则后续步骤全部无意义，直接返回错误）
     tracing::info!("正在确保 public schema 存在...");
     sqlx::query("CREATE SCHEMA IF NOT EXISTS public")
         .execute(&pool)
         .await
         .map_err(|e| anyhow!("创建 public schema 失败: {}", e))?;
 
+    // 失败步骤登记表，供末尾汇总
+    let mut failures: Vec<String> = Vec::new();
+
     // 3. 初始化 public schema 表结构
     tracing::info!("正在初始化 public schema 表结构...");
-    init_public_tables(&pool).await?;
+    run_init_step(&mut failures, "public 表结构", init_public_tables(&pool)).await;
 
     // 4. 执行 public schema 迁移脚本（补充旧表缺失列）
     tracing::info!("正在执行 public schema 迁移脚本...");
-    migrate_public_tables(&pool).await?;
+    run_init_step(
+        &mut failures,
+        "public 迁移脚本",
+        migrate_public_tables(&pool),
+    )
+    .await;
 
     // 5. 初始化 public schema 默认数据（租户、菜单）
     tracing::info!("正在初始化 public schema 默认数据...");
-    init_public_default_data(&pool).await?;
+    run_init_step(
+        &mut failures,
+        "public 默认数据（租户/菜单）",
+        init_public_default_data(&pool),
+    )
+    .await;
 
     // 6. 创建默认管理员账号
     tracing::info!("正在创建默认管理员账号...");
-    init_default_admin(&pool).await?;
+    run_init_step(&mut failures, "默认管理员账号", init_default_admin(&pool)).await;
 
-    // 7. 读取默认租户 schema 名称
-    let schema: String = sqlx::query_scalar::<_, String>(
+    // 7. 读取默认租户 schema 名称（失败时回退到 single，保证后续步骤仍可执行）
+    let schema: String = match sqlx::query_scalar::<_, String>(
         "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true",
     )
     .fetch_optional(&pool)
     .await
-    .map_err(|e| anyhow!("读取默认租户 schema 失败: {}", e))?
-    .unwrap_or_else(|| "single".to_string());
+    {
+        Ok(Some(schema)) => schema,
+        Ok(None) => {
+            tracing::warn!("未找到默认租户（id=1），回退使用 schema 'single'");
+            failures.push("读取默认租户 schema".to_string());
+            "single".to_string()
+        }
+        Err(e) => {
+            tracing::warn!("读取默认租户 schema 失败: {:#}，回退使用 'single'", e);
+            failures.push("读取默认租户 schema".to_string());
+            "single".to_string()
+        }
+    };
 
     tracing::info!("默认租户 schema: {}", schema);
 
     // 8. 创建租户 schema（如果不存在）
     tracing::info!("正在创建租户 schema '{}'...", schema);
-    sqlx::query(sqlx::AssertSqlSafe(format!(
+    if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "CREATE SCHEMA IF NOT EXISTS {}",
         schema
     )))
     .execute(&pool)
     .await
-    .map_err(|e| anyhow!("创建 schema '{}' 失败: {}", schema, e))?;
+    {
+        tracing::warn!("创建 schema '{}' 失败: {:#}", schema, e);
+        failures.push(format!("创建租户 schema '{}'", schema));
+    }
 
     // 9. 安装 pgvector 扩展（document_chunk 表使用 vector 类型，需在 init_tenant_tables 之前）
     tracing::info!("正在安装 pgvector 扩展...");
-    sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+    if let Err(e) = sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
         .execute(&pool)
         .await
-        .map_err(|e| anyhow!("安装 pgvector 扩展失败: {}", e))?;
+    {
+        tracing::warn!("安装 pgvector 扩展失败: {:#}", e);
+        failures.push("pgvector 扩展".to_string());
+    }
 
     // 10. 初始化租户 schema 表结构
     tracing::info!("正在初始化租户 '{}' 表结构...", schema);
-    init_tenant_tables(&pool, &schema).await?;
+    run_init_step(
+        &mut failures,
+        "租户表结构",
+        init_tenant_tables(&pool, &schema),
+    )
+    .await;
 
     // 11. 初始化租户 schema 默认数据
     tracing::info!("正在初始化租户 '{}' 默认数据...", schema);
-    init_tenant_default_data(&pool, &schema).await?;
+    run_init_step(
+        &mut failures,
+        "租户默认数据（资产分类等）",
+        init_tenant_default_data(&pool, &schema),
+    )
+    .await;
 
     // 11.1 迁移其余租户的工作流引擎表（默认租户已在 init_tenant_tables 中完成）
     tracing::info!("正在迁移租户工作流引擎表...");
-    migrate_all_tenant_workflow_tables(&pool).await?;
+    run_init_step(
+        &mut failures,
+        "其余租户工作流表迁移",
+        migrate_all_tenant_workflow_tables(&pool),
+    )
+    .await;
 
     // 11.2 迁移其余租户的运维采集表（默认租户已在 init_tenant_tables 中完成）
     tracing::info!("正在迁移租户运维采集表...");
-    migrate_all_tenant_ops_tables(&pool).await?;
+    run_init_step(
+        &mut failures,
+        "其余租户运维采集表迁移",
+        migrate_all_tenant_ops_tables(&pool),
+    )
+    .await;
 
     // 12. 初始化知识库模块 public 表
     tracing::info!("正在初始化知识库模块 public 表...");
-    init_knowledge_module_public(&pool).await?;
+    run_init_step(
+        &mut failures,
+        "知识库模块 public 表",
+        init_knowledge_module_public(&pool),
+    )
+    .await;
 
     // 13. 预加载 schema 缓存（供 middleware/ service 层使用）
-    preload_schema_cache(&pool).await?;
+    run_init_step(
+        &mut failures,
+        "schema 缓存预加载",
+        preload_schema_cache(&pool),
+    )
+    .await;
 
-    tracing::info!("数据库初始化完成！");
-    Ok(())
+    if failures.is_empty() {
+        tracing::info!("数据库初始化完成！");
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "数据库初始化部分步骤失败（其余步骤已继续执行，可查看上方的 warn 日志）: {}",
+            failures.join("、")
+        ))
+    }
 }
 
 /// 从环境变量初始化 PostgreSQL 数据库
