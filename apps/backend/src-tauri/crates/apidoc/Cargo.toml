@@ -1,0 +1,14 @@
+[package]
+edition = "2024"
+name = "apidoc"
+version = "0.1.0"
+
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+# 规范来源：api 各 *_routes.rs 上的 #[utoipa::path] 标注与 ToSchema 派生
+api.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+utoipa.workspace = true
+utoipa-swagger-ui.workspace = true
+

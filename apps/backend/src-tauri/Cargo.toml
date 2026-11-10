@@ -1,14 +1,25 @@
-[workspace]
-members = ["crates/*"]
-resolver = "2"
-
+# ============================================================================
+# 工作区依赖唯一来源（Single Source of Truth）
+#   所有第三方 / 内部依赖的 version、features、default-features 只在这里定义；
+#   根包与 crates/* 一律通过 `xxx.workspace = true` 继承，禁止再写 version。
+#
+# 三条硬约束（Cargo 1.99 / edition 2024）：
+#   1. [workspace.dependencies] 不允许 optional → 需要 optional 的依赖（parser 的 image）
+#      只能留在成员 crate 本地声明。
+#   2. 成员的 features 是在本表基础上的「追加」，不能削减。
+#   3. default-features 默认仍只在此处定一次，以维持唯一来源；自 edition 2024（Cargo 1.99+）
+#      起成员已可用 default-features = true/false 覆盖本表，仅当两个 crate 需求相反时才这么做。
+# ============================================================================
 [package]
 authors = ["gengyuwangbin"]
 description = "资产平台APP"
-edition = "2021"
+edition = "2024"
 name = "assets-platform"
-version = "0.0.9"
+version = "0.1.0"
 
+[workspace]
+members = ["crates/*"]
+resolver = "2"
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 name = "assetsplatform_lib"
@@ -17,58 +28,73 @@ name = "assetsplatform_lib"
 name = "assets-platform"
 path = "src/main.rs"
 
-[build-dependencies]
-tauri-build = { version = "2.5.6", default-features = false, features = [] } # 关闭默认特性
+[workspace.dependencies]
+# ---- 内部业务 crate ----
+api = {path = "crates/api"}
+# 启动初始化（数据库 / 租户 schema / LLM Router / HTTP 服务）：桌面与无头服务共用
+bootstrap = {path = "crates/bootstrap"}
+# OpenAPI 规范汇总 + Swagger UI：依赖 api（只读其 handler 标注），api 不反向依赖它
+apidoc = {path = "crates/apidoc"}
+database = {path = "crates/database"}
+engine = {path = "crates/engine"}
 
-[dependencies]
-tracing = "0.1.44"
+ast = {path = "crates/ast"}
+iso = {path = "crates/iso"}
+# LLM 协议适配：llm 只放 trait 与数据类型（零 HTTP），两个协议实现各自持有 reqwest
+llm = {path = "crates/llm"}
+llm-anthropic = {path = "crates/llm-anthropic"}
+llm-openai = {path = "crates/llm-openai"}
+ops = {path = "crates/ops"}
+parser = {path = "crates/parser"}
+service = {path = "crates/service"}
+storage = {path = "crates/storage"}
+utils = {path = "crates/utils"}
+# 向量数据存储：crates/vector 只放 trait 与数据类型，三个实现各自持有驱动、互不依赖
+vector = {path = "crates/vector"}
+vector-lance = {path = "crates/vector-lance"}
+vector-pgvector = {path = "crates/vector-pgvector"}
+vector-redis = {path = "crates/vector-redis"}
+vfs = {path = "crates/vfs"}
+workflow = {path = "crates/workflow"}
 
-# 加这一行（surrealdb / rand 兼容）
-getrandom = { version = "0.4.3", features = ["std"] }
+# ---- 序列化 ----
+chrono = {version = "0.4.45", default-features = false, features = ["serde"]}
+serde = {version = "1.0.229", default-features = false, features = ["derive", "alloc"]}
+serde_json = {version = "1.0.154", default-features = false, features = ["alloc"]}
+toml = "1.2.1+spec-1.1.0"
 
-# Tauri 核心（最小特性集）
-tauri = { version = "2.11.5", default-features = false, features = ["wry"] }
-tauri-plugin-dialog = "2.7.2"
-tauri-plugin-fs = "2.5.1"
-tauri-plugin-opener = { version = "2.5.4", default-features = false }
-tauri-plugin-process = "2.3.0"
-tauri-plugin-shell = "2.3.5"
-tauri-plugin-updater = "2.10.1"
-
-# 内部业务 crate（crates/*）
-assets-api = { path = "crates/assets-api" }
-assets-database = { path = "crates/assets-database" }
-assets-engine = { path = "crates/assets-engine" }
-assets-service = { path = "crates/assets-service" }
-assets-storage = { path = "crates/assets-storage" }
-assets-utils = { path = "crates/assets-utils" }
-assets-workflow = { path = "crates/assets-workflow" }
-
-# 序列化
-serde = { version = "1.0.229", default-features = false, features = [
-  "derive",
-  "alloc",
-] }
-serde_json = { version = "1.0.151", default-features = false, features = ["alloc"] }
-chrono = { version = "0.4", default-features = false, features = ["serde"] }
-
-# JWT（命令层）
-jsonwebtoken = { version = "11.0.0", default-features = false, features = [
-  "aws_lc_rs",
-] }
-
-# 数据库（命令层 / 工作流）
-sqlx = { version = "0.9.0", default-features = false, features = [
+# ---- 异步运行时 / 数据库 ----
+async-trait = "0.1.92"
+axum = {version = "0.8.9", features = ["macros"]}
+dashmap = "6.1.0"
+futures = "0.3.34"
+once_cell = "1.21.4"
+# OpenAPI / Swagger UI
+#   utoipa-swagger-ui 10.x 依赖 utoipa ^6（两个大版本并存会让 SwaggerUi::url 的
+#   OpenApi 参数类型不匹配），因此两者版本必须成对升级。
+#   chrono / decimal 供 database::models 里的 NaiveDateTime、rust_decimal::Decimal
+#   参与 ToSchema 推导（api / service / database 三层的规范都从这两个 crate 引入）。
+utoipa = {version = "6.0.0", features = ["axum_extras", "chrono", "decimal"]}
+# axum 是 Cargo 由 optional 依赖生成的隐式特性（10.0.2 的 Cargo.toml 未显式声明 feature 表）；
+# 注意键名是 features（复数）。构建期默认联网下载 Swagger UI 资源（Windows 走 reqwest），
+# 离线构建时改成 features = ["axum", "vendored"]。
+utoipa-swagger-ui = {version = "10.0.2", features = ["axum"]}
+# stream：SSE 流式对话需要 Response::bytes_stream()（llm-openai / llm-anthropic 共用）
+reqwest = {version = "0.13.5", default-features = false, features = [
+  "json",
+  "rustls",
+  "stream",
+]}
+rust_decimal = "1.43.0"
+sqlx = {version = "0.9.0", default-features = false, features = [
   "postgres",
   "runtime-tokio",
   "tls-rustls",
   "macros",
   "chrono",
   "rust_decimal",
-] }
-
-# 异步运行时（只开必须的特性，不要 full）
-tokio = { version = "1.53.1", default-features = false, features = [
+]}
+tokio = {version = "1.54.1", default-features = false, features = [
   "rt-multi-thread",
   "rt",
   "macros",
@@ -77,27 +103,364 @@ tokio = { version = "1.53.1", default-features = false, features = [
   "net",
   "signal",
   "sync",
-] }
+]}
 
-# 配置（lib.rs 加载 .env.toml）
-toml = "1.1.3+spec-1.1.0"
+parking_lot = "0.13.0"
+rayon = "1.12.0"
+tokio-util = {version = "0.7.20", features = ["full"]}
+tower-http = {version = "0.7.1", features = ["cors", "trace"]}
+# ──────────────────────────────────────────────────────────────────────────────
+# 向量数据存储（crates/vector-redis、crates/vector-pgvector、crates/vector-lance）
+#   版本与 features 只在此处定义一次；三个实现 crate 各自持有自己的驱动，
+#   crates/vector 只放与驱动无关的 trait 与数据类型。
+# ──────────────────────────────────────────────────────────────────────────────
+# RESP 客户端：tokio-comp = 异步连接，connection-manager = 多路复用 + 自动重连，
+# tokio-rustls-comp = 让 aio::tokio 实现 connect_tcp_tls（仅开 tls-rustls-* 会缺 impl）
+redis = {version = "1.8.1", default-features = false, features = [
+  "tokio-comp",
+  "connection-manager",
+  "tokio-rustls-comp",
+  "tls-rustls-webpki-roots",
+]}
+# rustls 的 CryptoProvider 全仓统一为 ring（与 kube / bollard / sqlx 同源）；
+# 显式声明可避免 "no process-level CryptoProvider" 运行时恐慌。
+rustls = {version = "0.23", default-features = false, features = [
+  "ring",
+  "std",
+  "tls12",
+]}
+# 嵌入式向量库（可重建副本）：default = [] 但 arrow / datafusion / lance 为非可选依赖，
+# 因此开启它的构建成本是确定的（只有 vector-lance 依赖它）。
+lancedb = {version = "0.41.0", default-features = false}
+# LanceDB schema 反射用；版本必须与 lancedb 内部 arrow 同源（58）
+arrow-schema = {version = "58", default-features = false}
+# ──────────────────────────────────────────────────────────────────────────────
+# Search & File Walking
+# ──────────────────────────────────────────────────────────────────────────────
+globset = "0.4"
+grep-matcher = "0.1"
+grep-pcre2 = "0.1"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+# ---- 认证 / 加密 ----
+# argon2 0.6 → password-hash 0.6：盐由 argon2 内部经 getrandom 0.4 生成，
+# 因此不再需要显式声明 rand_core 0.6 来激活 OsRng 特性。
+aes-gcm = "0.11.1"
+argon2 = "0.6.0"
+base64 = "0.23.1"
+getrandom = {version = "0.4.3", features = ["std"]}
+jsonwebtoken = {version = "11.1.0", default-features = false, features = ["aws_lc_rs"]}
+rand = {version = "0.10.3", features = ["std_rng"]}
+uuid = {version = "1.29.0", features = ["v4"]}
 
-# Windows 平台兼容
-winapi = { version = "0.3", features = [
+# ---- 日志 / 追踪 ----
+opentelemetry = {version = "0.33.1", features = ["trace", "metrics", "logs"]}
+opentelemetry-appender-tracing = "0.33.1"
+opentelemetry-otlp = {version = "0.33.1", features = [
+  "grpc-tonic",
+  "http-proto",
+  "trace",
+  "logs",
+  "metrics",
+]}
+opentelemetry_sdk = {version = "0.33.1", features = ["rt-tokio", "trace", "metrics", "logs"]}
+tracing = "0.1.44"
+tracing-opentelemetry = "0.34.0"
+tracing-subscriber = {version = "0.3.23", features = ["env-filter"]}
+
+# ---- 通用工具 ----
+anyhow = "1.0.104"
+dirs = "7.0.0"
+thiserror = "2.0.21"
+twitter_snowflake = "1.0.3"
+winapi = {version = "0.3", features = [
   "memoryapi",
   "debugapi",
   "sysinfoapi",
   "processthreadsapi",
   "errhandlingapi",
-] }
+]}
+
+# ---- 对象存储 ----
+aws-credential-types = "1.3.1"
+aws-sdk-s3 = {version = "1.156.0", default-features = false, features = ["rustls"]}
+aws-smithy-async = {version = "1.3.1", features = ["rt-tokio"]}
+
+# ---- 运维采集（Docker / Swarm / Kubernetes，全部只读）----
+# bollard 0.21 起 connect_with_* 的参数是 `timeout: u64`（秒）与 `&ClientVersion`，
+# 不再是 Option<Duration>/Option<&str>；默认 features 为 http+pipe，ssl 才能连 2376 mTLS。
+bollard = {version = "0.21.1", default-features = false, features = [
+  "http",
+  "pipe",
+  "ssl",
+  "time",
+]}
+# kube 4.2 的 kube-client 依赖 serde-saphyr 0.0.29（要求 smallvec <1.16），
+# 与 pdf_oxide 要求的 smallvec ^1.16 冲突；kube 3.0 仍用 serde_yaml，故锁 3.0.0。
+# 加密 provider 统一走 ring（bollard 的 ssl 内部也是 rustls/ring），避免双 provider 歧义。
+kube = {version = "4.2.0", default-features = false, features = [
+  "client",
+  "config",
+  "rustls-tls",
+  "ring",
+]}
+# k8s-openapi 0.28 提供 v1_32 ~ v1_36，且 kube 要求「恰好一个」版本 feature。
+# 注意：kube-client 4.2.0 依赖 k8s-openapi ^0.28；这里若写 0.27 会解析出双版本，
+# 0.28 那份没有 v1_* feature，build script 会直接 panic。升级时两处必须同版本。
+# 目标集群版本未知时取 v1_32 以获得较宽兼容性；确认集群版本后改这一行即可。
+k8s-openapi = {version = "0.28.0", default-features = false, features = [
+  "std",
+  "v1_32",
+]}
+# bollard 的 BollardDate 只有开启 time/chrono 特性时才不是 String；统一用 time，
+# 避免为了把 RFC3339 转成 epoch 毫秒而给 ops 引入 chrono 的 clock 特性。
+time = {version = "0.3.55", default-features = false, features = ["std"]}
+
+# ---- 文档解析 ----
+ffmpeg-sidecar = "2.7.0"
+office_oxide = "0.1.16"
+pdf_oxide = "0.3.77"
+zip = {version = "9.1.3", default-features = false}
+
+# ---- 工作流 / Agent ----
+adk-graph = "2.3.0"
+adk-rust = {version = "2.3.0", features = ["graph"]}
+bpmn-parser = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
+engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
+llama-cpp-v3 = "0.1.8"
+
+# ---- Tauri ----
+opus = "0.4.0"
+tauri = {version = "2.12.5", default-features = false, features = ["wry"]}
+tauri-build = {version = "2.7.4", default-features = false}
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-fs = "2.7.1"
+tauri-plugin-opener = {version = "2.7.2", default-features = false}
+tauri-plugin-process = "2.4.0"
+tauri-plugin-shell = "2.6.0"
+tauri-plugin-updater = "2.14.1"
+webrtc = "0.21.1"
+xattr = "1.7.0"
+# ──────────────────────────────────────────────────────────────────────────────
+# System & Platform
+# ──────────────────────────────────────────────────────────────────────────────
+libc = "0.2"
+os_pipe = "1"
+windows-sys = {version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Media_Audio",
+  "Win32_Media_Multimedia",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_Storage_ProjectedFileSystem",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_Threading",
+]}
+# Transitive-only pin (wired through crates/pi-natives' `cfg(false)` target
+# deps so the constraint participates in resolution without tripping the
+# unused-dependency lint): cc 1.2.x passes
+# FILE_ATTRIBUTE_TEMPORARY to OpenOptionsExt::custom_flags as u32, but
+# find-msvc-tools 0.1.13 retyped that constant to i32, breaking every Windows
+# build. tree-sitter-sequel caps cc at ~1.2.1 so the fixed cc 1.4.x line is
+# out of reach; hold 0.1.12 until upstream ships a compatible release.
+find-msvc-tools = "0.1.15"
+winreg = "0.56.0"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Data Structures - Collections
+# ──────────────────────────────────────────────────────────────────────────────
+heapless = "0.9"
+phf = {version = "0.14", features = ["macros"]}
+smallvec = {version = "1.16.4", features = [
+  "serde",
+  "write",
+  "union",
+  "const_new",
+]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hashing
+# ──────────────────────────────────────────────────────────────────────────────
+xxhash-rust = {version = "0.8.19", features = ["xxh64", "xxh32"]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI & Configuration
+# ──────────────────────────────────────────────────────────────────────────────
+clap = {version = "4", features = ["derive"]}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Text Processing & Parsing
+# ──────────────────────────────────────────────────────────────────────────────
+fontdue = {version = "0.9", default-features = false}
+pdf-inspector = "1"
+regex = "1"
+similar = "3.2.0"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# AST & Tree-Sitter
+# ──────────────────────────────────────────────────────────────────────────────
+ast-grep-core = {version = "0.51.0", default-features = false, features = ["tree-sitter"]}
+tree-sitter = "0.27.1"
+tree-sitter-bash = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-css = "0.25"
+tree-sitter-diff = "0.1"
+# elisp, fortran, lua, ruby, swift: test-only stand-ins for wasm grammars (see
+# the pi-ast and pi-edit dev-dependencies); every other grammar here is linked in.
+tree-sitter-elisp = "1.7.2"
+tree-sitter-fortran = "0.6.0"
+tree-sitter-go = "0.25"
+tree-sitter-html = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-lua = "0.5"
+tree-sitter-md = "0.5"
+tree-sitter-python = "0.25"
+tree-sitter-regex = "0.25"
+tree-sitter-ruby = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-swift = "0.7"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-typescript = "0.23"
+tree-sitter-yaml = "0.7"
+# ──────────────────────────────────────────────────────────────────────────────
+# Node.js Bindings (NAPI)
+# ──────────────────────────────────────────────────────────────────────────────
+napi = {version = "3", features = ["napi10", "tokio_rt", "tokio_time"]}
+napi-build = "2"
+napi-derive = "3"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Terminal & PTY
+# ──────────────────────────────────────────────────────────────────────────────
+arboard = {version = "3.6.1", features = ["wayland-data-control"]}
+clipboard-win = "5.4"
+icy_sixel = "0.7"
+portable-pty = "0.9"
+shlex = "2"
+# ──────────────────────────────────────────────────────────────────────────────
+# Machine Learning (pi-predict SmolLM2 engine)
+# ──────────────────────────────────────────────────────────────────────────────
+# macOS-only (Metal decoder; other targets use pi-predict's own CPU decoder).
+# 0.9.x, not 0.10+: later candle-core releases depend unconditionally on
+# `tokenizers` with the `onig` C library.
+candle-core = "0.11.0"
+candle-nn = "0.11.0"
+
+[build-dependencies]
+tauri-build = {workspace = true}
+
+[dependencies]
+# 内部业务 crate（crates/*）
+api.workspace = true
+apidoc.workspace = true
+ast.workspace = true
+async-trait.workspace = true
+bootstrap.workspace = true
+database.workspace = true
+engine.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+service.workspace = true
+storage.workspace = true
+utils.workspace = true
+vfs.workspace = true
+workflow.workspace = true
+# 序列化 / 异步 / 数据库
+chrono.workspace = true
+getrandom.workspace = true
+iso.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+# JWT（命令层）
+jsonwebtoken.workspace = true
+
+# Agent / Windows 平台兼容
+adk-graph.workspace = true
+adk-rust.workspace = true
+
+libc.workspace = true
+llama-cpp-v3.workspace = true
+pdf_oxide.workspace = true
+winapi.workspace = true
+# Tauri 核心（最小特性集）
+ast-grep-core.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-fs.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-process.workspace = true
+tauri-plugin-shell.workspace = true
+tauri-plugin-updater.workspace = true
+tauri.workspace = true
+tree-sitter-bash.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-cpp.workspace = true
+tree-sitter-css.workspace = true
+tree-sitter-diff.workspace = true
+tree-sitter.workspace = true
+# elisp, fortran, lua, ruby, swift: test-only stand-ins for wasm grammars (see
+# the pi-ast and pi-edit dev-dependencies); every other grammar here is linked in.
+globset.workspace = true
+grep-matcher.workspace = true
+grep-pcre2.workspace = true
+grep-regex.workspace = true
+grep-searcher.workspace = true
+ignore.workspace = true
+tree-sitter-elisp.workspace = true
+tree-sitter-fortran.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-html.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-json.workspace = true
+tree-sitter-lua.workspace = true
+tree-sitter-md.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-regex.workspace = true
+tree-sitter-ruby.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-swift.workspace = true
+tree-sitter-toml-ng.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-yaml.workspace = true
 
 [dev-dependencies]
 # 集成测试专用（tests/ 目录）
-surrealdb = "3.2.3"
-image = "0.25"
-pdf_oxide = "0.3.76"
 
-# Release模式优化配置
+# 例外：tests/image_tests.rs 需要 png / jpeg / webp 编解码（默认格式特性），
+# 与 crates/parser 的 optional + 仅 png 需求相反，无法共用同一条 workspace 定义。
+image = "0.25.10"
+
+[workspace.lints.rust]
+# ──────────────────────────────────────────────────────────────────────────────
+# Rust Lint Levels
+# ──────────────────────────────────────────────────────────────────────────────
+mismatched_lifetime_syntaxes = "allow"
+
+[workspace.lints.clippy]
+# ──────────────────────────────────────────────────────────────────────────────
+# Base Lint Levels
+# ──────────────────────────────────────────────────────────────────────────────
+all = {level = "warn", priority = -1}
+correctness = {level = "deny", priority = -1}
+nursery = {level = "warn", priority = -1}
+pedantic = {level = "warn", priority = -1}
+perf = {level = "warn", priority = -1}
+style = {level = "warn", priority = -1}
+suspicious = {level = "deny", priority = -1}
+
 [profile.release]
 codegen-units = 16
 incremental = false

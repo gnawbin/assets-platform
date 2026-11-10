@@ -634,6 +634,11 @@ pub fn create_adapter(provider: &LlmProvider) -> Box<dyn LLMProviderAdapter> {
 
 ### 5.3 Rust 适配器代码结构
 
+> ⚠️ 本节代码结构（`LLMProviderAdapter` trait + `OpenAIAdapter`/`ClaudeAdapter` 单文件内聚）
+> 已被 [LLM协议适配crate设计方案.md](./LLM协议适配crate设计方案.md) 取代：
+> 协议层拆为 `crates/llm`（契约）+ `crates/llm-openai` + `crates/llm-anthropic`。
+> 本节保留作为历史实现记录。
+
 ```rust
 /// 厂商适配器 trait
 #[async_trait]

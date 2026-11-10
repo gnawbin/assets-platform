@@ -9,7 +9,7 @@
  * 或运行时调用 setAdapter('http')
  *
  * 映射表覆盖后端 lib.rs invoke_handler 中注册的全部 Tauri 命令：
- * - 后端 HTTP API（crates/assets-api）已实现的路由 → 写入 COMMAND_ROUTE_MAP
+ * - 后端 HTTP API（crates/api）已实现的路由 → 写入 COMMAND_ROUTE_MAP
  * - 后端尚未提供 HTTP 端点（LLM 厂商/知识资产 OKF/对话/编号规则/RAG 等）
  *   → 登记在 TAURI_ONLY_COMMANDS，HTTP 模式下会抛出明确错误
  *
@@ -58,6 +58,9 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     // ======================== 认证（公开路由） ========================
     login: { method: 'POST', path: '/api/auth/login' },
     register: { method: 'POST', path: '/api/auth/register' },
+    // 刷新 / 登出：访问令牌可能已过期，属于公开路由（靠 refresh token 自身校验）
+    refresh_token: { method: 'POST', path: '/api/auth/refresh' },
+    logout: { method: 'POST', path: '/api/auth/logout' },
 
     // ======================== 资产分类 ========================
     get_categories: { method: 'GET', path: '/api/categories' },
@@ -77,6 +80,19 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     insert_intangible_asset: { method: 'POST', path: '/api/assets/intangible' },
     update_intangible_asset: { method: 'PUT', path: '/api/assets/intangible/{id}' },
     delete_intangible_asset: { method: 'DELETE', path: '/api/assets/intangible/{id}' },
+
+    // ======================== 运维采集（Docker / Swarm / K8s，只读） ========================
+    get_ops_providers: { method: 'GET', path: '/api/ops/providers' },
+    get_ops_connections: { method: 'GET', path: '/api/ops/connections' },
+    get_ops_connection: { method: 'GET', path: '/api/ops/connections/{id}' },
+    create_ops_connection: { method: 'POST', path: '/api/ops/connections' },
+    update_ops_connection: { method: 'PUT', path: '/api/ops/connections/{id}' },
+    delete_ops_connection: { method: 'DELETE', path: '/api/ops/connections/{id}' },
+    test_ops_connection_draft: { method: 'POST', path: '/api/ops/connections/test' },
+    test_ops_connection: { method: 'POST', path: '/api/ops/connections/{id}/test' },
+    collect_ops_resources: { method: 'POST', path: '/api/ops/connections/{id}/collect' },
+    get_ops_links: { method: 'GET', path: '/api/ops/links' },
+    bind_ops_link: { method: 'POST', path: '/api/ops/links/{linkId}/bind' },
 
     // ======================== 部门 ========================
     get_departments: { method: 'GET', path: '/api/departments' },
@@ -190,7 +206,7 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
 // ======================== 仅 Tauri 模式支持的命令 ========================
 
 /**
- * 后端 HTTP API（crates/assets-api）尚未提供 HTTP 端点的命令。
+ * 后端 HTTP API（crates/api）尚未提供 HTTP 端点的命令。
  *
  * 这些命令仅能通过 Tauri invoke() 调用。若在 HTTP 适配器下被调用，
  * httpCall() 会抛出明确错误，避免使用不存在的虚拟路由导致 404 混淆。
@@ -313,6 +329,127 @@ function getAuthToken(): string | null {
     return null;
 }
 
+// ======================== 令牌自动续期 ========================
+
+/** 认证端点本身不参与 401 自动续期，避免刷新递归 */
+const AUTH_ENDPOINTS: ReadonlySet<string> = new Set<string>([
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/refresh',
+    '/api/auth/logout',
+]);
+
+/** 并发去重：同一时刻只发起一次刷新请求，其余请求复用它 */
+let refreshInFlight: Promise<string | null> | null = null;
+
+/** 保存新的令牌对，并通知 authStore 同步内存中的 token */
+function persistRefreshedTokens(token: string, refreshToken?: string | null): void {
+    try {
+        localStorage.setItem('auth_token', token);
+        if (refreshToken) {
+            localStorage.setItem('refresh_token', refreshToken);
+        }
+    } catch {
+        // localStorage 不可用时忽略（请求仍能继续）
+    }
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+            new CustomEvent('auth:tokens-refreshed', { detail: { token } }),
+        );
+    }
+}
+
+async function doRefreshAccessToken(): Promise<string | null> {
+    let refreshToken: string | null = null;
+    try {
+        refreshToken =
+            typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+    } catch {
+        return null;
+    }
+    if (!refreshToken) {
+        return null;
+    }
+
+    try {
+        const response = await fetch(buildUrl('/api/auth/refresh', {}), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!response.ok) {
+            logger.warn(`[HTTP] 刷新令牌失败: HTTP ${response.status}`);
+            return null;
+        }
+
+        const payload = await response.json();
+        const data = payload && typeof payload === 'object' ? payload.data : undefined;
+        if (!data?.token) {
+            return null;
+        }
+
+        persistRefreshedTokens(data.token as string, (data.refresh_token as string) || null);
+        logger.info('[HTTP] 访问令牌已自动续期');
+        return data.token as string;
+    } catch (error) {
+        logger.warn('[HTTP] 刷新令牌请求异常', { error });
+        return null;
+    }
+}
+
+/**
+ * 用 refresh token 换取新的访问令牌（并发安全）
+ *
+ * @returns 新的访问令牌；刷新失败 / 无 refresh token 时返回 null
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+    if (refreshInFlight) {
+        return refreshInFlight;
+    }
+
+    const task = doRefreshAccessToken();
+    refreshInFlight = task;
+    try {
+        return await task;
+    } finally {
+        refreshInFlight = null;
+    }
+}
+
+/** 清除本地登录态并跳转登录页（刷新失败后的兜底） */
+export function clearAuthSession(): void {
+    try {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('auth_user');
+        localStorage.removeItem('available_tenants');
+        localStorage.removeItem('selected_tenant_id');
+    } catch {
+        // 忽略
+    }
+
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.assign('/login');
+    }
+}
+
+/**
+ * 撤销后端刷新令牌（主动登出；失败不阻断本地登出流程）
+ */
+export async function revokeRefreshTokenOnServer(refreshToken: string): Promise<void> {
+    try {
+        await fetch(buildUrl('/api/auth/logout', {}), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+            keepalive: true,
+        });
+    } catch (error) {
+        logger.warn('[HTTP] 撤销刷新令牌失败（不影响本地登出）', { error });
+    }
+}
+
 // ======================== 核心调用函数 ========================
 
 async function httpCall<T>(
@@ -392,7 +529,29 @@ async function httpCall<T>(
                 maxRetries: retryCount + 1,
             });
 
-            const response = await fetch(finalUrl, fetchOptions);
+            let response = await fetch(finalUrl, fetchOptions);
+
+            // 401 → 用 refresh token 静默续期并重放一次（认证端点本身不自救，避免刷新递归）
+            if (
+                response.status === 401 &&
+                !AUTH_ENDPOINTS.has(pathTemplate) &&
+                getAuthToken()
+            ) {
+                const renewedToken = await refreshAccessToken();
+                if (renewedToken) {
+                    logger.warn(
+                        `[HTTP] 访问令牌已过期，已使用刷新令牌重试: ${method} ${finalUrl}`,
+                    );
+                    fetchOptions.headers = {
+                        ...fetchOptions.headers,
+                        Authorization: `Bearer ${renewedToken}`,
+                    };
+                    response = await fetch(finalUrl, fetchOptions);
+                } else {
+                    logger.warn('[HTTP] 刷新令牌失败，清除登录态并跳转登录页');
+                    clearAuthSession();
+                }
+            }
 
             if (!response.ok) {
                 const errorBody = await response.text().catch(() => '');

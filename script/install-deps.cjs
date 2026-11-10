@@ -180,6 +180,62 @@ function installTauriCLI() {
   }
 }
 
+// Check CMake (required by wasmtime-c-api-impl, pulled in by the tree-sitter `wasm` feature)
+function checkCMake() {
+  logStep('Checking CMake installation...');
+
+  const minVersion = [3, 12];
+
+  if (!commandExists('cmake')) {
+    logError('CMake is not installed or not available on PATH!');
+    logInfo('The Rust build needs it: `crates/ast` enables the tree-sitter `wasm` feature,');
+    logInfo('which pulls in `wasmtime-c-api-impl` whose build script spawns `cmake`.');
+    logInfo('Without CMake the build panics with: failed to spawn `cmake`: program not found');
+
+    const platformInfo = getPlatformInfo();
+    if (platformInfo.isWindows) {
+      logInfo('Option 1: The "Desktop development with C++" workload in Visual Studio already bundles CMake, at:');
+      logInfo('  C:\\Program Files\\Microsoft Visual Studio\\<version>\\<edition>\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin');
+      logInfo('  Add that folder to your user PATH, then fully restart your terminal and VS Code.');
+      logInfo('Option 2: winget install --id Kitware.CMake -e');
+    } else if (platformInfo.isMacOS) {
+      logInfo('Run: brew install cmake');
+    } else {
+      logInfo('Run: sudo apt-get install cmake (Ubuntu/Debian)');
+      logInfo('Or:  sudo yum install cmake (CentOS/RHEL)');
+    }
+    return false;
+  }
+
+  try {
+    const output = execSync('cmake --version', { encoding: 'utf8' });
+    const match = output.match(/cmake version (\d+)\.(\d+)(?:\.(\d+))?/i);
+
+    if (!match) {
+      logWarning('CMake is installed but its version could not be parsed');
+      return true;
+    }
+
+    const version = [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3] || '0', 10)];
+    const versionText = version.join('.');
+    const isSupported =
+      version[0] > minVersion[0] ||
+      (version[0] === minVersion[0] && version[1] >= minVersion[1]);
+
+    if (!isSupported) {
+      logError(`CMake ${versionText} is too old. Required: >= ${minVersion.join('.')}`);
+      logInfo('Please upgrade CMake from: https://cmake.org/download/');
+      return false;
+    }
+
+    logSuccess(`CMake ${versionText} is installed and compatible`);
+    return true;
+  } catch (error) {
+    logError(`Failed to check CMake version: ${error.message}`);
+    return false;
+  }
+}
+
 // Install project dependencies
 function installProjectDependencies() {
   logStep('Installing project dependencies...');
@@ -233,6 +289,7 @@ async function main() {
     { name: 'Node.js', fn: checkNodeVersion },
     { name: 'Yarn', fn: installYarn },
     { name: 'Rust', fn: installRust },
+    { name: 'CMake', fn: checkCMake },
     { name: 'Tauri CLI', fn: installTauriCLI },
     { name: 'Project Dependencies', fn: installProjectDependencies }
   ];
@@ -267,4 +324,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, checkNodeVersion, installYarn, installRust, installTauriCLI };
+module.exports = { main, checkNodeVersion, installYarn, installRust, checkCMake, installTauriCLI };

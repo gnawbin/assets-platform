@@ -1,0 +1,22 @@
+[package]
+edition = "2024"
+name = "vector-lance"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# LanceDB（嵌入式向量库，本地目录 / 对象存储）实现。
+# 驱动（lancedb + arrow-schema）只属于本 crate：crates/vector 与 crates/ops 都不感知它。
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+vector.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+lancedb.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# 端到端单测直接开本地目录的 LanceDB（嵌入式，不需要任何服务）
+tokio = {workspace = true, features = ["macros", "rt-multi-thread"]}

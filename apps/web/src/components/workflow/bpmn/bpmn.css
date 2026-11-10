@@ -1,0 +1,97 @@
+/* bpmn-js 画布容器与业务语义着色（不修改 BPMN XML） */
+
+.bpmn-canvas {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #fbfbfb;
+    border-radius: 8px;
+}
+
+.bpmn-canvas .djs-container {
+    width: 100%;
+    height: 100%;
+    background: #fbfbfb;
+}
+
+.bpmn-canvas .djs-palette {
+    left: 12px;
+    top: 12px;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+    background: #ffffff;
+}
+
+.bpmn-canvas .djs-palette .entry {
+    color: #495057;
+}
+
+.bpmn-canvas .bjs-powered-by {
+    bottom: 8px;
+    right: 8px;
+    opacity: 0.55;
+}
+
+.bpmn-canvas .djs-label {
+    font-family: inherit;
+}
+
+/* ---------------- 业务语义着色（diagram-js marker） ---------------- */
+
+.bpmn-canvas .assets-kind-trigger .djs-visual > :nth-child(1) {
+    stroke: #2b8a3e !important;
+    stroke-width: 2px !important;
+}
+
+.bpmn-canvas .assets-kind-skill .djs-visual > :nth-child(1) {
+    stroke: #1971c2 !important;
+    fill: #e7f5ff !important;
+}
+
+.bpmn-canvas .assets-kind-llm .djs-visual > :nth-child(1) {
+    stroke: #9c36b5 !important;
+    fill: #f3f0ff !important;
+}
+
+.bpmn-canvas .assets-kind-condition .djs-visual > :nth-child(1) {
+    stroke: #e8590c !important;
+    fill: #fff4e6 !important;
+}
+
+.bpmn-canvas .assets-kind-code .djs-visual > :nth-child(1) {
+    stroke: #495057 !important;
+    fill: #f1f3f5 !important;
+}
+
+.bpmn-canvas .assets-kind-workflow .djs-visual > :nth-child(1) {
+    stroke: #0c8599 !important;
+    fill: #e3fafc !important;
+}
+
+.bpmn-canvas .assets-kind-output .djs-visual > :nth-child(1) {
+    stroke: #c92a2a !important;
+    stroke-width: 4px !important;
+}
+
+/* ---------------- 执行状态覆盖 ---------------- */
+
+.bpmn-canvas .assets-exec-running .djs-visual > :nth-child(1) {
+    stroke: #1c7ed6 !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(0 0 4px rgba(28, 126, 214, 0.65));
+}
+
+.bpmn-canvas .assets-exec-success .djs-visual > :nth-child(1) {
+    stroke: #2f9e44 !important;
+    stroke-width: 3px !important;
+}
+
+.bpmn-canvas .assets-exec-failed .djs-visual > :nth-child(1) {
+    stroke: #e03131 !important;
+    stroke-width: 3px !important;
+}
+
+.bpmn-canvas .assets-exec-skipped .djs-visual {
+    opacity: 0.45;
+}

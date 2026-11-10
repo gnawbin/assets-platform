@@ -93,7 +93,6 @@ assets-platform/
 │   │   ├── .storybook/                 # ← 当前根目录的 .storybook/（移入）
 │   │   ├── next.config.js              # [从根目录移入 + 修改路径别名]
 │   │   ├── tsconfig.json               # [从根目录移入 + 添加 shared 路径映射]
-│   │   ├── tsconfig.jest.json          # [从根目录移入]
 │   │   ├── jest.config.js              # [从根目录移入 + 修改 moduleNameMapper]
 │   │   ├── next-env.d.ts               # [从根目录移入]
 │   │   ├── .env.local                  # [移入] 前端环境变量
@@ -380,7 +379,6 @@ apps/backend/src-tauri/target
     "stylelint": "^17.13.0",
     "stylelint-config-standard-scss": "^17.0.0",
     "terser": "^5.43.1",
-    "ts-jest": "^29.4.4",
     "typescript": "7.0.2",
     "typescript-eslint": "^8.46.0"
   }
@@ -475,13 +473,22 @@ export default nextConfig;
 #### 4.2.4 `apps/web/jest.config.js`（从根目录移入 + 修改）
 
 ```js
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import nextJest from 'next/jest.js';
+
+const dir = dirname(fileURLToPath(import.meta.url));
+// 使用 Next.js 内置的 SWC 转换器，避免 ts-jest 依赖 TypeScript JS Compiler API
+const createJestConfig = nextJest({ dir });
+
 /** @type {import('jest').Config} */
 const config = {
-  preset: 'ts-jest',
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^@assets/shared$': '<rootDir>/../../packages/shared/src/index.ts',
     '^@assets/shared/(.*)$': '<rootDir>/../../packages/shared/src/$1',
   },
   testMatch: [
@@ -495,14 +502,9 @@ const config = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  transform: {
-    '^.+\\.(ts|tsx)$': ['ts-jest', {
-      tsconfig: 'tsconfig.jest.json',
-    }],
-  },
 };
 
-export default config;
+export default createJestConfig(config);
 ```
 
 ---
@@ -700,7 +702,7 @@ export * from './types/category';
 |------|------|----------|------|
 | 7 | 创建 `apps/web/` 目录结构 | 目录存在 | 低 |
 | 8 | 复制 `src/`、`public/`、`.storybook/` 等到 `apps/web/` | 文件完整 | 低 |
-| 9 | 复制 `next.config.js`、`tsconfig.json`、`jest.config.js`、`tsconfig.jest.json`、`next-env.d.ts` 到 `apps/web/` | 文件完整 | 低 |
+| 9 | 复制 `next.config.js`、`tsconfig.json`、`jest.config.js`、`next-env.d.ts` 到 `apps/web/` | 文件完整 | 低 |
 | 10 | 创建 `apps/web/package.json`（含所有依赖） | | 低 |
 | 11 | 创建 `apps/backend/` 目录 | 目录存在 | 低 |
 | 12 | 复制 `src-tauri/`、`tests/`、`.env.toml` 到 `apps/backend/` | 文件完整 | 低 |

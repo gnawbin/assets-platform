@@ -1,0 +1,47 @@
+# doc-parser systemd 单元（同机独立进程部署）
+#
+# 安装步骤：
+#   1) sudo mkdir -p /etc/doc-parser && sudo chmod 700 /etc/doc-parser
+#   2) 生成 token：python -c "import uuid; print(uuid.uuid4())"
+#   3) 参考 deploy/doc-parser.env.example 写入 /etc/doc-parser/doc-parser.env
+#      sudo chmod 600 /etc/doc-parser/doc-parser.env
+#   4) sudo cp deploy/doc-parser.service /etc/systemd/system/
+#   5) sudo systemctl daemon-reload && sudo systemctl enable --now doc-parser
+#   6) 校验：curl -s http://127.0.0.1:8321/health
+#
+# 说明：systemd 模式保持绑定 127.0.0.1（不对外暴露），由同机 Rust 端作为客户端访问。
+[Unit]
+Description=doc-parser 多模态文档解析服务
+Documentation=file:///opt/doc-parser/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=docparser
+Group=docparser
+WorkingDirectory=/opt/doc-parser
+
+# 含 DOC_PARSER_TOKEN 等敏感配置，权限必须 600，属主 root
+EnvironmentFile=/etc/doc-parser/doc-parser.env
+# 保证 ffmpeg / ffprobe 可被解析（README 前置条件：imageio_ffmpeg 不含 ffprobe）
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+ExecStart=/opt/doc-parser/.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 8321
+
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=doc-parser
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/doc-parser /tmp /opt/doc-parser/data
+
+[Install]
+WantedBy=multi-user.target

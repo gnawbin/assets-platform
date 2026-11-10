@@ -231,9 +231,9 @@ adb logcat | grep -iE "tauri|rust|assets"
 
 2. **数据库必须移动端可达**：`apps/backend/.env.toml` 里 Postgres 地址若写 `localhost/127.0.0.1`，Android 上会连到手机自己。模拟器用 `10.0.2.2`（映射宿主机），真机用局域网 IP；并且要让服务端允许该来源连接。
 
-3. **doc-parser（Python 侧车）在 Android 上不可用**：`assets-service/src/doc_parser.rs` 默认解释器是 `/home/ubuntu/conda/envs/aiagent/bin/python`，并按源码目录找 `doc-parser/main.py`——Android 上两者都不存在。代码已做 graceful 降级（启动失败只记日志返回 `None`），**不会导致崩溃**，但多模态/视频解析功能不可用；如需移动端支持，应把 doc-parser 改造成远端服务或在 Rust 侧重写。
+3. **doc-parser（Python 侧车）在 Android 上不可用**：`service/src/doc_parser.rs` 默认解释器是 `/home/ubuntu/conda/envs/aiagent/bin/python`，并按源码目录找 `doc-parser/main.py`——Android 上两者都不存在。代码已做 graceful 降级（启动失败只记日志返回 `None`），**不会导致崩溃**，但多模态/视频解析功能不可用；如需移动端支持，应把 doc-parser 改造成远端服务或在 Rust 侧重写。
 
-4. **内置 HTTP API 无碍但留意明文流量**：`assets-api` 绑 `0.0.0.0`，与 App 同进程，WebView 走 `127.0.0.1` 可访问。若前端在移动端用 `fetch("http://127.0.0.1:...")` 直连 HTTP API，需确认 AndroidManifest 允许 cleartext（Android 9+ 默认禁止明文 HTTP）；优先仍走 Tauri IPC（`@tauri-apps/api` 的 `invoke`，移动端同样支持）。
+4. **内置 HTTP API 无碍但留意明文流量**：`api` 绑 `0.0.0.0`，与 App 同进程，WebView 走 `127.0.0.1` 可访问。若前端在移动端用 `fetch("http://127.0.0.1:...")` 直连 HTTP API，需确认 AndroidManifest 允许 cleartext（Android 9+ 默认禁止明文 HTTP）；优先仍走 Tauri IPC（`@tauri-apps/api` 的 `invoke`，移动端同样支持）。
 
 5. **桌面专属配置会被忽略**：`tauri.conf.json` 的 `app.windows`（1480×800 单窗口）仅桌面生效；移动端固定单窗口 label `main`（与当前 capability 一致，无需改）。多窗口、系统托盘、全局快捷键等桌面能力在 Android 不可用。
 

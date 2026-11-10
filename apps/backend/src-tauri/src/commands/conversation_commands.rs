@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use assets_service::conversation_service::{
+use service::conversation_service::{
     AttachmentParam, ConversationResponse, ConversationService,
 };
-use assets_service::llm_gateway_service::LLMRouter;
+use service::llm_gateway_service::LLMRouter;
 
 /// 创建新会话并发送第一条消息
 #[tauri::command]
@@ -120,7 +120,7 @@ pub async fn get_conversation_messages(
     convId: String,
     page: Option<i32>,
     pageSize: Option<i32>,
-) -> Result<Vec<assets_database::models::Message>, String> {
+) -> Result<Vec<database::models::Message>, String> {
     let conv_id: i64 = convId.parse().map_err(|e| format!("无效的会话ID: {}", e))?;
     let p = page.unwrap_or(1);
     let ps = pageSize.unwrap_or(100);

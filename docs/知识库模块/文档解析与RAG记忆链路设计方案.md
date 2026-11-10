@@ -877,10 +877,14 @@ sequenceDiagram
 import config
 from fastapi import FastAPI, Request, HTTPException
 
-# 认证中间件：除 /health 外，所有请求校验 X-API-Token
+# 公开路径（豁免认证）：/health（健康检查）+ Swagger/ReDoc/OpenAPI 文档（/docs、/redoc、/openapi.json、/docs/oauth2-redirect）
+# 文档端点只暴露接口结构，真正的业务端点仍强制 X-API-Token
+PUBLIC_PATHS = {"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+
+# 认证中间件：除 PUBLIC_PATHS 外，所有请求校验 X-API-Token
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    if request.url.path == "/health":
+    if request.url.path in PUBLIC_PATHS:
         return await call_next(request)
 
     token = request.headers.get("X-API-Token")
@@ -905,7 +909,7 @@ def _token_matches(token: str) -> bool:
 API_TOKEN = os.getenv("DOC_PARSER_TOKEN", "")
 ```
 
-> ⚠️ 生产注意：`DOC_PARSER_TOKEN` 由 Rust 端生成并注入，**不要写死在 .env 中**（否则退化为方案 B）。`/health` 豁免认证以便健康检查；若需更强限制，可对 `/formats` 也豁免（无敏感操作）。
+> ⚠️ 生产注意：`DOC_PARSER_TOKEN` 由 Rust 端生成并注入，**不要写死在 .env 中**（否则退化为方案 B）。`/health` 豁免认证以便健康检查；`/docs`、`/redoc`、`/openapi.json` 豁免认证以便浏览器可打开 Swagger/ReDoc 文档（仅暴露接口结构，业务端点仍受 token 保护）；若需更强限制，可对 `/formats` 也豁免（无敏感操作）。
 
 ### 11.6 错误响应格式
 
