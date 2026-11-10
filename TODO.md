@@ -102,3 +102,28 @@
 
 - [ ] **P4-23.** 前端 `FileUploader.tsx` 改造：新增 context/fileGroupId/changeReason 属性
 - [ ] **P4-24.** 知识库页面集成测试：传入 context，验证完整上传链路
+
+## 🔐 认证与鉴权改造（设计见 `docs/OAuth2.1与API Key统一鉴权设计方案.md`）
+
+### Phase 0：安全基座（必须先做，1–2 天）
+- [ ] **26.** `JWT_SECRET` 校验**只加在 `api::start_http_server_with()` 入口**（缺失/过短 → 返回 `Err`，仅 HTTP 不启动；**不改** `auth.rs:43`、`user_service.rs:76`、`src/commands/user_commands.rs:116` 的默认值兜底——Tauri 也在用，见设计文档 §16 T-2/§16.3）
+- [ ] **27.** `/api/upload/*`（7 条）、`/api/chat/stream` 纳入 `auth_middleware`（当前在 `lib.rs:121` 于中间件之外 merge，匿名可访问）
+- [ ] **28.** 删除 `auth.rs:149` 的 `set_global_schema()` 调用（**仅删 HTTP 侧**；`GLOBAL_SCHEMA` 保留给 Tauri，`lib.rs:148` 与 `switch_tenant` 命令语义不变，见设计文档 §16 T-3）
+- [ ] **29.** 新增 `utils/src/api_key.rs`（`generate_api_key` / `hash_api_key` / `parse_prefix`）+ `sha2` 依赖
+
+### Phase 1：API Key + 鉴权执行点（5–8 天）
+- [ ] **30.** DDL：`sys_api_key` + `sys_menu` 权限点补录（12 个新权限点：`system:apikey:*` 4 个、`upload:file:add/list/delete` 3 个、`chat:completion:add`、`system:oauthclient:*` 4 个）
+- [ ] **31.** 路由 → perms 映射补录：105 条路由全覆盖（当前仅 38 条带 `http_path`），中间用 `AUTHZ_MODE=warn` 过渡后再切 `enforce`
+- [ ] **32.** `api/src/authz.rs`：`AuthPrincipal` + `(method, MatchedPath) → perms` 判定 + 60s 权限缓存 + 启动自检（未映射路由告警；**自检在 `start_http_server_with()` 内调用**，不 panic、不影响 Tauri）
+- [ ] **33.** API Key 管理接口（`api/src/api_key_routes.rs`，scopes ⊆ 创建者权限）+ 前端 Key 管理页
+
+### Phase 2：OAuth 2.1 授权服务器（5–8 天，外部第三方接入前）
+- [ ] **34.** `/oauth/authorize`（方案 A：Bearer + 同意页）、`/oauth/token`（code + PKCE S256 + refresh 轮换）、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`
+
+### 🔒 Tauri 模式隔离回归（每阶段收尾必跑，设计文档 §16 / §13.4）
+
+- [ ] **35.** 清空 `JWT_SECRET` 启动 → 桌面端登录/资产列表/上传全部正常，仅 HTTP 不可用
+- [ ] **36.** 桌面端切换租户 → 数据随租户变化；再用 HTTP 以另一租户身份请求后回桌面查询 → 数据不受影响（HTTP 不再写 `GLOBAL_SCHEMA`）
+- [ ] **37.** 不设置任何新环境变量（`AUTHZ_MODE` / `API_KEY_*` / `OAUTH_*`）→ 桌面端全功能可用
+- [ ] **38.** 新增权限点未污染 `sys_menu.command_name`；Tauri `invoke` 错误提示与改造前一致
+
