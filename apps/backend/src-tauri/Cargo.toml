@@ -31,6 +31,8 @@ path = "src/main.rs"
 [workspace.dependencies]
 # ---- 内部业务 crate ----
 api = {path = "crates/api"}
+# 启动初始化（数据库 / 租户 schema / LLM Router / HTTP 服务）：桌面与无头服务共用
+bootstrap = {path = "crates/bootstrap"}
 # OpenAPI 规范汇总 + Swagger UI：依赖 api（只读其 handler 标注），api 不反向依赖它
 apidoc = {path = "crates/apidoc"}
 database = {path = "crates/database"}
@@ -361,6 +363,7 @@ api.workspace = true
 apidoc.workspace = true
 ast.workspace = true
 async-trait.workspace = true
+bootstrap.workspace = true
 database.workspace = true
 engine.workspace = true
 futures.workspace = true

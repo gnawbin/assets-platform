@@ -63,7 +63,23 @@ pub async fn start_http_server_with(
         .parse()
         .unwrap_or(3001);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // 监听地址：`API_BIND` 指定网卡地址，缺省 `0.0.0.0`（与改造前一致，避免桌面端
+    // `localhost` 解析到 ::1 时连不上 127.0.0.1 的回归）。
+    //
+    // 部署建议：
+    // - 桌面形态：只需本机 WebView 访问，可设 `API_BIND=127.0.0.1` 收敛暴露面
+    // - 无头服务端（crates/server）：建议 `API_BIND=127.0.0.1`，对外由 nginx 反代
+    let bind = std::env::var("API_BIND").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let addr: SocketAddr = format!("{}:{}", bind, port)
+        .parse()
+        .map_err(|e| anyhow::anyhow!("API_BIND/API_PORT 非法（{}:{}）: {}", bind, port, e))?;
+
+    if !addr.ip().is_loopback() {
+        tracing::warn!(
+            "HTTP API 监听非回环地址 {}，请确认防火墙、JWT 密钥与 CORS 配置已就绪",
+            addr
+        );
+    }
 
     // CORS 配置（允许前端跨域访问）
     let cors = CorsLayer::new()

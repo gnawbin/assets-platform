@@ -4,92 +4,21 @@ use std::sync::Arc;
 use tauri::Manager;
 
 /// 加载 .env TOML 配置文件，将值设置为环境变量
+///
+/// 解析规则已抽取到 `crates/bootstrap`（桌面与无头服务共用同一实现），
+/// 这里只声明桌面形态的候选路径：
+/// 1. 当前工作目录（可能是项目根目录或 src-tauri 目录）
+/// 2. `src-tauri/.env.toml`（相对于当前工作目录）
+/// 3. 项目根目录（通过 `CARGO_MANIFEST_DIR` 定位，即 `apps/backend/`）
 fn load_env() {
-    // 尝试多个路径查找 .env.toml 文件
-    // 1. 当前工作目录（可能是项目根目录或 src-tauri 目录）
-    // 2. src-tauri/.env.toml（相对于当前工作目录）
-    // 3. 项目根目录（通过 CARGO_MANIFEST_DIR 定位）
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let root_dir = manifest_dir.parent().unwrap_or(manifest_dir);
-    let root_env = root_dir.join(".env.toml");
 
-    let content = std::fs::read_to_string(".env.toml")
-        .or_else(|_| std::fs::read_to_string("src-tauri/.env.toml"))
-        .or_else(|_| std::fs::read_to_string(&root_env));
-
-    match content {
-        Ok(text) => match text.parse::<toml::Table>() {
-            Ok(table) => {
-                for (section, values) in &table {
-                    if let Some(sub_table) = values.as_table() {
-                        // 特殊处理 postgres 段的 read_replicas 数组
-                        if section == "postgres" {
-                            if let Some(toml::Value::Array(replicas)) =
-                                sub_table.get("read_replicas")
-                            {
-                                let hosts_str: Vec<String> = replicas
-                                    .iter()
-                                    .filter_map(|v| {
-                                        let table = v.as_table()?;
-                                        let host = table.get("host")?.as_str()?;
-                                        let port = table
-                                            .get("port")
-                                            .and_then(|p| p.as_integer())
-                                            .unwrap_or(5432);
-                                        let weight = table
-                                            .get("weight")
-                                            .and_then(|w| w.as_integer())
-                                            .unwrap_or(1);
-                                        Some(format!("{}:{}:{}", host, port, weight))
-                                    })
-                                    .collect();
-                                if !hosts_str.is_empty() {
-                                    let pg_read_hosts = hosts_str.join(",");
-                                    // SAFETY: run() 首行调用 load_env()，此时尚无并发读取环境变量的线程。
-                                    unsafe {
-                                        std::env::set_var("PG_READ_HOSTS", &pg_read_hosts);
-                                        std::env::set_var("POSTGRES_READ_HOSTS", &pg_read_hosts);
-                                    }
-                                }
-                            }
-                        }
-
-                        for (key, value) in sub_table {
-                            let env_value = match value {
-                                toml::Value::String(s) => s.clone(),
-                                toml::Value::Integer(i) => i.to_string(),
-                                toml::Value::Float(f) => f.to_string(),
-                                toml::Value::Boolean(b) => b.to_string(),
-                                _ => continue,
-                            };
-                            // 生成标准环境变量名：SECTION_KEY
-                            let env_key =
-                                format!("{}_{}", section.to_uppercase(), key.to_uppercase());
-                            // SAFETY: 同上，启动期配置加载，无并发读取环境变量的线程。
-                            unsafe { std::env::set_var(&env_key, &env_value) };
-
-                            // 兼容旧版环境变量名（postgres 段映射为 PG_ 前缀）
-                            if section == "postgres" {
-                                let legacy_key = format!("PG_{}", key.to_uppercase());
-                                // SAFETY: 同上，启动期配置加载，无并发读取环境变量的线程。
-                                unsafe { std::env::set_var(&legacy_key, &env_value) };
-                            } else if section == "auth" && key == "jwt_secret" {
-                                // SAFETY: 同上，启动期配置加载，无并发读取环境变量的线程。
-                                unsafe { std::env::set_var("JWT_SECRET", &env_value) };
-                            }
-                        }
-                    }
-                }
-                tracing::info!("已加载 .env TOML 配置文件");
-            }
-            Err(e) => {
-                tracing::warn!(".env 文件解析失败: {}", e);
-            }
-        },
-        Err(e) => {
-            tracing::warn!("未找到 .env 文件，将使用默认环境变量: {}", e);
-        }
-    }
+    bootstrap::config::load_env_toml(&[
+        std::path::PathBuf::from(".env.toml"),
+        std::path::PathBuf::from("src-tauri/.env.toml"),
+        root_dir.join(".env.toml"),
+    ]);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -108,11 +37,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(commands::skill_commands::SkillRegistryState(
-            std::sync::Arc::new(tokio::sync::Mutex::new(
-                engine::skill_registry::SkillRegistry::new(),
-            )),
-        ))
+        .manage(commands::skill_commands::SkillRegistryState(Arc::new(
+            tokio::sync::Mutex::new(engine::skill_registry::SkillRegistry::new()),
+        )))
         .setup(|app| {
             // 初始化 OpenTelemetry（需要 Tokio 运行时上下文）
             tauri::async_runtime::block_on(async {
@@ -121,72 +48,23 @@ pub fn run() {
                 }
             });
 
-            // 应用启动时自动初始化数据库
+            // 数据库初始化 + 默认租户 schema（与无头服务共用 crates/bootstrap 的实现）
+            // 失败只告警：桌面窗口仍要能打开，HTTP API 会因拿不到连接池而跳过启动
             tauri::async_runtime::block_on(async {
-                let init_result = database::init_database().await;
-                match &init_result {
-                    Ok(()) => tracing::info!("数据库初始化完成"),
-                    // 不 panic，让 HTTP API 服务尝试启动（如果连接池可用）
-                    Err(e) => tracing::error!("数据库初始化失败: {:?}", e),
-                }
-
-                // 无论初始化是否全部成功，只要连接池可用就绑定默认租户 schema。
-                // 否则 GLOBAL_SCHEMA 会停留在默认值 public，Tauri 模式下
-                // schema_prefix() 退化为空串，业务表查询落到 public 并报
-                // `relation "xxx" does not exist`。
-                if let Ok(pool) = database::get_pool() {
-                    let schema: Option<String> = sqlx::query_scalar(
-                        "SELECT schema_name FROM public.sys_tenant WHERE id = 1 AND enable = true",
-                    )
-                    .fetch_optional(&pool)
-                    .await
-                    .ok()
-                    .flatten();
-
-                    match schema {
-                        Some(sn) => {
-                            database::set_global_schema(sn);
-                            tracing::info!("已设置默认租户 schema");
-                        }
-                        None => tracing::warn!("未找到默认租户 schema，GLOBAL_SCHEMA 保持 public"),
-                    }
-                } else {
-                    tracing::warn!("数据库连接池不可用，跳过默认租户 schema 设置");
+                if let Err(e) = bootstrap::init_database_and_schema().await {
+                    tracing::error!("数据库初始化失败: {:?}", e);
                 }
             });
 
-            // 初始化 LLM Router
-            let llm_router = Arc::new(service::llm_gateway_service::LLMRouter::new());
-            tauri::async_runtime::block_on(async {
-                if let Err(e) = llm_router.refresh_providers().await {
-                    tracing::warn!("LLM Provider 加载失败（可能需要稍后手动刷新）: {}", e);
-                } else {
-                    tracing::info!("LLM Router 初始化完成");
-                }
-            });
+            // LLM Router + 工作流运行时管理器（每租户引擎、持久化与 Agent checkpointer）
+            let llm_router = tauri::async_runtime::block_on(bootstrap::init_llm_router());
             app.manage(llm_router.clone());
 
-            // 初始化工作流运行时管理器（每租户引擎、持久化与 Agent checkpointer）
-            let _workflow_manager = workflow::WorkflowManager::init(llm_router.clone());
-            tracing::info!("工作流运行时管理器已初始化");
-
             // 在后台启动 HTTP API 服务（与 Tauri 共用 Tokio 运行时）
-            let llm_router_clone = llm_router.clone();
             match database::get_pool() {
                 Ok(pool) => {
                     tracing::info!("准备启动 HTTP API 服务...");
-                    tauri::async_runtime::spawn(async move {
-                        tracing::info!("正在启动 HTTP API 服务...");
-                        // OpenAPI / Swagger UI 文档路由（API_DOCS_ENABLED=false 可关闭）
-                        let docs = apidoc::docs_enabled().then(apidoc::docs_router);
-                        if let Err(e) =
-                            api::start_http_server_with(pool, Some(llm_router_clone), docs).await
-                        {
-                            tracing::error!("HTTP API 服务异常退出: {:?}", e);
-                        } else {
-                            tracing::info!("HTTP API 服务已停止");
-                        }
-                    });
+                    tauri::async_runtime::spawn(bootstrap::serve_http(pool, llm_router));
                 }
                 Err(e) => {
                     tracing::error!("获取数据库连接池失败，无法启动 HTTP API 服务: {}", e);

@@ -10,6 +10,8 @@
     "build": "turbo run build",
     "build:web": "turbo run build --filter=@assets/web...",
     "build:backend": "turbo run build --filter=@assets/backend...",
+    "dev:server": "cd apps/backend && pnpm dev:server",
+    "build:server": "cd apps/backend && pnpm build:server",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "clean": "turbo run clean",

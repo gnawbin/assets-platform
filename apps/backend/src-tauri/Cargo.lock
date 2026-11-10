@@ -739,6 +739,7 @@ dependencies = [
  "ast",
  "ast-grep-core",
  "async-trait",
+ "bootstrap",
  "chrono",
  "database",
  "engine",
@@ -1797,6 +1798,21 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "time",
+]
+
+[[package]]
+name = "bootstrap"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api",
+ "apidoc",
+ "database",
+ "service",
+ "sqlx",
+ "toml 1.2.1+spec-1.1.0",
+ "tracing",
+ "workflow",
 ]
 
 [[package]]
@@ -10501,6 +10517,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bootstrap",
+ "database",
+ "service",
+ "tokio",
+ "tracing",
+ "utils",
 ]
 
 [[package]]
