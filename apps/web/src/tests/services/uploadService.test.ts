@@ -73,6 +73,8 @@ describe('UploadService', () => {
   beforeEach(() => {
     service = new UploadService('/api');
     (global.fetch as jest.Mock).mockClear();
+    // 令牌由 authStore 写入 localStorage；每个用例默认未登录
+    localStorage.clear();
   });
 
   // ======================== init ========================
@@ -129,6 +131,8 @@ describe('UploadService', () => {
       expect(result).toEqual(mockStartResponse);
       expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/start', {
         method: 'POST',
+        // 未登录时 withAuth() 返回空对象（后端会统一返回 401）
+        headers: {},
       });
     });
   });
@@ -205,7 +209,9 @@ describe('UploadService', () => {
       const result = await service.getProgress('upload-001');
 
       expect(result).toEqual(mockProgressResponse);
-      expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/progress');
+      expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/progress', {
+        headers: {},
+      });
     });
 
     it('查询进度失败时应抛出错误', async () => {
@@ -241,6 +247,7 @@ describe('UploadService', () => {
       expect(result).toEqual(mockCompleteResponse);
       expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/complete', {
         method: 'POST',
+        headers: {},
       });
     });
 
@@ -261,6 +268,7 @@ describe('UploadService', () => {
 
       expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001', {
         method: 'DELETE',
+        headers: {},
       });
     });
 
@@ -284,6 +292,51 @@ describe('UploadService', () => {
         'https://api.example.com/v2/upload/init',
         expect.any(Object)
       );
+    });
+  });
+
+  // ======================== 认证头 ========================
+  // `/api/upload/*` 已纳入后端 auth_middleware，HTTP 模式必须带 Bearer 令牌；
+  // S3 presigned PUT 不能带认证头（否则签名不匹配）。
+
+  describe('认证头', () => {
+    it('已登录时应附加 Bearer 令牌', async () => {
+      localStorage.setItem('auth_token', 'token-abc');
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse(mockCompleteResponse));
+
+      await service.complete('upload-001');
+
+      expect(global.fetch).toHaveBeenCalledWith('/api/upload/upload-001/complete', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer token-abc' },
+      });
+    });
+
+    it('已登录时应保留 Content-Type 并附加令牌', async () => {
+      localStorage.setItem('auth_token', 'token-abc');
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse(mockInitResponse));
+
+      await service.init('report.pdf', 1024, 'application/pdf');
+
+      expect(global.fetch).toHaveBeenCalledWith('/api/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token-abc' },
+        body: expect.any(String),
+      });
+    });
+
+    it('S3 presigned 分片直传不应附加认证头', async () => {
+      localStorage.setItem('auth_token', 'token-abc');
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(
+        createMockResponse({}, 200, { etag: '"etag-001"' })
+      );
+
+      const chunk = new Blob(['x']);
+      await service.uploadChunk('https://s3.example.com/part/1', chunk, 1);
+
+      const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(init.headers).toEqual({ 'Content-Length': chunk.size.toString() });
+      expect(init.headers.Authorization).toBeUndefined();
     });
   });
 });

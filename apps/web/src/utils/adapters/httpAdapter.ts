@@ -133,6 +133,12 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     approve_registration: { method: 'POST', path: '/api/auth/registrations/{id}/approve' },
     reject_registration: { method: 'POST', path: '/api/auth/registrations/{id}/reject' },
 
+    // ======================== API Key 管理（仅 HTTP 通道） ========================
+    get_api_keys: { method: 'GET', path: '/api/api-keys' },
+    create_api_key: { method: 'POST', path: '/api/api-keys' },
+    rotate_api_key: { method: 'POST', path: '/api/api-keys/{id}/rotate' },
+    revoke_api_key: { method: 'DELETE', path: '/api/api-keys/{id}' },
+
     // ======================== 知识库 - 知识树节点 ========================
     get_knowledge_tree: { method: 'GET', path: '/api/knowledge/tree' },
     insert_knowledge_node: { method: 'POST', path: '/api/knowledge/node' },

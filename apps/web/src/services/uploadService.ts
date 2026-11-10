@@ -10,6 +10,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 
+import { getAuthToken } from '../utils/authToken';
+
 // ======================== 类型定义 ========================
 
 /** 初始化上传（占位）响应 */
@@ -169,6 +171,17 @@ class TauriUploadAdapter implements UploadAdapter {
 
 // ======================== HTTP 适配器 ========================
 
+/**
+ * 附加认证头的请求头构造器
+ *
+ * `/api/upload/*` 已纳入后端 `auth_middleware`，HTTP 模式必须带 Bearer 令牌。
+ * 注意：S3 presigned URL 的 PUT 请求**不能**加此头（否则签名不匹配）。
+ */
+function withAuth(headers: Record<string, string> = {}): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+}
+
 class HttpUploadAdapter implements UploadAdapter {
   private baseUrl: string;
 
@@ -187,7 +200,7 @@ class HttpUploadAdapter implements UploadAdapter {
   ): Promise<InitUploadResponse> {
     const res = await fetch(`${this.baseUrl}/upload/init`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         filename,
         file_size: fileSize,
@@ -210,6 +223,7 @@ class HttpUploadAdapter implements UploadAdapter {
   async startUpload(uploadId: string): Promise<StartUploadResponse> {
     const res = await fetch(`${this.baseUrl}/upload/${uploadId}/start`, {
       method: 'POST',
+      headers: withAuth(),
     });
     if (!res.ok) throw new Error(`开始上传失败: ${res.statusText}`);
     const json = await res.json();
@@ -226,14 +240,16 @@ class HttpUploadAdapter implements UploadAdapter {
   async commit(uploadId: string, contextType: string, contextId: string): Promise<void> {
     const res = await fetch(`${this.baseUrl}/upload/${uploadId}/commit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ context_type: contextType, context_id: Number(contextId) }),
     });
     if (!res.ok) throw new Error(`提交上传失败: ${res.statusText}`);
   }
 
   async getVersionHistory(fileGroupId: string): Promise<UploadVersionInfo[]> {
-    const res = await fetch(`${this.baseUrl}/upload/version-history/${fileGroupId}`);
+    const res = await fetch(`${this.baseUrl}/upload/version-history/${fileGroupId}`, {
+      headers: withAuth(),
+    });
     if (!res.ok) throw new Error(`获取版本历史失败: ${res.statusText}`);
     const json = await res.json();
     return json.data || json;
@@ -242,7 +258,7 @@ class HttpUploadAdapter implements UploadAdapter {
   async reportChunk(uploadId: string, partNumber: number, etag: string): Promise<void> {
     const res = await fetch(`${this.baseUrl}/upload/${uploadId}/chunk`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ part_number: partNumber, etag }),
     });
     if (!res.ok) throw new Error(`上报分片失败: ${res.statusText}`);
@@ -251,6 +267,7 @@ class HttpUploadAdapter implements UploadAdapter {
   async complete(uploadId: string): Promise<UploadCompleteResponse> {
     const res = await fetch(`${this.baseUrl}/upload/${uploadId}/complete`, {
       method: 'POST',
+      headers: withAuth(),
     });
     if (!res.ok) throw new Error(`完成上传失败: ${res.statusText}`);
     const json = await res.json();
@@ -262,7 +279,9 @@ class HttpUploadAdapter implements UploadAdapter {
   }
 
   async getProgress(uploadId: string): Promise<UploadProgress> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/progress`);
+    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/progress`, {
+      headers: withAuth(),
+    });
     if (!res.ok) throw new Error(`查询进度失败: ${res.statusText}`);
     const json = await res.json();
     const data = json.data || json;
@@ -277,6 +296,7 @@ class HttpUploadAdapter implements UploadAdapter {
   async abort(uploadId: string): Promise<void> {
     const res = await fetch(`${this.baseUrl}/upload/${uploadId}`, {
       method: 'DELETE',
+      headers: withAuth(),
     });
     if (!res.ok) throw new Error(`取消上传失败: ${res.statusText}`);
   }

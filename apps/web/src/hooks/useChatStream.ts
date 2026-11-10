@@ -12,6 +12,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import type { ChatAttachment } from '@/services/conversationService';
+import { getAuthToken } from '@/utils/authToken';
 
 export interface StreamResult {
     convId?: string;
@@ -29,7 +30,16 @@ export interface StreamCallbacks {
     onError?: (error: string) => void;
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001';
+/**
+ * 后端根地址（**不含** `/api` 后缀）
+ *
+ * `NEXT_PUBLIC_API_BASE_URL` 在 httpAdapter 中的默认值带 `/api`，
+ * 这里做一次归一化去掉尾部 `/api`，避免拼出 `/api/api/chat/stream`。
+ */
+const BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001').replace(
+    /\/api\/?$/,
+    ''
+);
 
 /**
  * SSE 流式对话 Hook
@@ -68,12 +78,15 @@ export function useChatStream(callbacks?: StreamCallbacks) {
 
             try {
                 const url = `${BASE_URL}/api/chat/stream`;
+                // 该端点已纳入后端 auth_middleware，未登录会直接 401
+                const token = getAuthToken();
                 const response = await fetch(url, {
                     method: 'POST',
                     signal: controller.signal,
                     headers: {
                         Accept: 'text/event-stream',
                         'Content-Type': 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
                     },
                     body: JSON.stringify({
                         user_id: params.userId,
