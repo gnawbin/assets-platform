@@ -7,6 +7,8 @@ version = "0.1.0"
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+# `client_secret_basic` 解析（RFC 6749 §2.3.1）
+base64.workspace = true
 # 鉴权缓存（路由→权限点 / 用户授权快照，设计文档 §6.8）
 dashmap.workspace = true
 database.workspace = true

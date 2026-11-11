@@ -2,8 +2,9 @@
 //!
 //! 提供 HTTP API 的凭证验证中间件：
 //! 从 `Authorization: Bearer <token>` 中提取凭证，按前缀分流为
-//! **JWT 访问令牌**（`eyJ...`）或**外部系统 API Key**（`ak_...`），
-//! 验证后注入 [`UserContext`] / [`Claims`]（JWT）与 [`AuthPrincipal`]（两者）。
+//! **JWT 访问令牌**（`eyJ...`）、**外部系统 API Key**（`ak_...`）或
+//! **OAuth 访问令牌**（`at_...`，Phase 2），
+//! 验证后注入 [`UserContext`] / [`Claims`]（JWT）与 [`AuthPrincipal`]（三者）。
 //! 同时根据用户当前选中租户设置 task_local schema。
 
 use std::{
@@ -104,6 +105,8 @@ pub enum Credential {
     Jwt(String),
     /// 外部系统 API Key（`ak_<env>_<prefix16>_<secret43>`）
     ApiKey(String),
+    /// OAuth 2.1 访问令牌（`at_<43>`，Phase 2，设计文档 §7.5）
+    AccessToken(String),
 }
 
 /// 用户授权快照缓存 TTL（设计文档 §6.8：用户 perms 并集 60s）
@@ -164,6 +167,19 @@ pub fn parse_credential(token: &str) -> Result<Credential, ApiError> {
             return Err(ApiError::unauthorized("凭证无效或已过期"));
         }
         return Ok(Credential::ApiKey(token.to_string()));
+    }
+
+    // OAuth 访问令牌（Phase 2）：`at_` 前缀，哈希查表在 oauth_service
+    if utils::oauth::is_access_token(token) {
+        return Ok(Credential::AccessToken(token.to_string()));
+    }
+
+    // refresh 令牌只能用于 /oauth/token，出现在资源请求里一律拒绝（§13.2 #3）
+    if utils::oauth::is_refresh_token(token) {
+        tracing::warn!("拒绝把 OAuth 刷新令牌当作访问令牌使用");
+        return Err(ApiError::unauthorized(
+            "刷新令牌只能用于 /oauth/token，请使用访问令牌",
+        ));
     }
 
     Ok(Credential::Jwt(token.to_string()))
@@ -418,6 +434,56 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, A
                 tenant_id = ?auth.tenant_id,
                 route = %req.uri().path(),
                 "API Key 鉴权通过"
+            );
+
+            let response =
+                database::with_schema(schema_name, async { next.run(req).await }).await;
+
+            Ok(response)
+        }
+        Credential::AccessToken(raw_token) => {
+            // OAuth 2.1 访问令牌（Phase 2）：哈希查表 + 客户端启用状态校验。
+            // 回源失败同样不得降级为放行（§6.8）。
+            let auth = service::oauth_service::verify_access_token(&raw_token)
+                .await
+                .map_err(|e| {
+                    tracing::error!("OAuth 访问令牌校验失败（回源异常）: {}", e);
+                    ApiError::internal_error("凭证校验服务暂时不可用")
+                })?
+                .ok_or_else(|| {
+                    tracing::warn!("OAuth 访问令牌无效 / 过期 / 已撤销（不输出完整值）");
+                    ApiError::unauthorized("凭证无效或已过期")
+                })?;
+
+            let schema_name = resolve_tenant_schema(auth.tenant_id).await;
+
+            // 主体标识格式见 §5.4：`u:<user_id>@client:<client_id>`
+            let subject = match auth.user_id {
+                Some(user_id) => format!("u:{}@client:{}", user_id, auth.client_id),
+                None => format!("client:{}", auth.client_id),
+            };
+
+            // 只注入 AuthPrincipal：OAuth 令牌没有 username，
+            // 需要 `UserContext` / `Claims` 的接口由 authz 层一律 403。
+            let principal = AuthPrincipal {
+                kind: PrincipalKind::OAuth,
+                subject,
+                user_id: auth.user_id,
+                api_key_id: None,
+                tenant_id: auth.tenant_id,
+                schema_name: schema_name.clone(),
+                scopes: auth.scopes,
+                is_super_admin: false,
+                rate_limit_per_min: None,
+            };
+            req.extensions_mut().insert(principal);
+
+            tracing::debug!(
+                client_id = %auth.client_id,
+                token_id = auth.token_id,
+                tenant_id = ?auth.tenant_id,
+                route = %req.uri().path(),
+                "OAuth 访问令牌鉴权通过"
             );
 
             let response =

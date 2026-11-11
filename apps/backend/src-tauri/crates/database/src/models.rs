@@ -1290,3 +1290,44 @@ pub struct SysApiKey {
     /// 软删除标记（0=未删除，1=已删除）
     pub deleted: i16,
 }
+
+/// OAuth 2.1 客户端实体
+/// 对应表：public.sys_oauth_client（设计文档 §9.2）
+///
+/// **安全约定**：`client_secret_hash` 是客户端密钥的 SHA-256，禁止序列化外泄；
+/// 明文密钥只在创建 / 轮换的返回值里出现一次。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SysOauthClient {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    /// 客户端标识（公开，出现在 authorize / token 请求里）
+    pub client_id: String,
+    /// 展示名（同意页显示）
+    pub client_name: String,
+    /// SHA-256(客户端密钥) hex；public client 为 None
+    #[serde(skip_serializing)]
+    pub client_secret_hash: Option<String>,
+    /// 1 = confidential（有密钥）2 = public（无密钥，强制 PKCE）
+    pub client_type: i16,
+    /// 允许的回调地址（逐条精确匹配，loopback 忽略端口）
+    pub redirect_uris: Vec<String>,
+    /// 允许申请的权限点（scope ⊆ 本列）
+    pub allowed_scopes: Vec<String>,
+    /// 允许的授权类型（本项目只支持 authorization_code / refresh_token）
+    pub grant_types: Vec<String>,
+    /// 访问令牌有效期（秒）
+    pub access_token_ttl: i32,
+    /// 刷新令牌有效期（秒）
+    pub refresh_token_ttl: i32,
+    /// 归属租户（空表示 public 全局客户端）
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub tenant_id: Option<i64>,
+    pub enable: bool,
+    pub deleted: i16,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+}

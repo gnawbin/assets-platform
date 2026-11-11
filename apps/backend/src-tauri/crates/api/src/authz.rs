@@ -110,6 +110,9 @@ pub const SERVICE_FORBIDDEN_ROUTES: &[(&str, &str)] = &[
 pub const AUTH_ONLY_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/users/me"),
     ("GET", "/api/menus/user"),
+    // OAuth 2.1 方案 A（§7.3）：授权端点需要用户登录态，但没有对应权限点
+    ("GET", "/oauth/authorize"),
+    ("POST", "/oauth/authorize"),
 ];
 
 /// 完全公开（不经过认证中间件）的路由，仅用于自检对账
@@ -284,6 +287,11 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ("POST", "/api/api-keys", "system:apikey:add"),
     ("POST", "/api/api-keys/{id}/rotate", "system:apikey:edit"),
     ("DELETE", "/api/api-keys/{id}", "system:apikey:delete"),
+    // ===== OAuth 客户端管理（Phase 2 新增，禁止 API Key / OAuth 令牌管理）=====
+    ("GET", "/api/oauth-clients", "system:oauthclient:list"),
+    ("POST", "/api/oauth-clients", "system:oauthclient:add"),
+    ("PUT", "/api/oauth-clients/{id}", "system:oauthclient:edit"),
+    ("DELETE", "/api/oauth-clients/{id}", "system:oauthclient:delete"),
 ];
 
 /// 路由 → 权限点缓存：`(METHOD, 路由模板)` → (写入时刻, 权限点集合)
@@ -479,9 +487,9 @@ pub async fn authz_middleware(req: Request, next: Next) -> Result<Response, ApiE
         return Err(ApiError::unauthorized("未认证"));
     };
 
-    // API Key（服务身份）不存在兼容包袱，判定始终 enforce；
+    // API Key（服务身份）与 OAuth 令牌都不存在兼容包袱，判定始终 enforce；
     // 普通用户 JWT 在 warn 模式下只告警不拒绝（设计文档 §16 T-7）。
-    let enforce = mode.is_enforce() || principal.kind == PrincipalKind::Service;
+    let enforce = mode.is_enforce() || principal.kind != PrincipalKind::User;
 
     let Some(required) = required_perms(&method, &matched).await else {
         if enforce {
@@ -498,42 +506,64 @@ pub async fn authz_middleware(req: Request, next: Next) -> Result<Response, ApiE
         return Ok(next.run(req).await);
     };
 
-    if principal.kind == PrincipalKind::Service {
-        // 服务身份不得触碰管理面 / 上传流（§6.6 防提权 + 防自举）
+    if principal.kind != PrincipalKind::User {
+        // 服务身份（API Key）与 OAuth 令牌都不得触碰管理面 / 上传流
+        // （§6.6 防提权 + 防自举）；两者都没有 `UserContext` / `Claims`，
+        // 因此需要用户归属的写接口与「仅需登录」的用户态接口一律 403。
+        let label = if principal.kind == PrincipalKind::Service {
+            "API Key"
+        } else {
+            "OAuth 访问令牌"
+        };
+
         if required.iter().any(|perms| is_service_forbidden(perms)) {
             warn!(
                 subject = %principal.subject,
                 route = %matched,
-                "API Key 调用了管理类接口，拒绝"
+                "{} 调用了管理类接口，拒绝",
+                label
             );
             return Err(ApiError::forbidden_with_scope(&required));
         }
-        // 依赖 UserContext（写入 created_by）的接口：服务身份没有 user_id，
-        // 必须 403，而不是让 handler 因缺少 Extension 变成 500（§6.6 禁止用户态接口）
         if is_service_forbidden_route(&method, &matched) {
             warn!(
                 subject = %principal.subject,
                 route = %matched,
-                "API Key 调用了需要用户归属的写接口，拒绝"
+                "{} 调用了需要用户归属的写接口，拒绝",
+                label
             );
-            return Err(ApiError::forbidden("该接口需要用户身份，API Key 不可调用"));
+            return Err(ApiError::forbidden(format!(
+                "该接口需要用户身份，{} 不可调用",
+                label
+            )));
         }
-        // 需要 claims.sub 的用户态接口（仅需登录）对 API Key 一律 403
+        // 需要 claims.sub 的用户态接口（仅需登录）对非用户主体一律 403
         if required.is_empty() {
-            warn!(subject = %principal.subject, route = %matched, "API Key 调用了用户态接口，拒绝");
-            return Err(ApiError::forbidden("该接口需要用户身份，API Key 不可调用"));
+            warn!(
+                subject = %principal.subject,
+                route = %matched,
+                "{} 调用了用户态接口，拒绝",
+                label
+            );
+            return Err(ApiError::forbidden(format!(
+                "该接口需要用户身份，{} 不可调用",
+                label
+            )));
         }
 
-        let limit = principal.rate_limit_per_min.unwrap_or(600);
-        if let Some(api_key_id) = principal.api_key_id {
-            if !check_rate_limit(api_key_id, limit) {
-                warn!(
-                    subject = %principal.subject,
-                    route = %matched,
-                    limit,
-                    "API Key 超出速率限制"
-                );
-                return Err(ApiError::too_many_requests("请求过于频繁"));
+        // 速率限制只作用于 API Key（OAuth 令牌有独立 TTL 与客户端级配额）
+        if principal.kind == PrincipalKind::Service {
+            let limit = principal.rate_limit_per_min.unwrap_or(600);
+            if let Some(api_key_id) = principal.api_key_id {
+                if !check_rate_limit(api_key_id, limit) {
+                    warn!(
+                        subject = %principal.subject,
+                        route = %matched,
+                        limit,
+                        "API Key 超出速率限制"
+                    );
+                    return Err(ApiError::too_many_requests("请求过于频繁"));
+                }
             }
         }
     }
@@ -925,6 +955,68 @@ mod tests {
         };
         assert_eq!(report.stale_db_routes(), 2);
         assert!(report.code_routes > 100, "全量路由应不少于 100 条");
+    }
+
+    // ===== OAuth 2.1（Phase 2）=====
+
+    #[test]
+    fn oauth_routes_are_registered() {
+        // 授权端点只要求登录（方案 A），不登记权限点
+        assert!(is_auth_only_route("GET", "/oauth/authorize"));
+        assert!(is_auth_only_route("POST", "/oauth/authorize"));
+        assert_eq!(static_perms_for("GET", "/oauth/authorize"), None);
+
+        // 客户端管理接口必须有权限点，且落在 system: 前缀（API Key / OAuth 令牌不可调用）
+        assert_eq!(
+            static_perms_for("GET", "/api/oauth-clients"),
+            Some("system:oauthclient:list")
+        );
+        assert_eq!(
+            static_perms_for("POST", "/api/oauth-clients"),
+            Some("system:oauthclient:add")
+        );
+        assert_eq!(
+            static_perms_for("PUT", "/api/oauth-clients/{id}"),
+            Some("system:oauthclient:edit")
+        );
+        assert_eq!(
+            static_perms_for("DELETE", "/api/oauth-clients/{id}"),
+            Some("system:oauthclient:delete")
+        );
+
+        for (method, path, perms) in ROUTE_PERMS {
+            if path.starts_with("/api/oauth-clients") {
+                assert!(
+                    is_service_forbidden(perms),
+                    "OAuth 客户端管理接口必须是 system: 权限点: {} {}",
+                    method,
+                    path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn oauth_principal_is_scoped_and_never_super_admin() {
+        let principal = AuthPrincipal {
+            kind: PrincipalKind::OAuth,
+            subject: "u:1@client:oc_test".to_string(),
+            user_id: Some(1),
+            api_key_id: None,
+            tenant_id: Some(1),
+            schema_name: "tenant_a".to_string(),
+            scopes: vec!["asset:hardware:list".to_string()],
+            is_super_admin: false,
+            rate_limit_per_min: None,
+        };
+
+        assert_ne!(principal.kind, PrincipalKind::User);
+        assert!(!principal.is_super_admin);
+        assert!(principal.allows(&["asset:hardware:list".to_string()]));
+        assert!(!principal.allows(&["asset:hardware:delete".to_string()]));
+        // 管理面权限点对任何非用户主体都应被前缀规则拦住
+        assert!(is_service_forbidden("system:oauthclient:list"));
+        assert!(!is_service_forbidden("asset:hardware:list"));
     }
 }
 

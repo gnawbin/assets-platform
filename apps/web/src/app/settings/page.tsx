@@ -23,6 +23,7 @@ import {
   IconUserCheck,
   IconHash,
   IconKey,
+  IconApps,
 } from '@tabler/icons-react';
 
 const settingsItems = [
@@ -88,6 +89,13 @@ const settingsItems = [
     icon: IconKey,
     color: 'pink',
     href: '/settings/api-keys',
+  },
+  {
+    title: 'OAuth 客户端',
+    description: '注册 OAuth 2.1 客户端（授权码 + PKCE），配置回调地址与授权范围',
+    icon: IconApps,
+    color: 'red',
+    href: '/settings/oauth-clients',
   },
   {
     title: '操作日志',

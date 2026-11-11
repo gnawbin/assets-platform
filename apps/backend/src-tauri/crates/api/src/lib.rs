@@ -11,6 +11,8 @@ pub mod category_routes;
 pub mod chat_routes;
 pub mod department_routes;
 pub mod knowledge_routes;
+pub mod oauth_error;
+pub mod oauth_routes;
 pub mod ops_routes;
 pub mod process_routes;
 pub mod register_routes;
@@ -103,6 +105,9 @@ pub async fn start_http_server_with(
     let authz_mode = authz::AuthzMode::current();
     let coverage = authz::audit_route_coverage().await;
     coverage.log(authz_mode);
+
+    // OAuth 2.1 传输护栏（§8.2）：启用 AS 且 issuer 为 http 时打印 WARN 横幅
+    oauth_routes::warn_if_insecure_transport();
 
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
@@ -221,6 +226,17 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         // 刷新 / 登出：访问令牌可能已过期，必须公开（靠 refresh token 自身校验）
         .route("/api/auth/refresh", post(user_routes::refresh))
         .route("/api/auth/logout", post(user_routes::logout));
+
+    // 公开路由 + OAuth 客户端端点（缺省不挂载，§16 T-7 缺省即安全）
+    let public_routes = if oauth_routes::is_enabled() {
+        info!(
+            "OAuth 2.1 端点已启用：/oauth/token、/oauth/introspect、/oauth/revoke、\
+             /.well-known/oauth-authorization-server"
+        );
+        public_routes.merge(oauth_routes::public_oauth_routes())
+    } else {
+        public_routes
+    };
 
     // 需要认证的路由
     let protected_routes = Router::new()
@@ -459,7 +475,29 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             "/api/api-keys/{id}",
             delete(api_key_routes::revoke_api_key),
         )
-        // L2 功能权限判定（内层：先认证再鉴权；`.layer` 后加的在外层）
+        // OAuth 客户端管理（Phase 2：只允许用户 JWT，权限点 system:oauthclient:*）
+        .route(
+            "/api/oauth-clients",
+            get(oauth_routes::list_oauth_clients).post(oauth_routes::create_oauth_client),
+        )
+        .route(
+            "/api/oauth-clients/{id}",
+            put(oauth_routes::update_oauth_client).delete(oauth_routes::delete_oauth_client),
+        );
+
+    // OAuth 2.1 授权端点（方案 A：Bearer JWT + 同意页）
+    // 缺省不挂载（§16 T-7：OAUTH_* 未配置 = 端点不存在）
+    let protected_routes = if oauth_routes::is_enabled() {
+        protected_routes.route(
+            "/oauth/authorize",
+            get(oauth_routes::authorize_consent).post(oauth_routes::authorize_decision),
+        )
+    } else {
+        protected_routes
+    };
+
+    // L2 功能权限判定（内层：先认证再鉴权；`.layer` 后加的在外层）
+    let protected_routes = protected_routes
         .layer(middleware::from_fn(authz::authz_middleware))
         .layer(middleware::from_fn(auth_middleware));
 

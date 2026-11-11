@@ -655,6 +655,16 @@ ORDER BY id DESC LIMIT $1 OFFSET $2;
 - `redirect_uris` 存**数组**（JSONB 或 `text[]`），逐条精确匹配。
 - **loopback 特例**：Tauri 桌面端回调端口随机，按 RFC 8252 §7.3，登记 `http://127.0.0.1/callback` 时忽略端口比较；实现中单独一个函数 `matches_redirect()` 处理并写注释说明理由，**不要**污染主流程的严格比较。
 
+### 7.7 Phase 2 落地说明（实现与本文档的差异）
+
+1. **方案 A 的交互形态**：`GET /oauth/authorize` 返回 JSON 同意信息（`client_name` / `scopes` / `state` / `issuer`），`POST /oauth/authorize` 提交 `approve` 后返回 `{ redirect_to }`，由调用方完成 302。**不返回 HTML 同意页、也不做浏览器重定向**：Bearer JWT 无法随浏览器跳转携带，这是方案 A 的固有限制（接外部第三方前需补方案 B）。
+2. **端点开关**：`/oauth/authorize`、`/oauth/token`、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server` 仅在 `OAUTH_ENABLED=true`（或 `OAUTH_ALLOW_INSECURE_HTTP=true`）时挂载，缺省 404（§16 T-7）。`/api/oauth-clients*` 管理接口不受该开关影响（权限点仍为 `system:oauthclient:*`）。
+3. **issuer**：`OAUTH_ISSUER` 缺省 `http://localhost:<API_PORT>`；启用且为明文 HTTP 时启动日志打印 WARN 横幅（§8.2）。
+4. **`family_id` 读写**：DDL 采用 `UUID`，但 sqlx 未启用 `uuid` feature，读写分别用 `$n::uuid` 与 `family_id::text`，无需新增依赖。
+5. **OAuth 主体**：`PrincipalKind::OAuth`，`subject = "u:<user_id>@client:<client_id>"`，只注入 `AuthPrincipal`（不注入 `UserContext` / `Claims`）；`authz` 对非用户主体始终 enforce，`system:*` / `upload:*` 与用户态接口一律 403。
+6. **重放处置**：刷新令牌重放 → 撤销整个 `family_id`；授权码重放 → 撤销该 `client_id + user_id` 的全部未撤销令牌；PKCE 校验失败 → 立即把该 code 置 `used_at`。
+7. **清理任务**：`oauth_service::cleanup_expired_grants()`（授权码保留 24h、令牌过期后保留 30d）供定时任务调用，不挂在请求路径上。
+
 ---
 
 ## 8. HTTP / TLS 落地方案

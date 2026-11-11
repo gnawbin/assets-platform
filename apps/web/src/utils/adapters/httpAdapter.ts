@@ -139,6 +139,12 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     rotate_api_key: { method: 'POST', path: '/api/api-keys/{id}/rotate' },
     revoke_api_key: { method: 'DELETE', path: '/api/api-keys/{id}' },
 
+    // ======================== OAuth 客户端管理（仅 HTTP 通道，Phase 2） ========================
+    get_oauth_clients: { method: 'GET', path: '/api/oauth-clients' },
+    create_oauth_client: { method: 'POST', path: '/api/oauth-clients' },
+    update_oauth_client: { method: 'PUT', path: '/api/oauth-clients/{id}' },
+    delete_oauth_client: { method: 'DELETE', path: '/api/oauth-clients/{id}' },
+
     // ======================== 知识库 - 知识树节点 ========================
     get_knowledge_tree: { method: 'GET', path: '/api/knowledge/tree' },
     insert_knowledge_node: { method: 'POST', path: '/api/knowledge/node' },

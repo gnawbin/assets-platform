@@ -133,7 +133,17 @@
 
 
 ### Phase 2：OAuth 2.1 授权服务器（5–8 天，外部第三方接入前）
-- [ ] **34.** `/oauth/authorize`（方案 A：Bearer + 同意页）、`/oauth/token`（code + PKCE S256 + refresh 轮换）、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`
+- [x] **34.** `/oauth/authorize`（方案 A：Bearer + 同意页）、`/oauth/token`（code + PKCE S256 + refresh 轮换）、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`
+  - 已实现：`service/src/oauth_service.rs`（授权码 / 令牌 / 内省 / 撤销 / 客户端 CRUD + PKCE 与回调地址校验的纯函数单测 10 个）、`api/src/oauth_routes.rs`（端点 + 客户端管理 + `client_secret_basic` 解析 + 查询参数编码单测）、`api/src/oauth_error.rs`（RFC 6749 §5.2 错误体，与 `ApiResponse` 隔离）。
+  - 方案 A 落地形态：`GET /oauth/authorize` 返回**同意信息 JSON**（client_name / scopes / state / issuer），`POST /oauth/authorize` 提交 `approve` 后返回 `{redirect_to}`（由调用方 302）。不做 HTML 页面与浏览器重定向 —— Bearer 无法随浏览器跳转携带（§7.3 方案 A 的限制）。
+  - PKCE：只支持 `S256`（`plain` 直接拒绝），`code_challenge` 必填；`code_verifier` 校验 43–128 位字符集，比较走常数时间；授权码只存 SHA-256、TTL 60s、一次性，PKCE 失败即作废该 code。
+  - 令牌：`at_` / `rt_` 前缀（与 `ak_` / JWT 分流互不冲突），只存哈希；刷新轮换复用 `family_id` 语义（重放撤销整族）；授权码重放则撤销该 client + user 的全部未撤销令牌；`/oauth/token` 响应带 `Cache-Control: no-store`。
+  - `at_` 接入 `auth.rs`：`PrincipalKind::OAuth`，主体 `u:<id>@client:<client_id>`，**不注入** `UserContext` / `Claims`，因此用户态接口与 `system:*` / `upload:*` 由 `authz` 一律 403（非用户主体始终 enforce）。
+  - 缺省不挂载（§16 T-7）：需 `OAUTH_ENABLED=true`（或 `OAUTH_ALLOW_INSECURE_HTTP=true`）才注册 `/oauth/authorize`、`/oauth/token`、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`；`/api/oauth-clients*` 管理接口始终挂载（`system:oauthclient:*` + 租户隔离 + scope ⊆ 创建者权限）。
+  - DDL：`sys_oauth_client` / `sys_oauth_code` / `sys_oauth_token`（`public_migration.sql`，幂等；`family_id UUID` 读写用 `$n::uuid` / `family_id::text`，因 sqlx 未启用 `uuid` feature）；`sys_menu` 205–208 补 `http_method` / `http_path`，新增页面 id 49（`/settings/oauth-clients`）。
+  - 前端：`services/oauthClientService.ts` + `app/settings/oauth-clients/page.tsx`（一次性密钥弹窗、scope 模板、启用/禁用、删除），`httpAdapter.ts` 登记 4 条路由，设置首页加入口。
+  - 清理：`oauth_service::cleanup_expired_grants()` 供定时任务调用（授权码保留 24h、令牌过期后保留 30d），不在请求路径上自动执行。
+
 
 ### 🔒 Tauri 模式隔离回归（每阶段收尾必跑，设计文档 §16 / §13.4）
 

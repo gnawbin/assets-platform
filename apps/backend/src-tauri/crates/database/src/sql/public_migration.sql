@@ -620,3 +620,88 @@ WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 277);
 INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
 SELECT 278, '编辑采购申请', 25, NULL, NULL, NULL, 2, true, 'process:purchase:edit', 3, true, NULL, 'PUT', '/api/process/purchase/{id}', 1, NOW(), NULL, NULL, 0
 WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 278);
+
+-- ============================================================================
+-- OAuth 2.1 授权服务器（Phase 2，设计文档 §9.2）
+--   只新增表与索引，不改既有表结构（§16 T-5 加法式 DDL）；
+--   客户端管理权限点（system:oauthclient:*，id 205-208）已在 Phase 1 落库，
+--   这里补上 http_method / http_path，供鉴权自检与 DB 优先映射比对。
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.sys_oauth_client (
+    id BIGINT PRIMARY KEY,
+    client_id VARCHAR(64) NOT NULL,
+    client_name VARCHAR(100) NOT NULL,
+    client_secret_hash CHAR(64),
+    client_type SMALLINT NOT NULL DEFAULT 1,
+    redirect_uris TEXT[] NOT NULL DEFAULT '{}',
+    allowed_scopes TEXT[] NOT NULL DEFAULT '{}',
+    grant_types TEXT[] NOT NULL DEFAULT '{authorization_code,refresh_token}',
+    access_token_ttl INT NOT NULL DEFAULT 900,
+    refresh_token_ttl INT NOT NULL DEFAULT 2592000,
+    tenant_id BIGINT,
+    enable BOOLEAN NOT NULL DEFAULT TRUE,
+    deleted SMALLINT NOT NULL DEFAULT 0,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_oauth_client_id ON public.sys_oauth_client (client_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_client_tenant ON public.sys_oauth_client (tenant_id, enable, deleted);
+
+CREATE TABLE IF NOT EXISTS public.sys_oauth_code (
+    id BIGINT PRIMARY KEY,
+    code_hash CHAR(64) NOT NULL,
+    client_id VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    redirect_uri TEXT NOT NULL,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    code_challenge VARCHAR(128) NOT NULL,
+    code_challenge_method VARCHAR(10) NOT NULL DEFAULT 'S256',
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_oauth_code_hash ON public.sys_oauth_code (code_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_code_expires ON public.sys_oauth_code (expires_at);
+
+CREATE TABLE IF NOT EXISTS public.sys_oauth_token (
+    id BIGINT PRIMARY KEY,
+    token_hash CHAR(64) NOT NULL,
+    token_type SMALLINT NOT NULL,
+    client_id VARCHAR(64) NOT NULL,
+    user_id BIGINT,
+    tenant_id BIGINT,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    family_id UUID NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    replaced_by VARCHAR(64),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_oauth_token_hash ON public.sys_oauth_token (token_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_token_family ON public.sys_oauth_token (family_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_token_user ON public.sys_oauth_token (user_id, revoked_at);
+
+-- 客户端管理权限点补登路由（与 ROUTE_PERMS 保持一致，DB 优先）
+UPDATE public.sys_menu SET http_method = 'GET', http_path = '/api/oauth-clients' WHERE id = 205 AND http_path IS NULL;
+
+UPDATE public.sys_menu SET http_method = 'POST', http_path = '/api/oauth-clients' WHERE id = 206 AND http_path IS NULL;
+
+UPDATE public.sys_menu SET http_method = 'PUT', http_path = '/api/oauth-clients/{id}' WHERE id = 207 AND http_path IS NULL;
+
+UPDATE public.sys_menu SET http_method = 'DELETE', http_path = '/api/oauth-clients/{id}' WHERE id = 208 AND http_path IS NULL;
+
+-- OAuth 客户端管理页面（侧边栏可见，perms 与列表权限点一致）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 49, 'OAuth 客户端', 5, '/settings/oauth-clients', '/settings/oauth-clients/page', 'IconApps', 10, true, 'system:oauthclient:list', 2, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 49);
+

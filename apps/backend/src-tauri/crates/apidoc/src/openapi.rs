@@ -51,6 +51,7 @@ use utoipa::{Modify, OpenApi};
         (name = "智能问答", description = "RAG + LLM 的 SSE 流式问答"),
         (name = "技能", description = "Agent Skill 注册与执行"),
         (name = "API Key", description = "外部系统 API Key 管理（JWT 管理员专用，API Key 自身禁止管理）"),
+        (name = "OAuth 2.1", description = "OAuth 2.1 授权服务器与客户端注册（方案 A：Bearer JWT + 同意页）"),
     ),
     // 只登记已标注 #[utoipa::path] 的 handler；新增接口时同步追加。
     paths(
@@ -176,6 +177,17 @@ use utoipa::{Modify, OpenApi};
         api::api_key_routes::create_api_key,
         api::api_key_routes::rotate_api_key,
         api::api_key_routes::revoke_api_key,
+        // OAuth 2.1 授权服务器（Phase 2：方案 A + 客户端注册管理）
+        api::oauth_routes::authorize_consent,
+        api::oauth_routes::authorize_decision,
+        api::oauth_routes::token,
+        api::oauth_routes::introspect,
+        api::oauth_routes::revoke,
+        api::oauth_routes::metadata,
+        api::oauth_routes::list_oauth_clients,
+        api::oauth_routes::create_oauth_client,
+        api::oauth_routes::update_oauth_client,
+        api::oauth_routes::delete_oauth_client,
     ),
     modifiers(&BearerAuthAddon)
 )]
