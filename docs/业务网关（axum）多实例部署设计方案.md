@@ -2,9 +2,9 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v1.1（设计稿，含 `/livez` 与 `build_router` 事实修正） |
+| 文档版本 | v1.2（设计稿；新增附录 D：不依赖 Redis 的 PostgreSQL 协调面） |
 | 日期 | 2026-11-11 |
-| 适用范围 | `apps/backend/src-tauri`（axum 0.8.9 + tonic 0.14.6 + sqlx 0.9 + redis 1.8.1 + tokio 1.54） |
+| 适用范围 | `apps/backend/src-tauri`（axum 0.8.9 + tonic 0.14.6 + sqlx 0.9 + redis 1.8.1（可选，见附录 D） + tokio 1.54） |
 | 状态 | 待评审；本轮只产出设计，不含代码改动 |
 | 关联文档 | `docs/OAuth2.1与API Key统一鉴权设计方案.md`、`docs/桌面与Web双形态部署指南.md`、`docs/多租户数据权限与租户切换设计方案.md`、`docs/doc-parser 独立部署指南.md`、`TODO.md` |
 
@@ -20,7 +20,7 @@
 2. **端口**：单端口 `8080`，同端口承载 HTTP/1.1、SSE 与 h2c gRPC；TLS 由 Ingress / Nginx 终止，进程内只跑 h2c。
 3. **gRPC**：tonic `0.14.6`（`Cargo.lock` 已有，来自 `opentelemetry-otlp` 的 `grpc-tonic`）+ `tonic-prost-build` + `protoc-bin-vendored`（**本机没有 `protoc`，必须用 vendored 二进制**）。
 4. **鉴权**：复用 `api::auth::AuthPrincipal`（`auth.rs:71`）与 `authz::required_perms`（`authz.rs:344`），把内联在 `auth_middleware`（`auth.rs:360`）里的解析逻辑抽成 `authenticate()`，HTTP 与 gRPC 共用同一份。
-5. **多实例**：Postgres 是唯一事实源；Redis 承担认证 L2 缓存、限流、SSE Streams/PubSub 广播、leader 租约；进程内 `DashMap` 只做 L1（TTL ≤ 5s）。
+5. **多实例**：Postgres 是唯一事实源；Redis 承担认证 L2 缓存、限流、SSE Streams/PubSub 广播、leader 租约；进程内 `DashMap` 只做 L1（TTL ≤ 5s）。若部署环境不能引入 Redis，按**附录 D** 用 PostgreSQL 承接全部跨实例协调职责（阶段划分与人日不变）。
 6. **租户隔离**：每个请求都必须走 `database::with_schema(schema, next.run(req))`；**禁止**使用 `database::GLOBAL_SCHEMA`（`auth.rs:377` 的注释已记录该历史 bug）。
 7. **SSE**：标准 `event:` / `id:` / `retry:` 字段，15s 注释帧心跳，支持 `Last-Event-ID` 续传，背压队列 256，退出时 25s drain。
 8. **一致性**：启动 DDL 加 `pg_advisory_lock`；过期清理任务选主；`SNOWFLAKE_WORKER_ID` 每实例唯一（0..31）。
@@ -47,6 +47,8 @@
 | P3 | `SseHub`、`/api/events`、`/api/auth/sse-ticket`、事件格式修正、Streams+PubSub、`Last-Event-ID` 续传、背压 | 4–6d | 杀实例后续传不丢事件；两实例连接收到同一广播；票据只能用一次 |
 | P4 | proto/codegen、`into_axum_router` 合并、`grpc_auth` + `Status` 映射、health/reflection/gRPC-Web、流式取消 | 4–5d | `grpcurl list` 可用；无 token → `Unauthenticated`；取消后上游流停止 |
 | P5 | leader 清理、OTel propagator + `gw_*` 指标、K8s/Nginx/Helm、压测与混沌 | 3d | 滚动更新 0 个 5xx；`SIGTERM` 后 30s 内退出；trace 跨服务连通 |
+
+> 若采用**附录 D** 的「PostgreSQL 单一依赖模式」，把上表中的 Redis 换成 D.0 映射表的对应项即可，阶段划分与人日不变。
 
 ---
 
@@ -2166,7 +2168,7 @@ SELECT id, name, perms, http_path FROM sys_menu WHERE http_path LIKE 'grpc:%';
 
 | 术语 | 含义 |
 |---|---|
-| L1 / L2 | 进程内缓存（`DashMap`）/ Redis 共享缓存 |
+| L1 / L2 | 进程内缓存（`DashMap`）/ 共享缓存（Redis；附录 D 模式下取消 L2） |
 | 伪路径 | 把 gRPC 方法映射成 `grpc:/pkg.Service/Method`，复用 HTTP 权限表 |
 | 票据（ticket） | `GETDEL` 一次性消费的短时凭证，专供 `EventSource` |
 | 选主 | 通过 `pg_try_advisory_lock` 保证同一时刻只有一个清理执行者 |
@@ -2179,6 +2181,7 @@ SELECT id, name, perms, http_path FROM sys_menu WHERE http_path LIKE 'grpc:%';
 |---|---|---|
 | v1.0 | 2026-11-11 | 首版：16 章 + 3 附录。确立单端口（merged gRPC）架构、L1+L2+版本号认证缓存、Redis 全局限流、SSE Stream+Pub/Sub 双写、`pg_advisory_lock` 串行化 |
 | v1.1 | 2026-11-11 | 修正 `/healthz` 语义（现有实现含 DB 探测，新增 `/livez`）；补充 `build_router` 必须包含 upload/chat 子路由与不得重复注册 `/healthz`；新增 B8（`api_key_service::verify_cache` 不跨实例）；B1–B8 缺陷清单定稿；P0–P5 阶段与人日对齐 |
+| v1.2 | 2026-11-11 | 新增附录 D：不依赖 Redis 的 PostgreSQL 单一依赖模式（LISTEN/NOTIFY + 4 张 sys_gateway_* 表 + advisory lock）；含 10 张跨实例流程图、协调表 DDL、故障自愈矩阵与验收清单；版本号、术语表、一页总结同步更新 |
 
 ### C.5 待补充（下一版）
 
@@ -2192,6 +2195,436 @@ SELECT id, name, perms, http_path FROM sys_menu WHERE http_path LIKE 'grpc:%';
 
 ---
 
+## 附录 D：PostgreSQL 单一依赖模式（不引入 Redis）
+
+> **适用条件**：部署环境不允许新增 Redis（运维限制、等保/合规要求、客户环境只提供 PostgreSQL）。
+> **结论**：正文 §6 / §7 / §9 中由 Redis 承担的职责（认证 L2 缓存与失效广播、限流、SSE 广播、票据、worker 抢位）全部由 PostgreSQL 承接。**进程模型、路由、鉴权管线、阶段划分与人日不变**，只把「共享状态落在哪里」从 Redis 换成本就强依赖的 PG。
+> **代价**见 D.12：热点路径多一次 DB 往返、SSE 每个事件一次 INSERT；换来少一个中间件、少一个故障域。
+
+### D.0 职责映射（Redis → PostgreSQL）
+
+| 正文中的 Redis 用法 | 本附录替代 | 一致性说明 |
+|---|---|---|
+| `PUBLISH gw:v1:invalidate` 认证失效广播 | `NOTIFY assets_gw '{"k":"authz","u":42}'` | 等价（毫秒级）；漏通知最坏 = L1 TTL 60s，与改造前单实例行为相同 |
+| `gw:v1:auth:authz:u:<id>:v<ver>` L2 快照 + 版本号 | **取消 L2**：PG 本就是唯一真源，只需广播失效 | 少一层缓存、少一处不一致 |
+| `PUBLISH gw:sse:<tenant>` + `XADD/XRANGE` Stream | `sys_gateway_event` 日志表 + `NOTIFY`（载荷只带 `id`） | 更好：`BIGSERIAL` 全局单调，天然就是 `Last-Event-ID` 游标 |
+| `SET ... NX EX` 一次性票据 | `sys_gateway_sse_ticket` + `DELETE ... RETURNING` | 等价，且跨重启、跨实例有效 |
+| `ZSET + Lua`（`EVALSHA`）固定窗口限流 | `sys_gateway_rate_limit` + 单语句 UPSERT | 等价（单语句原子，跨实例总额准确） |
+| `SET ... NX PX` worker id 抢位与续约 | `sys_gateway_instance` 租约表 | 等价；崩溃后租约到期可被接管 |
+| PubSub 连接管理与重连 | 无（`PgListener` 自带连接，重连由网关侧指数退避） | 少一个客户端依赖 |
+
+> 依赖面收益：不新增 Redis 客户端、不需要 Redis 高可用、不引入第二套监控项；唯一中间件仍是 PostgreSQL——**没有新增故障域**。
+
+### D.1 拓扑与四个共享面（图 1）
+
+```
+     浏览器 / 桌面 WebView / 第三方
+                 │  HTTPS
+                 ▼
+        ┌─────────────────┐
+        │ nginx / k8s LB  │   SSE：关闭 proxy_buffering、read_timeout ≥ 1h
+        └───┬─────────┬───┘
+            ▼         ▼
+ ┌────────────────┐  ┌────────────────┐
+ │ assets-gateway │  │ assets-gateway │   无状态，可水平扩
+ │ #1  :8080      │  │ #2  :8081      │
+ │ worker_id=1    │  │ worker_id=2    │
+ │ ├ api::build_router（auth / authz / chat / upload）
+ │ ├ SseHub       │  │ ├ SseHub       │   本地连接表
+ │ ├ L1 权限缓存  │  │ ├ L1 权限缓存  │   60s
+ │ ├ PgListener ──┼──┼─┼─ PgListener  │   LISTEN assets_gw
+ │ └ leader 锁    │  │ └ (standby)    │   pg_try_advisory_lock
+ └───────┬────────┘  └───────┬────────┘
+         │                   │
+         └─────────┬─────────┘
+                   ▼
+        ┌──────────────────────────────┐
+        │ PostgreSQL（唯一硬依赖）      │
+        │  LISTEN/NOTIFY  channel=assets_gw
+        │  sys_gateway_instance         │  worker id 租约
+        │  sys_gateway_sse_ticket       │  一次性票据
+        │  sys_gateway_event            │  SSE 事件日志 / 续传
+        │  sys_gateway_rate_limit       │  共享限流计数
+        │  advisory locks               │  迁移互斥 / 清理选主
+        └──────────────────────────────┘
+```
+
+| # | 共享面 | 用途 | 一致性模型 |
+|---|---|---|---|
+| ① | `NOTIFY assets_gw` | 唤醒（不传正文）：认证失效、新 SSE 事件 | 尽力而为，可丢 → 靠 ② 与客户端游标兜底 |
+| ② | `sys_gateway_event` | SSE 正文 + `Last-Event-ID` 续传 | 强一致（表） |
+| ③ | `sys_gateway_instance` / `sse_ticket` / `rate_limit` | 租约、一次性票据、共享计数 | 强一致（原子 SQL） |
+| ④ | `advisory locks` | 迁移互斥、清理选主 | 强一致（会话级） |
+
+### D.2 四张协调表与迁移串行化
+
+新增 `crates/database/src/sql/gateway_migration.sql`（全部 `IF NOT EXISTS`；`execute_sql_content` 走单事务，**不能用 `CREATE INDEX CONCURRENTLY`**）：
+
+```sql
+CREATE TABLE IF NOT EXISTS public.sys_gateway_instance (
+    worker_id   SMALLINT PRIMARY KEY CHECK (worker_id BETWEEN 0 AND 31),
+    instance_id TEXT NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.sys_gateway_sse_ticket (
+    token      TEXT PRIMARY KEY,
+    tenant_id  BIGINT,
+    principal  JSONB NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gw_sse_ticket_exp ON public.sys_gateway_sse_ticket (expires_at);
+
+CREATE TABLE IF NOT EXISTS public.sys_gateway_event (
+    id         BIGSERIAL PRIMARY KEY,          -- 全局单调，直接当 Last-Event-ID 游标
+    tenant_id  BIGINT NOT NULL,
+    kind       VARCHAR(32) NOT NULL,
+    payload    JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_gw_event_tenant_id ON public.sys_gateway_event (tenant_id, id);
+CREATE INDEX IF NOT EXISTS idx_gw_event_created  ON public.sys_gateway_event (created_at);
+
+CREATE TABLE IF NOT EXISTS public.sys_gateway_rate_limit (
+    bucket_key   TEXT NOT NULL,
+    window_start TIMESTAMPTZ NOT NULL,
+    counter      INTEGER NOT NULL,
+    PRIMARY KEY (bucket_key, window_start)
+);
+CREATE INDEX IF NOT EXISTS idx_gw_rate_limit_window ON public.sys_gateway_rate_limit (window_start);
+```
+
+`crates/database/src/postgres.rs`：
+
+- 新增 `pub async fn migrate_gateway_tables(pool: &PgPool)`（`include_str!("sql/gateway_migration.sql")` + `execute_sql_content`），在 `init_postgres_database` 执行完 public 迁移脚本之后用 `run_init_step` 调用。
+- 新增 `pub const MIGRATION_LOCK_KEY: i64`；`init_postgres_database` 内 `pool.acquire()` → `detach()` 拿独占连接，`SET lock_timeout TO '300s'` → `SELECT pg_advisory_lock($1)` → 执行原有步骤 → unlock → close。用 detach 而不是事务级锁：现有初始化函数全部是 `&PgPool` 多语句 DDL；连接在提前返回或 panic 时 drop 即自动释放，不会把锁带回连接池。
+
+**图 2 · 多实例并发启动**
+
+```
+实例#1                                PostgreSQL                          实例#2
+  │ init_database_and_schema()                                          │
+  │ pool.acquire() → detach()                                           │
+  ├─ pg_advisory_lock(MIGRATION_LOCK_KEY) ──────────►│                  │
+  │                                                  │◄── 请求同一把锁 ─┤
+  │ create schema / tables / migrations（幂等）      │   （阻塞，        │
+  │                                                  │ lock_timeout=300s）│
+  ├─ pg_advisory_unlock + conn.close() ────────────►│                  │
+  │                                                  ├── 获锁 → 幂等 DDL ┤
+  │                                                  │   → unlock        │
+  │ upsert sys_gateway_instance                      │                  │
+  │  (worker_id=1, expires=now()+60s) ──────────────►│                  │
+  │                                                  │◄── upsert worker=2 ┤
+  │ RETURNING 1 行 → 抢位成功                        │    RETURNING 1 行 │
+  │ PgListener.listen(assets_gw) ───────────────────►│◄── listen ────────┤
+  │ axum::serve(:8080)                               │   axum::serve(:8081)
+  ▼                                                  │                  ▼
+
+冲突分支：ON CONFLICT ... WHERE 条件不满足 → RETURNING 无行
+         → 日志「worker id 已被 gw-1 占用」→ 退出码 != 0（不带病启动）
+```
+
+worker 租约 SQL（抢位 / 续约共用）：
+
+```sql
+INSERT INTO public.sys_gateway_instance (worker_id, instance_id, expires_at)
+VALUES ($1, $2, now() + make_interval(secs => $3))
+ON CONFLICT (worker_id) DO UPDATE
+   SET instance_id = EXCLUDED.instance_id,
+       expires_at  = EXCLUDED.expires_at,
+       updated_at  = now()
+ WHERE public.sys_gateway_instance.instance_id = EXCLUDED.instance_id
+    OR public.sys_gateway_instance.expires_at < now()
+RETURNING instance_id;
+```
+
+### D.3 认证与权限失效（图 3）
+
+```
+Admin ──► 实例#1  PUT /api/users/42（改角色）
+            │ 1) UPDATE sys_user_role …（提交）
+            │ 2) api::auth::invalidate_user_authority(42)
+            │      ├─▶ clear_local_user_authority(42)        ← 本实例 L1 立即失效
+            │      └─▶ AuthInvalidator::on_invalidate_user(42)
+            │              └─ spawn { SELECT pg_notify('assets_gw',
+            │                          '{"k":"authz","u":42}') }
+            ▼
+        PostgreSQL ── NOTIFY 广播给该通道所有 LISTEN 会话 ──┐
+            ├──────────────► 实例#1 listener（自己也会收到，幂等清空）
+            └──────────────► 实例#2 listener → clear_local_user_authority(42)
+
+用户下一次请求（任意实例）：
+  L1 hit(<60s)? ──yes──► 用旧快照（仅通知丢失且 <60s 时发生）
+        │no
+        ▼
+  service::load_user_authority(42) → 新快照 → 写 L1 → authz 用新权限
+```
+
+注入点（`api` / `service` 各一处，签名保持向后兼容）：
+
+```rust
+// crates/api/src/auth.rs
+pub trait AuthInvalidator: Send + Sync {
+    fn on_invalidate_user(&self, user_id: i64);
+    fn on_clear_all(&self);
+}
+pub fn install_auth_invalidator(i: Arc<dyn AuthInvalidator>);
+
+pub fn invalidate_user_authority(user_id: i64) {   // 签名不变，现有调用点不用改
+    clear_local_user_authority(user_id);           // 新增：只清本地，供 listener 调用（防回环）
+    if let Some(i) = auth_invalidator() { i.on_invalidate_user(user_id); }
+}
+
+// crates/service/src/api_key_service.rs —— 修 B8（verify_cache 30s 跨实例窗口）
+pub fn install_api_key_invalidator(f: Arc<dyn Fn(i64) + Send + Sync>);
+```
+
+**图 4 · 单请求鉴权路径**
+
+```
+请求 ─► request_id ─► security_headers ─► TraceLayer ─► api::auth_middleware
+                                                          │ authenticate(&mut req)
+                                                          │   ├ ak_* → verify_api_key（30s 进程内缓存）
+                                                          │   ├ at_* → oauth token 缓存
+                                                          │   └ JWT  → verify_token → user_authority(u)
+                                                          │            ├ L1 hit(<60s) → 直接用
+                                                          │            └ miss → SELECT 回源 → 写 L1
+                                                          ├ 注入 UserContext / AuthPrincipal
+                                                          └ database::with_schema(principal.schema)
+                                                                │
+                                                          authz_middleware（权限点 / AUTH_ONLY / 拒绝服务身份）
+                                                                │
+                                                          RateLimiter::check()
+                                                                ├ 默认：进程内固定窗口（仅 API Key）
+                                                                └ GATEWAY_RATE_LIMIT_ENFORCE_GLOBAL=1 → PG 共享计数
+                                                                │
+                                                          handler → service → 租户 schema
+```
+
+> 关键点：**DB 是唯一真源**，缓存只做加速；通知丢失的最坏后果是「最多 60s 旧权限」，与改造前单实例行为一致。
+
+### D.4 跨实例限流（图 5）
+
+```sql
+-- 固定窗口共享计数（单语句原子）
+INSERT INTO public.sys_gateway_rate_limit AS rl (bucket_key, window_start, counter)
+VALUES ($1, to_timestamp(floor(extract(epoch FROM now()) / $2::int) * $2::int), 1)
+ON CONFLICT (bucket_key, window_start) DO UPDATE SET counter = rl.counter + 1
+RETURNING counter;
+-- bucket_key 形如 p:u:42|r:/api/assets/hardware，维度 g/r/t/p 见正文 §9
+-- window_start 取 DB 时钟，天然免疫实例间时钟漂移
+```
+
+```
+t=0.00s  客户端 ─► 实例#1 ─► UPSERT → c=1 → 200
+t=0.05s  客户端 ─► 实例#2 ─► UPSERT → c=2 → 200
+t=0.10s  客户端 ─► 实例#1 ─► c=3 → 200
+t=0.15s  客户端 ─► 实例#2 ─► c=4 → 200
+t=0.20s  客户端 ─► 实例#1 ─► c=5 → 200          (limit=5)
+t=0.25s  客户端 ─► 实例#2 ─► c=6 → 429 + Retry-After: 59
+t=60.0s  新窗口 → 新行 → c=1 → 200
+
+故障：DB 不可用 → RATE_LIMIT_FAIL_MODE=closed（缺省）返回 429/503；=open 放行并告警
+清理：leader 执行 DELETE FROM public.sys_gateway_rate_limit
+                       WHERE window_start < now() - interval '10 minutes'
+```
+
+### D.5 SSE 建连：票据 + 一次性消费 + 回放（图 6）
+
+```
+① 取票（可带 Header，走普通认证）
+ 浏览器 ── POST /api/auth/sse-ticket (Authorization: Bearer <JWT>) ──► 实例#1
+         ◄── 200 {"ticket":"9f3c…","expires_in":30}
+              INSERT INTO public.sys_gateway_sse_ticket(token, tenant_id, principal, expires_at)
+              VALUES ($1, $2, $3, now() + interval '30 seconds')
+             （API Key / OAuth 服务主体 → 403：SSE 只服务用户态）
+
+② 建流（EventSource 不能带 Header，只能 query 传票）
+ 浏览器 ── GET /api/events?ticket=9f3c…  (Last-Event-ID: 1234) ──► 实例#2
+         │ sse_auth 中间件：
+         │   DELETE FROM public.sys_gateway_sse_ticket
+         │    WHERE token = $1 AND expires_at > now()
+         │    RETURNING principal, tenant_id        ← 原子、一次性、跨实例可用
+         │   （无效/已用/过期 → 401；租户不匹配 → 403）
+         │   database::with_schema(principal.schema) + authz（GET /api/events ∈ AUTH_ONLY）
+         │   SseHub::register(conn_id, user, tenant) ← 每实例/每用户连接上限
+         │ 回放：SELECT id, kind, payload FROM public.sys_gateway_event
+         │        WHERE tenant_id = $1 AND id > $2 ORDER BY id LIMIT 200
+         │       若首行 id > $2 + 1 → 事件已被 retention 清理 → hello.gap = true
+         ▼
+         ◄── event: hello   data: {"cursor":1240,"gap":false}
+         ◄── （回放 1235 … 1240）
+         ◄── 实时模式（图 7）；每 15s 发送 `:keep-alive` 注释帧
+```
+
+### D.6 SSE 跨实例分发（图 7）
+
+```sql
+-- 发布：写日志 + 广播，单语句完成（同一事务，commit 时投递）
+WITH ins AS (
+  INSERT INTO public.sys_gateway_event (tenant_id, kind, payload)
+  VALUES ($1, $2, $3) RETURNING id, tenant_id
+)
+SELECT id, pg_notify('assets_gw',
+       json_build_object('k', 'sse', 't', tenant_id, 'id', id)::text) FROM ins;
+-- 载荷只有 id（远小于 NOTIFY 8KB 上限），正文由订阅方回表读取
+```
+
+```
+业务代码（任意实例）publish(tenant=1, kind="asset.changed", payload={…})
+        │ 单语句：INSERT + pg_notify
+        ▼
+   PostgreSQL NOTIFY
+        ├────────────────────────┬─────────────────────────┐
+        ▼                        ▼                         ▼
+  实例#1 listener          实例#2 listener           实例#3 listener
+  （发布者也在此收到，不做本地直发 → 不会重复推送）
+        │
+        └─ SELECT kind, payload FROM public.sys_gateway_event WHERE id = 1241
+                              ▼
+                     SseHub.broadcast(tenant=1, event)   ← 只推 tenant_id == 1 的连接
+                              ├─ try_send 成功 → 写入该连接流
+                              └─ 通道满 → 丢最旧 + gw_sse_dropped_total++
+```
+
+> 为什么不把 payload 塞进 NOTIFY：8KB 上限 + 丢失不可恢复。只发 `id`、正文回表读，天然支持回放与漏通知补齐。
+
+### D.7 断线续传（图 8）
+
+```
+浏览器（已知 last_event_id = 1240）
+   │ 网络中断 / 实例#1 被 LB 摘除
+   ▼
+重连 ─► GET /api/events?ticket=<新票>   Header: Last-Event-ID: 1240 ──► 实例#2
+        │ SELECT id, kind, payload FROM public.sys_gateway_event
+        │  WHERE tenant_id = 1 AND id > 1240 ORDER BY id ASC LIMIT 200
+        ├─ 命中 1241,1242,1243 → 逐条推送（event id 与原事件一致）→ 进入实时模式
+        ├─ 最小 id = 1250（1241..1249 已被 retention 删除）→ hello {"cursor":1250,"gap":true}
+        └─ 一条都没有 → hello {"cursor":1240,"gap":false}
+```
+
+### D.8 优雅退出与清理选主（图 9）
+
+```
+实例#1 收到 SIGTERM
+  1. cancel.cancel()
+  2. Hub：对所有连接 send  event: shutdown  data:{"reason":"restart","retry_after_ms":1000}
+  3. 各 SSE 流 return → 连接关闭（客户端按 retry_after 重连到实例#2）
+  4. axum::serve(...).with_graceful_shutdown(cancel.cancelled()) → 等在途请求（≤ 25s）
+  5. 若本实例是 leader：pg_advisory_unlock(CLEANUP_LOCK_KEY) + 释放 detach 连接
+  6. DELETE FROM public.sys_gateway_instance WHERE worker_id = 1 AND instance_id = 'gw-1'
+  7. 关闭 PgListener → 正常退出（30s 兜底强杀）
+
+实例#2 的 leader 循环（每 10s 一次）：
+   pg_try_advisory_lock(CLEANUP_LOCK_KEY)
+     ├─ true  → leader：执行清理 + api::cleanup_once()（每 CLEANUP_INTERVAL_SECS）
+     │          └─ SELECT 1 保活；连接断开 → 锁自动释放 → 回到 try 状态
+     └─ false → standby，睡 10s
+
+清理内容（leader 独占）：
+   · DELETE FROM public.sys_gateway_event      WHERE created_at  < now() - interval '1 hour'
+   · DELETE FROM public.sys_gateway_sse_ticket WHERE expires_at  < now()
+   · DELETE FROM public.sys_gateway_rate_limit WHERE window_start < now() - interval '10 minutes'
+   · DELETE FROM public.sys_gateway_instance   WHERE expires_at  < now() - interval '5 minutes'
+```
+
+### D.9 故障自愈矩阵（图 10）
+
+| 场景 | 现象 | 自愈机制 | 时限 |
+|---|---|---|---|
+| 实例进程崩溃（未释放锁） | LB 探活失败 | advisory lock 随会话断开由 PG 自动释放；worker 租约到期 | 锁：立即；租约：≤ 60s |
+| worker 续约失败（网络分区） | 可能与旧实例撞 id | 续约 UPSERT 无返回行 → 记 FATAL → 主动退出，避免双写 | ≤ 20s |
+| PgListener 断线 | 本实例收不到跨实例事件与失效通知 | 指数退避重连（1s→30s）；期间 /readyz=503 由 LB 摘除；SSE 靠 Last-Event-ID 补齐 | 重连 ≤ 30s |
+| PG 短暂重启 | 全部实例 5xx | sqlx 池自动重连；listener 重建；leader 重新抢锁；/readyz 反映真实状态 | 恢复后 ≤ 30s |
+| NOTIFY 丢失（罕见） | 个别 SSE 事件未推、个别权限未即时失效 | SSE：重连带游标补齐；权限：L1 TTL 60s 后回源 | ≤ 60s |
+| 事件表 / 限流表膨胀 | 存储增长 | leader 按 SSE_EVENT_RETENTION_SECS 与窗口淘汰 | 每小时 |
+| 时钟漂移 | 窗口 / 租约错乱 | 一律用 DB 的 now() 与 extract(epoch FROM now()) | 无 |
+| 多实例同时启动 | 迁移并发 | pg_advisory_lock(MIGRATION_LOCK_KEY) 串行化 | 第二个实例等待 ≤ 300s |
+
+### D.10 一图串联
+
+```
+                  ┌──────────── 4 个共享面 ────────────┐
+请求 / 连接 ─┬─► ① NOTIFY 事件总线（唤醒，不传正文）
+             ├─► ② sys_gateway_event（SSE 正文 + Last-Event-ID 续传）
+             ├─► ③ sys_gateway_*（票据 / worker 租约 / 限流计数）
+             └─► ④ advisory locks（迁移互斥 / 清理选主）
+                          │
+        ┌─────────────────┴──────────────────┐
+        │ 强一致（DB 直读 / 原子写）：租约、票据、限流计数、续传
+        │ 最终一致（NOTIFY 广播）：L1 权限失效、在线事件推送
+        │ 兜底：L1 TTL 60s、Last-Event-ID 回放、LB 探针
+        └────────────────────────────────────┘
+```
+
+### D.11 环境变量（替换正文 §12.2 中的 REDIS_* 项）
+
+| 变量 | 缺省 | 说明 |
+|---|---|---|
+| `GATEWAY_PG_CHANNEL` | `assets_gw` | LISTEN/NOTIFY 通道名；多套环境共库时必须区分 |
+| `SNOWFLAKE_WORKER_ID` | `0` | 0..=31；由租约表校验唯一性 |
+| `GATEWAY_WORKER_LEASE_SECS` | `60` | 租约时长；续约间隔 = 1/3 |
+| `SSE_EVENT_RETENTION_SECS` | `3600` | 事件表保留时长（决定可续传窗口） |
+| `SSE_TICKET_TTL_SECS` | `30` | 票据有效期 |
+| `SSE_REPLAY_MAX_EVENTS` | `200` | 单次回放上限，超出置 gap = true |
+| `GATEWAY_RATE_LIMIT_ENFORCE_GLOBAL` | `false` | 关闭时沿用进程内「仅 API Key」限流，不产生限流 DB 写 |
+| `RATE_LIMIT_FAIL_MODE` | `closed` | DB 故障时 closed = 拒绝 / open = 放行 |
+| `CLEANUP_INTERVAL_SECS` | `3600` | leader 执行清理的间隔 |
+| `AUTHZ_CACHE_TTL_SECS` | `60` | L1 权限快照 TTL（与现状一致，不放大不一致窗口） |
+
+> 同时删除正文 §12 中 `REDIS_URL` / `GATEWAY_REQUIRE_REDIS` 的必填校验；`/readyz` 改为「DB `SELECT 1`（2s 超时）+ PgListener 健康标志 + 未收到 shutdown」。
+
+### D.12 代价与边界
+
+| 项 | 影响 | 缓解 |
+|---|---|---|
+| 限流每次请求 1 次 DB 写 | 比 Redis 多 1 个 RTT，占用 PG 写容量 | 缺省**关闭**全局维度（沿用进程内 API Key 限流）；开启时只按 p/r 维度生效 |
+| SSE 每事件 1 次 INSERT | 比 PUBLISH 重，高吞吐时写压力上升 | `SSE_EVENT_RETENTION_SECS` 控制保留；必要时用 `GATEWAY_SSE_PERSIST=0` 退化为「仅本实例分发、无续传」 |
+| NOTIFY 不持久，重连窗口可能丢 | 重连瞬间的事件不主动推 | 客户端带 `Last-Event-ID` 补齐；`hello.gap=true` 提示缺口 |
+| NOTIFY 载荷 8KB 上限 | 大事件不能内联 | 只发 `id`，正文回表读（本设计已如此） |
+| 每实例多占 PG 连接 | listener 1 条 + leader 1 条（迁移锁仅启动期） | 按「实例数 × 2」预留连接池上限 |
+| 多实例共用同一 PG | PG 不可用则全部不可用 | 本就是唯一硬依赖，无新增故障域 |
+| 无 L2 缓存 | 每次 L1 miss 都回源 DB | 现状即如此（60s TTL），未变差 |
+
+### D.13 与正文各章的对应关系
+
+| 正文 | 本附录的替换 |
+|---|---|
+| §6.6 / §6.8 认证 L2、版本号、失效广播 | D.3（取消 L2，只保留 L1 + NOTIFY 失效） |
+| §7 SSE Streams + PubSub 双写 | D.5 – D.7（事件表 + NOTIFY + Last-Event-ID） |
+| §9.2 限流 Redis ZSET/Lua | D.4（PG 固定窗口 UPSERT） |
+| §9.5 worker 抢位 | D.2（租约表） |
+| §9.6 清理选主 | D.8（不变，仍是 advisory lock） |
+| §12.2 `REDIS_*` 配置与 prod 必填校验 | D.11（整段删除） |
+| §15 R12（Redis 内存膨胀） | 不再适用，改为「事件表 / 限流表膨胀」→ D.9 |
+
+### D.14 验收（无 Redis，只需 PG）
+
+```bash
+cargo check -p server -p api -p database -p service      # 现有三形态回归
+cargo build -p gateway --bin assets-gateway
+cargo test  -p gateway -p api
+```
+
+1. `/livez` 200、`/readyz` 200、`/healthz` 200、`/api/users/me` 无凭证 401
+2. 双实例 `GATEWAY_PORT=8080/8081` + `SNOWFLAKE_WORKER_ID=1/2`：同 token 权限一致；第三实例用 `SNOWFLAKE_WORKER_ID=1` 启动失败（日志含「已被占用」）
+3. 实例 A 改角色 → 实例 B 下一次请求立即生效（NOTIFY 生效；`SELECT` 确认 L1 已清）
+4. `GATEWAY_RATE_LIMIT_ENFORCE_GLOBAL=1` + 5 rps：跨实例 20 次请求 ≈ 5 × 200 + 15 × 429（带 `Retry-After`）
+5. 取票据 → 连 A → 从 B 发布（`GATEWAY_DEV_ENDPOINTS=1`）→ A 收到；票据二次使用 401；断线带 `Last-Event-ID` 重连补齐；`SIGTERM` 后 30s 内退出
+6. 四张 `sys_gateway_*` 表在启动后自动创建（覆盖老库升级路径）；`pg_locks` 中 `locktype = advisory` 的 leader 只有一行
+
+验证 SQL：
+
+```sql
+SELECT * FROM public.sys_gateway_instance ORDER BY worker_id;
+SELECT count(*) FROM public.sys_gateway_event WHERE created_at > now() - interval '10 minutes';
+SELECT bucket_key, counter FROM public.sys_gateway_rate_limit ORDER BY window_start DESC LIMIT 20;
+SELECT pid, objid, mode FROM pg_locks WHERE locktype = 'advisory';
+```
+
+---
+
 ## 一页总结
 
 - **形态**：新增 `crates/gateway`（bin `assets-gateway`），单端口 8080 承载 HTTP + SSE + h2c gRPC，默认内嵌 `api::build_router`。
@@ -2199,3 +2632,4 @@ SELECT id, name, perms, http_path FROM sys_menu WHERE http_path LIKE 'grpc:%';
 - **多实例三件事**：认证缓存靠 L2+版本号、限流靠 Redis Lua、清理任务靠 advisory lock 选主。
 - **已确认的 8 个现状缺陷**：B1 trace propagator、B2 单实例限流注释、B3 SSE 事件格式、B4 错误码、B5 `build_router`、B6 liveness 查 DB、B7 upload/chat 路由复用、B8 API Key 缓存不跨实例（清单见 §15.1，其中 B3/B5/B6/B7 在 P0 修，B4/B8 在 P1，B2 在 P2，B1 在 P5）。
 - **上线门槛**：`/livez` 与 `/readyz` 分离、SSE buffering 关闭、优雅退出顺序正确、worker id 唯一。
+- **零中间件可选项**：环境不允许 Redis 时，按附录 D 用 PostgreSQL（LISTEN/NOTIFY + sys_gateway_event / sse_ticket / instance / rate_limit + advisory lock）承接全部跨实例职责，进程模型与阶段划分不变。
