@@ -17,6 +17,8 @@ llm-openai.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
+# API Key 校验结果 / last_used_at 节流的进程内缓存（设计文档 §6.8）
+dashmap.workspace = true
 # 流式事件消费（LLMRouter::chat_stream 返回 ChatStream）
 futures.workspace = true
 jsonwebtoken.workspace = true

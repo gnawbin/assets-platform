@@ -1246,3 +1246,47 @@ pub struct AssetOpsLink {
     pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>, //软删除标记
 }
+
+/// 外部系统 API Key 实体
+/// 对应表：public.sys_api_key（设计文档 §9.1）
+///
+/// **安全约定**：
+/// - `key_hash` 是完整 key 的 SHA-256，禁止在任何响应里落地，故 `skip_serializing`
+/// - 明文密钥不在本表出现，只在 service 的创建 / 轮换返回值中出现一次
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SysApiKey {
+    #[serde(serialize_with = "i64_to_string")]
+    pub id: i64,
+    /// 所属租户（空表示 public 全局 key）
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub tenant_id: Option<i64>,
+    /// 名称（给人看）
+    pub name: String,
+    /// 用途说明
+    pub description: Option<String>,
+    /// 定位段（明文，用于列表展示与日志定位）
+    pub key_prefix: String,
+    /// SHA-256(完整 key) hex —— 单向哈希，禁止序列化外泄
+    #[serde(skip_serializing)]
+    pub key_hash: String,
+    /// 授权范围（权限点集合）
+    pub scopes: Vec<String>,
+    /// 每分钟请求上限
+    pub rate_limit_per_min: i32,
+    /// 过期时间（空 = 永不过期）
+    pub expires_at: Option<DateTime<Utc>>,
+    /// 最近一次使用时间（写入节流 ≥ 60s）
+    pub last_used_at: Option<DateTime<Utc>>,
+    /// 吊销时间（非空即失效）
+    pub revoked_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+    /// 是否启用（吊销时置 false）
+    pub enable: bool,
+    /// 软删除标记（0=未删除，1=已删除）
+    pub deleted: i16,
+}

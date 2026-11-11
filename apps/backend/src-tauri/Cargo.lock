@@ -394,6 +394,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "dashmap",
  "database",
  "engine",
  "futures",
@@ -406,6 +407,7 @@ dependencies = [
  "tokio",
  "tower-http 0.7.1",
  "tracing",
+ "utils",
  "utoipa",
 ]
 
@@ -10539,6 +10541,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "chrono",
+ "dashmap",
  "database",
  "futures",
  "jsonwebtoken",
@@ -13100,6 +13103,7 @@ dependencies = [
  "rand 0.10.3",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

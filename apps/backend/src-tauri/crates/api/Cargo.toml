@@ -7,6 +7,8 @@ version = "0.1.0"
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+# 鉴权缓存（路由→权限点 / 用户授权快照，设计文档 §6.8）
+dashmap.workspace = true
 database.workspace = true
 engine.workspace = true
 futures.workspace = true
@@ -19,5 +21,7 @@ storage.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
+# 凭证前缀分流（utils::api_key::is_api_key_token / parse_api_key_prefix）
+utils.workspace = true
 # OpenAPI 标注（#[utoipa::path] / ToSchema）：规范由 crates/apidoc 汇总并对外提供
 utoipa.workspace = true

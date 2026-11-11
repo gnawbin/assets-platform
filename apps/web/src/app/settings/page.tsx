@@ -22,6 +22,7 @@ import {
   IconFileText,
   IconUserCheck,
   IconHash,
+  IconKey,
 } from '@tabler/icons-react';
 
 const settingsItems = [
@@ -80,6 +81,13 @@ const settingsItems = [
     icon: IconHash,
     color: 'indigo',
     href: '/settings/numbering',
+  },
+  {
+    title: 'API Key 管理',
+    description: '签发外部系统接入凭证，配置权限点、有效期与限流',
+    icon: IconKey,
+    color: 'pink',
+    href: '/settings/api-keys',
   },
   {
     title: '操作日志',

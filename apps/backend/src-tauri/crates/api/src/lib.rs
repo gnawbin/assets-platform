@@ -3,8 +3,10 @@
 //! 提供 RESTful API 服务，与 Tauri 桌面应用同时运行。
 //! 使用 axum 框架，支持 OpenAPI/Swagger 文档。
 
+pub mod api_key_routes;
 pub mod asset_routes;
 pub mod auth;
+pub mod authz;
 pub mod category_routes;
 pub mod chat_routes;
 pub mod department_routes;
@@ -47,17 +49,61 @@ pub async fn start_http_server(
     start_http_server_with(pool, llm_router, None).await
 }
 
+/// 校验 HTTP 启动所必需的 `JWT_SECRET`
+///
+/// 规则（设计文档 §16 T-2 / §16.3）：
+/// - 未配置（或为空串）→ `Err`
+/// - 少于 32 字节（256 bit）→ `Err`
+///
+/// 抽成纯函数便于单测，且**不 panic**：调用方（`start_http_server_with`）把
+/// `Err` 直接透传给 `bootstrap`，桌面端不受影响。
+fn check_jwt_secret(secret: Option<&str>) -> anyhow::Result<()> {
+    let Some(secret) = secret.filter(|s| !s.is_empty()) else {
+        return Err(anyhow::anyhow!(
+            "HTTP API 未启动：JWT_SECRET 未配置（Tauri 桌面模式不受影响，仍使用内置默认值）"
+        ));
+    };
+    if secret.len() < 32 {
+        return Err(anyhow::anyhow!(
+            "HTTP API 未启动：JWT_SECRET 长度需 ≥ 32 字节（当前 {} 字节）",
+            secret.len()
+        ));
+    }
+    Ok(())
+}
+
 /// 启动 HTTP API 服务（可注入额外路由）
 ///
-/// `extra_routes` 在顶层 `merge`，与上传 / SSE 路由一样位于 `auth_middleware` 之外，
-/// 供 `crates/apidoc` 注入 `/swagger-ui` 与 `/api-docs/openapi.json`。
+/// `extra_routes` 在顶层 `merge`，与 `/swagger-ui`、`/api-docs/openapi.json` 一样
+/// 位于 `auth_middleware` 之外，供 `crates/apidoc` 注入文档路由。
 /// 之所以用「注入」而不是让 `api` 依赖 `apidoc`，是为了避免
 /// `apidoc → api` 的反向依赖成环。
+///
+/// 上传（`/api/upload/*`）与 SSE（`/api/chat/stream`）**已纳入** `auth_middleware`：
+/// 它们各自持有独立的 `State`，无法与受保护路由共用同一个 `Router`，
+/// 因此在各自 `with_state()` 之后单独挂 `.layer(middleware::from_fn(auth_middleware))`。
 pub async fn start_http_server_with(
     pool: sqlx::PgPool,
     llm_router: Option<std::sync::Arc<service::llm_gateway_service::LLMRouter>>,
     extra_routes: Option<Router>,
 ) -> anyhow::Result<()> {
+    // ===== HTTP 启动前置条件：JWT_SECRET 必须存在且足够强 =====
+    //
+    // 只在 HTTP 启动路径校验（设计文档 §16 T-2 / §16.3）：
+    // - `JWT_SECRET` 在 Tauri 桌面模式也在用（登录签发 / get_current_user 解码），
+    //   那三处保留「缺失时回落内置默认值」的兜底，**不做进程级 fail-fast**；
+    // - 这里返回 `Err` 只会让 HTTP 服务不启动（由 `bootstrap::serve_http` 记录错误日志），
+    //   Tauri 窗口与全部 `invoke` 命令照常工作。
+    let jwt_secret = std::env::var("JWT_SECRET").ok();
+    check_jwt_secret(jwt_secret.as_deref())?;
+
+    // ===== 鉴权自检（设计文档 §6.3 手段 3）=====
+    // 只读代码兜底表与 DB 映射，**不 panic、不 block 启动**（§16 T-2）：
+    // 未登记权限点的路由在 enforce 模式下会 403，这里提前把差异打出来。
+    let authz_mode = authz::AuthzMode::current();
+    let coverage = authz::audit_route_coverage().await;
+    coverage.log(authz_mode);
+
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
@@ -120,6 +166,9 @@ pub async fn start_http_server_with(
             )
             .route("/api/upload/{id}", delete(upload_routes::abort_upload))
             .with_state(state)
+            // 上传接口必须登录（改造前匿名可调用：在 auth_middleware 之外 merge）
+            .layer(middleware::from_fn(authz::authz_middleware))
+            .layer(middleware::from_fn(auth_middleware))
     };
 
     // 初始化智能问答 SSE 流式路由（LLM Router 全局共享）
@@ -130,9 +179,13 @@ pub async fn start_http_server_with(
         Router::new()
             .route("/api/chat/stream", post(chat_routes::chat_stream))
             .with_state(state)
+            // SSE 对话必须登录（改造前匿名可调用：在 auth_middleware 之外 merge）
+            .layer(middleware::from_fn(authz::authz_middleware))
+            .layer(middleware::from_fn(auth_middleware))
     };
 
-    // 构建路由（外部注入的路由与上传 / SSE 一样在顶层合并，不经过 auth_middleware）
+    // 构建路由（上传 / SSE 各自已挂 auth_middleware；外部注入的路由在顶层合并，
+    // 不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
     let has_extra_routes = extra_routes.is_some();
     let mut app = create_router(pool).merge(upload_router).merge(chat_router);
     if let Some(extra) = extra_routes {
@@ -393,6 +446,21 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/ops/connections/{id}/collect", post(ops_routes::collect_now))
         .route("/api/ops/links", get(ops_routes::list_links))
         .route("/api/ops/links/{linkId}/bind", post(ops_routes::bind_link))
+        // API Key 管理（Phase 1：只允许 JWT 管理员，API Key 自身禁止管理 API Key）
+        .route(
+            "/api/api-keys",
+            get(api_key_routes::list_api_keys).post(api_key_routes::create_api_key),
+        )
+        .route(
+            "/api/api-keys/{id}/rotate",
+            post(api_key_routes::rotate_api_key),
+        )
+        .route(
+            "/api/api-keys/{id}",
+            delete(api_key_routes::revoke_api_key),
+        )
+        // L2 功能权限判定（内层：先认证再鉴权；`.layer` 后加的在外层）
+        .layer(middleware::from_fn(authz::authz_middleware))
         .layer(middleware::from_fn(auth_middleware));
 
     // Skill 路由（使用独立的 SkillRouterState）
@@ -400,7 +468,11 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     let skill_router_state = Arc::new(skill_routes::SkillRouterState {
         registry: skill_registry,
     });
-    let skill_routes = skill_routes::skill_routes().with_state(skill_router_state);
+    let skill_routes = skill_routes::skill_routes()
+        .with_state(skill_router_state)
+        // 改造前 Skill 接口不经过任何中间件（匿名可调用），Phase 1 一并纳入认证 + 鉴权
+        .layer(middleware::from_fn(authz::authz_middleware))
+        .layer(middleware::from_fn(auth_middleware));
 
     // 合并所有路由（大文件上传路由在 start_http_server 中通过 .merge() 添加）
     Router::new()
@@ -435,4 +507,42 @@ async fn shutdown_signal() {
     }
 
     info!("收到关闭信号，HTTP 服务正在关闭...");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== RT-1 / RT-2：HTTP 启动前置条件（设计文档 §16.3）=====
+
+    #[test]
+    fn jwt_secret_missing_only_blocks_http() {
+        // 未配置：返回 Err（不是 panic），调用方据此只放弃启动 HTTP
+        let err = check_jwt_secret(None).expect_err("未配置 JWT_SECRET 时必须返回 Err");
+        assert!(err.to_string().contains("JWT_SECRET 未配置"));
+    }
+
+    #[test]
+    fn jwt_secret_empty_string_is_treated_as_missing() {
+        // 空串等价于未配置（.env.toml 里写成 "" 的情况）
+        assert!(check_jwt_secret(Some("")).is_err());
+    }
+
+    #[test]
+    fn jwt_secret_too_short_is_rejected() {
+        // 26 字节：低于 256 bit
+        let err = check_jwt_secret(Some("01234567890123456789012345"))
+            .expect_err("长度不足 32 字节必须返回 Err");
+        assert!(err.to_string().contains("长度需"));
+        // 31 字节同样拒绝
+        assert!(check_jwt_secret(Some(&"a".repeat(31))).is_err());
+    }
+
+    #[test]
+    fn jwt_secret_boundary_and_default_are_accepted() {
+        // 恰好 32 字节：通过
+        assert!(check_jwt_secret(Some(&"a".repeat(32))).is_ok());
+        // 内置默认值（Tauri 桌面模式使用的兜底值）也必须通过，保证本地 HTTP 可用
+        assert!(check_jwt_secret(Some("assets-platform-default-secret-key")).is_ok());
+    }
 }

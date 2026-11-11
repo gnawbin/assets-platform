@@ -106,16 +106,31 @@
 ## 🔐 认证与鉴权改造（设计见 `docs/OAuth2.1与API Key统一鉴权设计方案.md`）
 
 ### Phase 0：安全基座（必须先做，1–2 天）
-- [ ] **26.** `JWT_SECRET` 校验**只加在 `api::start_http_server_with()` 入口**（缺失/过短 → 返回 `Err`，仅 HTTP 不启动；**不改** `auth.rs:43`、`user_service.rs:76`、`src/commands/user_commands.rs:116` 的默认值兜底——Tauri 也在用，见设计文档 §16 T-2/§16.3）
-- [ ] **27.** `/api/upload/*`（7 条）、`/api/chat/stream` 纳入 `auth_middleware`（当前在 `lib.rs:121` 于中间件之外 merge，匿名可访问）
-- [ ] **28.** 删除 `auth.rs:149` 的 `set_global_schema()` 调用（**仅删 HTTP 侧**；`GLOBAL_SCHEMA` 保留给 Tauri，`lib.rs:148` 与 `switch_tenant` 命令语义不变，见设计文档 §16 T-3）
-- [ ] **29.** 新增 `utils/src/api_key.rs`（`generate_api_key` / `hash_api_key` / `parse_prefix`）+ `sha2` 依赖
+- [x] **26.** `JWT_SECRET` 校验**只加在 `api::start_http_server_with()` 入口**（缺失/过短 → 返回 `Err`，仅 HTTP 不启动；**不改** `auth.rs:43`、`user_service.rs:76`、`src/commands/user_commands.rs:116` 的默认值兜底——Tauri 也在用，见设计文档 §16 T-2/§16.3）
+  - 已实现：`crates/api/src/lib.rs` 入口处校验（缺失 / < 32 字节 → `Err`），桌面端兜底逻辑零改动。
+- [x] **27.** `/api/upload/*`（7 条）、`/api/chat/stream` 纳入 `auth_middleware`（当前在 `lib.rs:121` 于中间件之外 merge，匿名可访问）
+  - 已实现：两个独立 `Router` 各自 `with_state()` 后挂 `.layer(middleware::from_fn(auth_middleware))`。
+  - `chat_routes` 改为以令牌 `sub` 为准（body `user_id` 不一致时告警并以令牌为准），避免冒用他人身份。
+  - 前端同步带令牌：`uploadService.ts`（8 处 `/api/upload/*` fetch，S3 presigned PUT 不加）、`useChatStream.ts`（SSE），统一走 `utils/authToken.ts`。
+- [x] **28.** 删除 `auth.rs:149` 的 `set_global_schema()` 调用（**仅删 HTTP 侧**；`GLOBAL_SCHEMA` 保留给 Tauri，`lib.rs:148` 与 `switch_tenant` 命令语义不变，见设计文档 §16 T-3）
+  - 已实现：`auth.rs` 中间件不再写 `GLOBAL_SCHEMA`；另补 `database::global_schema_name()`，在 HTTP 的 `login` / `switch_tenant` 调用共享 service 前后保存 / 恢复快照（service 内部会写 `GLOBAL_SCHEMA`，不改其签名）。
+- [x] **29.** 新增 `utils/src/api_key.rs`（`generate_api_key` / `hash_api_key` / `parse_prefix`）+ `sha2` 依赖
+  - 已实现：`ak_<env>_<prefix16>_<secret43>`，入库 `SHA-256` hex；含 base32/格式/前缀解析单测；`sha2` 加入 workspace 依赖与 `utils` crate。
 
 ### Phase 1：API Key + 鉴权执行点（5–8 天）
-- [ ] **30.** DDL：`sys_api_key` + `sys_menu` 权限点补录（12 个新权限点：`system:apikey:*` 4 个、`upload:file:add/list/delete` 3 个、`chat:completion:add`、`system:oauthclient:*` 4 个）
-- [ ] **31.** 路由 → perms 映射补录：105 条路由全覆盖（当前仅 38 条带 `http_path`），中间用 `AUTHZ_MODE=warn` 过渡后再切 `enforce`
-- [ ] **32.** `api/src/authz.rs`：`AuthPrincipal` + `(method, MatchedPath) → perms` 判定 + 60s 权限缓存 + 启动自检（未映射路由告警；**自检在 `start_http_server_with()` 内调用**，不 panic、不影响 Tauri）
-- [ ] **33.** API Key 管理接口（`api/src/api_key_routes.rs`，scopes ⊆ 创建者权限）+ 前端 Key 管理页
+- [x] **30.** DDL：`sys_api_key` + `sys_menu` 权限点补录（12 个新权限点：`system:apikey:*` 4 个、`upload:file:add/list/delete` 3 个、`chat:completion:add`、`system:oauthclient:*` 4 个）
+  - 已实现：`public_migration.sql` 新增 `sys_api_key`（`IF NOT EXISTS` 幂等 DDL + `uk_sys_api_key_hash` / 租户 / 前缀索引）与 44 条 `sys_menu` 权限点（API Key 4 + 页面 1 + OAuth 客户端 4 + 技能 4 + 注册 2 + 上传 3 + 对话 1 + 用户 5 + 角色 3 + 部门 3 + 租户 2 + 知识 3 + 流程 9），id 段 200–278 与既有 1–165 不冲突，`command_name` 全部为 NULL（不污染 Tauri 映射）。
+- [x] **31.** 路由 → perms 映射补录：105 条路由全覆盖（当前仅 38 条带 `http_path`），中间用 `AUTHZ_MODE=warn` 过渡后再切 `enforce`
+  - 已实现：`api/src/authz.rs::ROUTE_PERMS` 覆盖约 140 条路由模板（含 `/api/upload/*`、`/api/chat/stream`、`/api/skills*`、`/api/api-keys*`），DB（`sys_menu.http_method` + `http_path`）优先、代码兜底，60s 缓存。
+  - `AUTHZ_MODE` 默认 `warn`（JWT 仅告警），**Service principal 恒为 enforce**，非法取值回落 `warn`；未登记路由在 enforce 下 403（fail-closed）。
+- [x] **32.** `api/src/authz.rs`：`AuthPrincipal` + `(method, MatchedPath) → perms` 判定 + 60s 权限缓存 + 启动自检（未映射路由告警；**自检在 `start_http_server_with()` 内调用**，不 panic、不影响 Tauri）
+  - 已实现：`AuthPrincipal`（`PrincipalKind::User/Service`）+ `matches_scope` 通配（`*` / `asset:*`）+ 每分钟限流；`audit_route_coverage()` 只输出 `tracing` 日志（`RouteCoverageReport` 统计 code-only / db-only 路由），不 panic。
+  - 服务身份约束：`SERVICE_FORBIDDEN_PREFIXES`（`system:` / `upload:`）+ `SERVICE_FORBIDDEN_ROUTES`（强制 `UserContext` 的资产写接口）一律 403；`ops_routes` 三个写 handler 改为 `Option<Extension<UserContext>>`，使「采集上报」模板可被 API Key 调用（`created_by` 记 NULL）而不是 500。
+  - 单测：`authz` 15 个 + `response` 3 个（403 携带 `scope` 与 `WWW-Authenticate`）。
+- [x] **33.** API Key 管理接口（`api/src/api_key_routes.rs`，scopes ⊆ 创建者权限）+ 前端 Key 管理页
+  - 已实现：`api_key_routes.rs` 4 个 handler（scopes ⊆ 创建者权限、禁止 `system:*` / `upload:*` / 用户角色类高危点、跨租户 404、API Key 自身不可管理 Key）+ `service/src/api_key_service.rs`（创建 / 列表 / 轮换（旧 key ≤24h 过期）/ 吊销 / 校验，30s 校验缓存、60s `last_used_at` 节流、DB 故障 fail-closed）。
+  - 前端：`services/apiKeyService.ts` + `app/settings/api-keys/page.tsx`（一次性明文弹窗 + 复制、scope 模板、有效期 / 限流、轮换 / 吊销、桌面模式提示），`httpAdapter.ts` 补 4 条路由，设置首页加入口。
+
 
 ### Phase 2：OAuth 2.1 授权服务器（5–8 天，外部第三方接入前）
 - [ ] **34.** `/oauth/authorize`（方案 A：Bearer + 同意页）、`/oauth/token`（code + PKCE S256 + refresh 轮换）、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`

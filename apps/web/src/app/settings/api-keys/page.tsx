@@ -181,10 +181,18 @@ const ApiKeysSettingsPage: React.FC = () => {
     // Tauri 通道没有 API Key 命令，只有 HTTP 通道可用
     const isHttpMode = typeof window !== 'undefined' && getAdapterType() === 'http';
 
-    const { data: keys, loading, error, execute: fetchKeys } = useApi(getApiKeys);
+    const {
+        data: keys,
+        loading,
+        error,
+        execute: fetchKeys,
+        reset: resetError,
+    } = useApi(getApiKeys);
     const { execute: doCreate, loading: creating } = useApi(createApiKey);
     const { execute: doRotate, loading: rotating } = useApi(rotateApiKey);
-    const { execute: doRevoke, loading: revoking } = useApi(revokeApiKey);
+    // 吊销接口返回 data = null（无响应体），无法用返回值区分成功/失败，
+    // 因此不走 useApi（它在失败时同样返回 null），改为直接调用 service + 本地状态
+    const [revoking, setRevoking] = useState(false);
 
     const [createOpened, { open: openCreate, close: closeCreate }] = useDisclosure(false);
     const [secretOpened, { open: openSecret, close: closeSecret }] = useDisclosure(false);
@@ -266,13 +274,17 @@ const ApiKeysSettingsPage: React.FC = () => {
 
     const handleRevoke = async () => {
         if (!revokeTarget) return;
-        const result = await doRevoke(revokeTarget.id);
-        if (result === null && !revoking) {
-            // 吊销成功时 data 为 null（无响应体），失败时 error 由 useApi 记录
+        setRevoking(true);
+        try {
+            await revokeApiKey(revokeTarget.id);
             notifySuccess('已吊销');
+            setRevokeTarget(null);
+            await fetchKeys();
+        } catch {
+            // 失败提示由 HTTP 适配器统一弹出（showError 默认 true），这里不重复提示
+        } finally {
+            setRevoking(false);
         }
-        setRevokeTarget(null);
-        await fetchKeys();
     };
 
     return (
@@ -319,7 +331,7 @@ const ApiKeysSettingsPage: React.FC = () => {
                         title="加载失败"
                         color="red"
                         withCloseButton
-                        onClose={() => fetchKeys()}
+                        onClose={resetError}
                     >
                         {error}
                     </Alert>

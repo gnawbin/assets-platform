@@ -33,6 +33,18 @@ pub fn set_global_schema(schema: String) {
     }
 }
 
+/// 读取当前全局 schema 快照（只读）
+///
+/// 供 HTTP 层在调用**共享 service**（`user_service::login` / `tenant_service::switch_tenant`
+/// 内部会写 `GLOBAL_SCHEMA`）前后保存与恢复，避免 HTTP 请求把同进程的桌面会话
+/// schema 改掉（设计文档 §16 T-3）。
+pub fn global_schema_name() -> String {
+    get_global_schema()
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "public".to_string())
+}
+
 /// 在请求上下文中执行带 schema 的操作
 ///
 /// 在 auth middleware 或 route handler 中调用此函数，为后续所有 `schema_prefix()`

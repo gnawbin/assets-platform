@@ -8,10 +8,11 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::IntoResponse;
-use axum::Json;
+use axum::{Extension, Json};
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
+use super::auth::UserContext;
 use service::conversation_service::{
     AttachmentParam, ConversationService,
 };
@@ -60,11 +61,28 @@ pub struct ChatRouterState {
 )]
 pub async fn chat_stream(
     State(state): State<Arc<ChatRouterState>>,
+    user_ctx: Option<Extension<UserContext>>,
     Json(params): Json<ChatStreamRequest>,
 ) -> impl IntoResponse {
-    let user_id: i64 = match params.user_id.parse() {
-        Ok(id) => id,
-        Err(e) => {
+    // 认证已由 `auth_middleware` 完成（`/api/chat/stream` 已纳入受保护路由）。
+    // 以令牌里的 `sub` 为准，body 里的 `user_id` 仅作向后兼容：
+    // 不一致时告警并使用令牌值，避免调用方冒用他人身份。
+    let token_user_id = user_ctx.as_ref().map(|Extension(ctx)| ctx.user_id);
+    let user_id: i64 = match (token_user_id, params.user_id.parse::<i64>()) {
+        (Some(tid), Ok(body_id)) => {
+            if tid != body_id {
+                tracing::warn!(
+                    "chat/stream 请求体 user_id={} 与令牌 sub={} 不一致，以令牌为准",
+                    body_id,
+                    tid
+                );
+            }
+            tid
+        }
+        (Some(tid), Err(_)) => tid,
+        // 理论上不会走到：没有中间件上下文时保持改造前行为（按 body 解析）
+        (None, Ok(body_id)) => body_id,
+        (None, Err(e)) => {
             return Sse::new(futures::stream::once(async move {
                 Ok::<_, axum::Error>(Event::default().event("error").data(
                     serde_json::json!({"message": format!("无效的用户ID: {}", e)}).to_string(),

@@ -102,7 +102,14 @@ pub struct LoginResponse {
 pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<ApiResponse<LoginResponse>>, ApiError> {
-    match service::user_service::login(&req.username, &req.password).await {
+    // HTTP 侧不写全局 schema：`service::user_service::login` 内部会把 `GLOBAL_SCHEMA`
+    // 切到该用户租户（供 Tauri 命令模式使用）。这里在调用前后保存 / 恢复，
+    // 避免一次 HTTP 登录改掉同进程桌面会话的 schema（设计文档 §16 T-3）。
+    let schema_snapshot = database::global_schema_name();
+    let result = service::user_service::login(&req.username, &req.password).await;
+    database::set_global_schema(schema_snapshot);
+
+    match result {
         Ok(resp) => {
             let login_resp = LoginResponse {
                 token: resp.token.clone(),

@@ -152,6 +152,7 @@ base64 = "0.23.1"
 getrandom = {version = "0.4.3", features = ["std"]}
 jsonwebtoken = {version = "11.1.0", default-features = false, features = ["aws_lc_rs"]}
 rand = {version = "0.10.3", features = ["std_rng"]}
+sha2 = "0.10.9"
 uuid = {version = "1.29.0", features = ["v4"]}
 
 # ---- 日志 / 追踪 ----

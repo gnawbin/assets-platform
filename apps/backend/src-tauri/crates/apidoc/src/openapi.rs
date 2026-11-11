@@ -50,6 +50,7 @@ use utoipa::{Modify, OpenApi};
         (name = "大文件上传", description = "S3 分片上传与断点续传"),
         (name = "智能问答", description = "RAG + LLM 的 SSE 流式问答"),
         (name = "技能", description = "Agent Skill 注册与执行"),
+        (name = "API Key", description = "外部系统 API Key 管理（JWT 管理员专用，API Key 自身禁止管理）"),
     ),
     // 只登记已标注 #[utoipa::path] 的 handler；新增接口时同步追加。
     paths(
@@ -170,6 +171,11 @@ use utoipa::{Modify, OpenApi};
         api::skill_routes::register_skill_handler,
         api::skill_routes::unregister_skill_handler,
         api::skill_routes::get_skill_count_handler,
+        // API Key 管理（JWT 管理员专用）
+        api::api_key_routes::list_api_keys,
+        api::api_key_routes::create_api_key,
+        api::api_key_routes::rotate_api_key,
+        api::api_key_routes::revoke_api_key,
     ),
     modifiers(&BearerAuthAddon)
 )]
