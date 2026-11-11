@@ -1,0 +1,15 @@
+[package]
+edition = "2024"
+name = "trustgraph-lite"
+version = "0.1.0"
+description = "轻量级信任 / 知识图谱内核（纯内存、零 IO）"
+
+[lints]
+workspace = true
+
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+# 内核不引入任何数据库 / HTTP 驱动：sqlx、reqwest、redis、lancedb 一律不在此出现
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

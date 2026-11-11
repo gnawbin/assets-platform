@@ -47,6 +47,8 @@ llm-openai = {path = "crates/llm-openai"}
 ops = {path = "crates/ops"}
 parser = {path = "crates/parser"}
 service = {path = "crates/service"}
+# 轻量级信任/知识图谱内核：纯内存、零 IO；service 负责从 knowledge_relation 构建图后传入
+trustgraph-lite = {path = "crates/trustgraph-lite"}
 storage = {path = "crates/storage"}
 utils = {path = "crates/utils"}
 # 向量数据存储：crates/vector 只放 trait 与数据类型，三个实现各自持有驱动、互不依赖

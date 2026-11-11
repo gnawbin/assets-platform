@@ -12841,6 +12841,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trustgraph-lite"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
