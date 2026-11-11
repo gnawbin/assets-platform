@@ -667,6 +667,65 @@ ORDER BY id DESC LIMIT $1 OFFSET $2;
 
 ---
 
+### 7.8 Phase 2.2 落地：方案 B（浏览器会话 Cookie）+ 传输护栏
+
+**新增数据表**（`public_migration.sql`，幂等）：
+
+| 表 | 关键列 | 说明 |
+|---|---|---|
+| `sys_user_session` | `session_hash`、`user_id`、`tenant_id`、`csrf_hash`、`ip inet`、`user_agent`、`expires_at`、`revoked_at` | 只存 `SHA-256`，明文只在 `Set-Cookie` 出现一次；`uk_sys_user_session_hash` + 用户 / 过期索引 |
+
+**Cookie 规格**：
+
+| Cookie | 前缀 | 属性 | 用途 |
+|---|---|---|---|
+| `ap_session` | `ss_<43>` | `HttpOnly; SameSite=Lax; Path=/; Max-Age=SESSION_TTL_SECS`（TLS 下加 `Secure`） | 浏览器授权流程的登录态 |
+| `ap_csrf` | `cs_<43>` | `SameSite=Lax; Path=/`（**不加 HttpOnly**） | 双提交 CSRF 校验 |
+
+**`/oauth/authorize` 双流程分流**（同一 URL，handler 内判定）：
+
+| 请求特征 | 分支 | 响应 |
+|---|---|---|
+| `Authorization: Bearer <用户 JWT>` | 方案 A | JSON 同意信息 / `{redirect_to}`（与 2.1 行为一致） |
+| 无 Bearer，带 `ap_session` | 方案 B | `GET` 渲染 HTML 同意页；`POST` 校验 CSRF 后 **302** 回调 |
+| 无 Bearer，无会话 | 方案 B | `401` HTML「请先登录」 |
+
+- 授权端点因此从「受保护路由」移到**公开路由**：方案 A 在 handler 内自行校验 Bearer（API Key / `at_` 令牌一律 `access_denied`），方案 B 靠 Cookie；
+- 方案 B 的 `POST` 顺序：CSRF 双提交校验（常数时间）→ 会话校验 → `ensure_user_active` → `prepare_authorization`（含 `redirect_uri` 精确匹配）→ 签发 code 并 302；拒绝授权时跳 `?error=access_denied&state=...`，**不泄漏**任何额外信息；
+- 同意页为纯静态 HTML（内联样式、无脚本），所有插值经 HTML 转义，并附 `CSP: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'` 与 `X-Frame-Options: DENY`、`Cache-Control: no-store`。
+
+**会话生命周期**：
+
+| 时机 | 行为 |
+|---|---|
+| `POST /api/auth/login` | 追加 `Set-Cookie`（会话 + CSRF）；签发失败只记 WARN，不影响 JWT 登录 |
+| `POST /api/auth/logout` | 追加清空 Cookie；撤销会话（幂等） |
+| `GET /api/auth/session` | 用 Cookie 返回 `{user_id, tenant_id, expires_at}`（无会话 401） |
+| `POST /api/auth/session/logout` | 撤销会话 + 清 Cookie |
+| 改密 / 删除用户 | `revoke_all_user_sessions(user_id)` 撤销该用户全部会话 |
+| 定时任务 | `cleanup_expired_sessions()` 每小时删除「过期超过 7 天」的行（保留期便于审计） |
+
+**传输与运维护栏**：
+
+| 项 | 行为 |
+|---|---|
+| `OAUTH_TRUSTED_CIDRS` | 非空时 `/oauth/*`、`/api/auth/session*` 只允许清单内来源；**配置了清单但取不到 IP 一律拒绝**（fail-closed），清单为空 = 不限制 |
+| `TRUST_PROXY_HEADERS` | 只有为 `true` 才采信 `X-Forwarded-For` / `X-Real-IP` / `X-Forwarded-Proto`；否则用 TCP 对端地址（`into_make_service_with_connect_info`） |
+| 安全响应头 | 全局 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`；HTTPS 下追加 `Strict-Transport-Security: max-age=31536000; includeSubDomains`（`HSTS_ENABLED=false` 可关闭） |
+| `GET /healthz` | 公开存活探测：`SELECT 1`（2s 超时）；正常 `200`，数据库不可达 `503`；附带 `insecure_transport`（§8.2 补偿控制 5） |
+| 后台清理 | 启动后 60s 首次执行，之后每 `OAUTH_CLEANUP_INTERVAL_SECS`（默认 3600s）清理授权码 / 令牌 / 会话；失败只记 WARN |
+
+**新增环境变量**：`SESSION_TTL_SECS`、`OAUTH_TRUSTED_CIDRS`、`TRUST_PROXY_HEADERS`、`HSTS_ENABLED`、`OAUTH_CLEANUP_INTERVAL_SECS`。全部有安全缺省值，不配置也能启动。
+
+### 7.9 JWT 加固：`iss` / `aud` 校验与迁移
+
+- 签发的 access / refresh 令牌新增 `iss`（`JWT_ISSUER`，默认 `assets-platform`）与 `aud`（`JWT_AUDIENCE`，默认 `assets-platform-api`）；
+- 校验规则：**存在即校验**（与期望值不符 → 401「令牌签发方/受众不匹配」）；缺失时由 `JWT_STRICT_ISS_AUD` 决定 —— `false`（默认）放过历史令牌，`true` 强制要求；
+- 迁移步骤：上线本版 → 等待现有令牌自然过期（access 7 天 / refresh 30 天，或提前缩短 `JWT_ACCESS_TTL_SECS`）→ 设 `JWT_STRICT_ISS_AUD=true` 完成严格化；
+- 校验点：`api::auth::verify_token()`（资源请求）与 `service::user_service::refresh_tokens()`（续期）两处，未覆盖的路径不会签出新令牌。
+
+---
+
 ## 8. HTTP / TLS 落地方案
 
 ### 8.1 三方案对比

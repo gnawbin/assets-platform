@@ -145,7 +145,24 @@
   - 清理：`oauth_service::cleanup_expired_grants()` 供定时任务调用（授权码保留 24h、令牌过期后保留 30d），不在请求路径上自动执行。
 
 
-### 🔒 Tauri 模式隔离回归（每阶段收尾必跑，设计文档 §16 / §13.4）
+### Phase 2.2：方案 B（会话 Cookie）+ 传输护栏 + JWT 加固
+- [x] **39.** `sys_user_session` + `/oauth/authorize` 浏览器流程（httpOnly 会话 Cookie + 双提交 CSRF + HTML 同意页 + 302）、`/api/auth/session`、登录/登出 Cookie 桥接
+  - 已实现：`public_migration.sql` 新增 `sys_user_session`（幂等；只存 `SHA-256`；令牌 `ss_<43>`、CSRF `cs_<43>`）；
+    `service/src/session_service.rs`（`create_session` / `find_session`（`last_seen_at` 5 分钟节流）/ `revoke_session` / `revoke_all_user_sessions` / `cleanup_expired_sessions`）；
+    `api/src/oauth_session.rs`（Cookie 序列化与解析、`x-www-form-urlencoded` 解析、HTML 转义、同意页 / 错误页渲染，含 XSS 与协议解析单测）；
+    `api/src/oauth_browser.rs`（同一 URL 分流方案 A JSON / 方案 B HTML+302；`html_response` 带 CSP / `X-Frame-Options` / `no-store`；`issue_session_cookies` 供登录调用）。
+  - 端点：`/oauth/authorize` 从受保护路由移到公开路由（Bearer 在 handler 内校验；API Key / `at_` 一律 `access_denied`），新增 `GET /api/auth/session`、`POST /api/auth/session/logout`；
+    `POST /api/auth/login` 追加 `Set-Cookie`（失败只记 WARN，JWT 登录不受影响），`POST /api/auth/logout` 撤销会话并清 Cookie。
+  - 会话失效：改密 / 删除用户 → `revoke_all_user_sessions`；授权缓存在用户资料更新、分配用户角色、分配角色菜单、改密、删除用户后立即失效（§6.8）。
+- [x] **40.** 传输与运维护栏：`OAUTH_TRUSTED_CIDRS` 来源白名单（fail-closed）、安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）、`GET /healthz`、过期数据定时清理
+  - 已实现：`api/src/security.rs`（CIDR 解析与匹配 IPv4/IPv6、`ip_allowed` fail-closed、`trusted_cidr_guard` 中间件、`security_headers` 中间件、`TRUST_PROXY_HEADERS` 才采信转发头；CIDR 与安全头单测 7 个）；
+    `api/src/health.rs`（`SELECT 1` + 2s 超时，正常 200 / 数据库不可达 503，附 `insecure_transport`，§8.2 补偿控制 5）；
+    `api/src/lib.rs` 启动时 `spawn_cleanup_task()`（60s 后首次，之后每 `OAUTH_CLEANUP_INTERVAL_SECS`，默认 1 小时）清理授权码 / 令牌 / 会话；`axum::serve` 改为 `into_make_service_with_connect_info` 以取得 TCP 对端地址。
+- [x] **41.** JWT 加固：签发 `iss` / `aud` 并在资源请求与续期两处校验，提供 `JWT_STRICT_ISS_AUD` 平滑迁移开关
+  - 已实现：`service/src/user_service.rs` 的 `Claims` 增加 `iss` / `aud`（历史令牌缺省 `None`）、`check_scope()`（纯函数，4 个单测）/ `check_token_scope()`；
+    `api/src/auth.rs::verify_token()` 与 `refresh_tokens()` 均校验；默认「存在即校验」，`JWT_STRICT_ISS_AUD=true` 时强制存在（迁移步骤见设计文档 §7.9）。
+
+
 
 - [ ] **35.** 清空 `JWT_SECRET` 启动 → 桌面端登录/资产列表/上传全部正常，仅 HTTP 不可用
 - [ ] **36.** 桌面端切换租户 → 数据随租户变化；再用 HTTP 以另一租户身份请求后回桌面查询 → 数据不受影响（HTTP 不再写 `GLOBAL_SCHEMA`）

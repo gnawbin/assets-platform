@@ -3,6 +3,8 @@
 //! 提供用户的 RESTful 接口。
 
 use axum::extract::Query;
+use axum::http::{header, HeaderMap, HeaderValue};
+use axum::response::{IntoResponse, Response};
 use axum::{extract::Path, Extension, Json};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -100,8 +102,9 @@ pub struct LoginResponse {
     )
 )]
 pub async fn login(
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<ApiResponse<LoginResponse>>, ApiError> {
+) -> Result<Response, ApiError> {
     // HTTP 侧不写全局 schema：`service::user_service::login` 内部会把 `GLOBAL_SCHEMA`
     // 切到该用户租户（供 Tauri 命令模式使用）。这里在调用前后保存 / 恢复，
     // 避免一次 HTTP 登录改掉同进程桌面会话的 schema（设计文档 §16 T-3）。
@@ -111,6 +114,12 @@ pub async fn login(
 
     match result {
         Ok(resp) => {
+            // 同时下发浏览器会话 Cookie（OAuth 2.1 方案 B：`/oauth/authorize` 同意页依赖它）。
+            // 会话签发失败只记 WARN，不影响 JWT 登录本身（桌面端 / Bearer 调用方无感）。
+            let cookies =
+                super::oauth_browser::issue_session_cookies(&headers, resp.id, resp.tenant_id)
+                    .await;
+
             let login_resp = LoginResponse {
                 token: resp.token.clone(),
                 refresh_token: resp.refresh_token.clone(),
@@ -120,7 +129,14 @@ pub async fn login(
                 real_name: resp.real_name.clone(),
                 is_super_admin: resp.is_super_admin,
             };
-            Ok(Json(ApiResponse::success(login_resp)))
+            let mut response = Json(ApiResponse::success(login_resp)).into_response();
+            let response_headers = response.headers_mut();
+            for cookie in cookies {
+                if let Ok(value) = HeaderValue::from_str(&cookie) {
+                    response_headers.append(header::SET_COOKIE, value);
+                }
+            }
+            Ok(response)
         }
         Err(e) => Err(ApiError::unauthorized(e)),
     }
@@ -186,12 +202,34 @@ pub async fn refresh(
     )
 )]
 pub async fn logout(
+    headers: HeaderMap,
     Json(req): Json<RefreshTokenRequest>,
-) -> Result<Json<ApiResponse<()>>, ApiError> {
+) -> Result<Response, ApiError> {
     service::user_service::revoke_refresh_token(&req.refresh_token)
         .await
         .map_err(ApiError::internal_error)?;
-    Ok(Json(ApiResponse::success(())))
+
+    // 同时撤销浏览器会话（OAuth 方案 B）并清理 Cookie，幂等
+    if let Some(raw) = super::oauth_session::read_cookie(
+        &headers,
+        super::oauth_session::SESSION_COOKIE_NAME,
+    ) {
+        if let Err(e) = service::session_service::revoke_session(&raw).await {
+            tracing::warn!("撤销浏览器会话失败: {}", e);
+        }
+    }
+
+    let mut response = Json(ApiResponse::success(())).into_response();
+    let response_headers = response.headers_mut();
+    for cookie in [
+        super::oauth_session::clear_cookie(super::oauth_session::SESSION_COOKIE_NAME),
+        super::oauth_session::clear_csrf_cookie(),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response_headers.append(header::SET_COOKIE, value);
+        }
+    }
+    Ok(response)
 }
 
 /// 获取所有用户
@@ -300,7 +338,11 @@ pub async fn update_user(
     )
     .await
     {
-        Ok(user) => Ok(Json(ApiResponse::success(user))),
+        Ok(user) => {
+            // 角色 / 权限可能随资料更新而变化：清掉授权快照，下一个请求重新回源（§6.8）
+            auth::invalidate_user_authority(id);
+            Ok(Json(ApiResponse::success(user)))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -328,7 +370,14 @@ pub async fn reset_password(
         .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
 
     match service::user_service::reset_password(id, &req.new_password).await {
-        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Ok(_) => {
+            // 改密后：授权快照失效 + 全部浏览器会话失效（已登录的浏览器需重新登录）
+            auth::invalidate_user_authority(id);
+            if let Err(e) = service::session_service::revoke_all_user_sessions(id).await {
+                tracing::warn!("改密后撤销浏览器会话失败: user_id={}, error={}", id, e);
+            }
+            Ok(Json(ApiResponse::success(())))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -362,7 +411,14 @@ pub async fn delete_user(
         Ok(current_user) => {
             let is_super_admin = current_user.is_super_admin;
             match service::user_service::delete_user(id, current_user_id, is_super_admin).await {
-                Ok(_) => Ok(Json(ApiResponse::success(()))),
+                Ok(_) => {
+                    // 删除后：授权快照 + 浏览器会话立即作废
+                    auth::invalidate_user_authority(id);
+                    if let Err(e) = service::session_service::revoke_all_user_sessions(id).await {
+                        tracing::warn!("删除用户后撤销浏览器会话失败: user_id={}, error={}", id, e);
+                    }
+                    Ok(Json(ApiResponse::success(())))
+                }
                 Err(e) => Err(ApiError::internal_error(e)),
             }
         }

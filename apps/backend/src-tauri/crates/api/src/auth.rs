@@ -34,6 +34,12 @@ pub struct Claims {
     /// 刷新令牌白名单主键（雪花 ID 字符串），仅 refresh 令牌携带
     #[serde(default)]
     pub jti: Option<String>,
+    /// 签发方（Phase 3；历史令牌没有该字段）
+    #[serde(default)]
+    pub iss: Option<String>,
+    /// 受众（Phase 3；历史令牌没有该字段）
+    #[serde(default)]
+    pub aud: Option<String>,
 }
 
 /// 用户上下文（注入到每个请求的 Extension 中）
@@ -208,6 +214,14 @@ pub fn verify_token(token: &str) -> Result<Claims, ApiError> {
         return Err(ApiError::unauthorized(
             "请使用访问令牌（access token），刷新令牌仅可用于 /api/auth/refresh",
         ));
+    }
+
+    // Phase 3：iss / aud 校验（存在即校验；JWT_STRICT_ISS_AUD=true 时强制存在）
+    if let Err(e) =
+        service::user_service::check_token_scope(claims.iss.as_deref(), claims.aud.as_deref())
+    {
+        tracing::warn!("JWT scope 校验失败: sub={}, error={}", claims.sub, e);
+        return Err(ApiError::unauthorized(e));
     }
 
     Ok(claims)

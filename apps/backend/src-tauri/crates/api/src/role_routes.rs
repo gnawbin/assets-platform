@@ -196,7 +196,11 @@ pub async fn assign_user_roles(
         .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
 
     match service::role_service::assign_user_roles(user_id, req.role_ids).await {
-        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Ok(_) => {
+            // 用户权限并集变了：立即清掉其授权快照，避免 60s 内仍按旧权限放行（§6.8）
+            auth::invalidate_user_authority(user_id);
+            Ok(Json(ApiResponse::success(())))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -260,7 +264,11 @@ pub async fn assign_role_menus(
         .map_err(|_| ApiError::bad_request("无效的角色ID"))?;
 
     match service::role_service::assign_role_menus(role_id, req.menu_ids).await {
-        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Ok(_) => {
+            // 该角色下的所有用户权限都会变化：整表清空授权快照（低频管理操作）
+            auth::clear_user_authority_cache();
+            Ok(Json(ApiResponse::success(())))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }

@@ -25,6 +25,90 @@ pub struct Claims {
     /// 刷新令牌白名单主键（雪花 ID 字符串），仅 refresh 令牌携带
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jti: Option<String>,
+    /// 签发方（Phase 3 新增；历史令牌没有该字段，`None` 表示旧令牌）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
+    /// 受众（Phase 3 新增；同上）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
+}
+
+/// 默认签发方（可用 `JWT_ISSUER` 覆盖）
+pub const DEFAULT_JWT_ISSUER: &str = "assets-platform";
+/// 默认受众（可用 `JWT_AUDIENCE` 覆盖）
+pub const DEFAULT_JWT_AUDIENCE: &str = "assets-platform-api";
+
+/// 当前生效的签发方
+pub fn jwt_issuer() -> String {
+    std::env::var("JWT_ISSUER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JWT_ISSUER.to_string())
+}
+
+/// 当前生效的受众
+pub fn jwt_audience() -> String {
+    std::env::var("JWT_AUDIENCE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JWT_AUDIENCE.to_string())
+}
+
+/// 是否强制要求 `iss` / `aud` 声明（`JWT_STRICT_ISS_AUD=true`）
+///
+/// 缺省 `false`：**存在即校验**，缺失则按历史令牌放过 —— 这样升级瞬间不会把
+/// 所有 7 天有效期内的旧令牌踢下线。等旧令牌自然过期后把该开关置为 true 即可
+/// 完成严格化（设计文档 §7.9 迁移步骤）。
+fn strict_iss_aud() -> bool {
+    matches!(
+        std::env::var("JWT_STRICT_ISS_AUD")
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+    )
+}
+
+/// 纯函数版 `iss` / `aud` 校验（便于单测）
+///
+/// - 声明存在但与期望值不符 → `Err`
+/// - 声明缺失且 `strict` → `Err`；非严格模式放过（兼容历史令牌）
+pub fn check_scope(
+    issuer: Option<&str>,
+    audience: Option<&str>,
+    expected_iss: &str,
+    expected_aud: &str,
+    strict: bool,
+) -> Result<(), String> {
+    match issuer {
+        Some(value) if value != expected_iss => {
+            return Err("令牌签发方（iss）不匹配，请重新登录".to_string())
+        }
+        None if strict => return Err("令牌缺少 iss 声明，请重新登录".to_string()),
+        _ => {}
+    }
+    match audience {
+        Some(value) if value != expected_aud => {
+            return Err("令牌受众（aud）不匹配，请重新登录".to_string())
+        }
+        None if strict => return Err("令牌缺少 aud 声明，请重新登录".to_string()),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// 按当前环境配置校验令牌的 `iss` / `aud`
+pub fn check_token_scope(issuer: Option<&str>, audience: Option<&str>) -> Result<(), String> {
+    let expected_iss = jwt_issuer();
+    let expected_aud = jwt_audience();
+    check_scope(
+        issuer,
+        audience,
+        &expected_iss,
+        &expected_aud,
+        strict_iss_aud(),
+    )
 }
 
 /// 登录响应（包含 JWT Token）
@@ -122,6 +206,8 @@ async fn issue_token_pair(
         iat: now,
         typ: Some("access".to_string()),
         jti: None,
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let token = sign_claims(&access_claims)?;
 
@@ -133,6 +219,8 @@ async fn issue_token_pair(
         iat: now,
         typ: Some("refresh".to_string()),
         jti: Some(jti.to_string()),
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let refresh_token = sign_claims(&refresh_claims)?;
 
@@ -179,6 +267,12 @@ pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
     if claims.typ.as_deref() != Some("refresh") {
         warn!("拒绝使用非 refresh 令牌续期: sub={}", claims.sub);
         return Err("请使用刷新令牌（refresh token）".to_string());
+    }
+
+    // Phase 3：iss / aud 校验（存在即校验；JWT_STRICT_ISS_AUD=true 时强制存在）
+    if let Err(e) = check_token_scope(claims.iss.as_deref(), claims.aud.as_deref()) {
+        warn!("刷新令牌 scope 校验失败: sub={}, error={}", claims.sub, e);
+        return Err(e);
     }
 
     let jti: i64 = claims
@@ -301,6 +395,8 @@ pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
         iat: now,
         typ: Some("access".to_string()),
         jti: None,
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let token = sign_claims(&access_claims)?;
 
@@ -312,6 +408,8 @@ pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
         iat: now,
         typ: Some("refresh".to_string()),
         jti: Some(new_jti.to_string()),
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let new_refresh_token = sign_claims(&refresh_claims)?;
 
@@ -1061,3 +1159,95 @@ pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
     info!("重置用户密码成功: id={}", id);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== Phase 3：JWT iss / aud 校验 =====
+
+    #[test]
+    fn scope_accepts_matching_issuer_and_audience() {
+        assert!(check_scope(
+            Some(DEFAULT_JWT_ISSUER),
+            Some(DEFAULT_JWT_AUDIENCE),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn scope_rejects_mismatched_issuer_or_audience() {
+        let err = check_scope(
+            Some("other-issuer"),
+            Some(DEFAULT_JWT_AUDIENCE),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            false,
+        )
+        .expect_err("iss 不匹配必须拒绝");
+        assert!(err.contains("iss"));
+
+        let err = check_scope(
+            Some(DEFAULT_JWT_ISSUER),
+            Some("other-audience"),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            false,
+        )
+        .expect_err("aud 不匹配必须拒绝");
+        assert!(err.contains("aud"));
+    }
+
+    #[test]
+    fn scope_allows_legacy_tokens_unless_strict() {
+        // 历史令牌（无 iss / aud）：非严格模式放行，严格模式拒绝
+        assert!(check_scope(
+            None,
+            None,
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            false
+        )
+        .is_ok());
+        assert!(check_scope(
+            None,
+            None,
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_err());
+        // 只缺一个也按同样规则处理
+        assert!(check_scope(
+            Some(DEFAULT_JWT_ISSUER),
+            None,
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_err());
+        assert!(check_scope(
+            None,
+            Some(DEFAULT_JWT_AUDIENCE),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn jwt_issuer_and_audience_have_stable_defaults() {
+        // 未配置环境变量时使用内置默认值（测试进程默认无 JWT_ISSUER / JWT_AUDIENCE）
+        if std::env::var("JWT_ISSUER").is_err() {
+            assert_eq!(jwt_issuer(), DEFAULT_JWT_ISSUER);
+        }
+        if std::env::var("JWT_AUDIENCE").is_err() {
+            assert_eq!(jwt_audience(), DEFAULT_JWT_AUDIENCE);
+        }
+    }
+}
+

@@ -691,6 +691,37 @@ CREATE INDEX IF NOT EXISTS idx_sys_oauth_token_family ON public.sys_oauth_token 
 
 CREATE INDEX IF NOT EXISTS idx_sys_oauth_token_user ON public.sys_oauth_token (user_id, revoked_at);
 
+-- 浏览器会话（方案 B，设计文档 §7.3 / §9.2）：
+--   `/oauth/authorize` 的浏览器重定向流程需要「已登录的用户会话」，
+--   这里只增加一张表（§16 T-5 加法式 DDL），会话令牌只存 SHA-256。
+CREATE TABLE IF NOT EXISTS public.sys_user_session (
+    id BIGINT PRIMARY KEY,
+    session_hash CHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    csrf_hash CHAR(64) NOT NULL,
+    ip INET,
+    user_agent VARCHAR(512),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE public.sys_user_session IS '浏览器会话（OAuth 方案 B：httpOnly Cookie 的 authorize 流程，只存哈希）';
+
+COMMENT ON COLUMN public.sys_user_session.session_hash IS '会话令牌的 SHA-256 十六进制（Cookie 里的明文不落库）';
+
+COMMENT ON COLUMN public.sys_user_session.csrf_hash IS '同意页 CSRF 令牌的 SHA-256（双提交 Cookie 校验）';
+
+COMMENT ON COLUMN public.sys_user_session.revoked_at IS '撤销时间（登出 / 改密 / 封禁，非空即失效）';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_user_session_hash ON public.sys_user_session (session_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_user_session_user ON public.sys_user_session (user_id, revoked_at);
+
+CREATE INDEX IF NOT EXISTS idx_sys_user_session_expires ON public.sys_user_session (expires_at);
+
 -- 客户端管理权限点补登路由（与 ROUTE_PERMS 保持一致，DB 优先）
 UPDATE public.sys_menu SET http_method = 'GET', http_path = '/api/oauth-clients' WHERE id = 205 AND http_path IS NULL;
 

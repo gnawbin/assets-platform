@@ -10,14 +10,18 @@ pub mod authz;
 pub mod category_routes;
 pub mod chat_routes;
 pub mod department_routes;
+pub mod health;
 pub mod knowledge_routes;
+pub mod oauth_browser;
 pub mod oauth_error;
 pub mod oauth_routes;
+pub mod oauth_session;
 pub mod ops_routes;
 pub mod process_routes;
 pub mod register_routes;
 pub mod response;
 pub mod role_routes;
+pub mod security;
 pub mod skill_routes;
 pub mod tenant_routes;
 pub mod upload_routes;
@@ -109,6 +113,10 @@ pub async fn start_http_server_with(
     // OAuth 2.1 传输护栏（§8.2）：启用 AS 且 issuer 为 http 时打印 WARN 横幅
     oauth_routes::warn_if_insecure_transport();
 
+    // ===== 后台清理任务（§7.7）：过期授权码 / 刷新令牌 / 浏览器会话 =====
+    // 每小时跑一次，失败只记日志（不 panic、不影响服务）。
+    spawn_cleanup_task();
+
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
@@ -196,7 +204,11 @@ pub async fn start_http_server_with(
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
     }
-    let app = app.layer(cors).layer(TraceLayer::new_for_http());
+    let app = app
+        .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        // 安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）挂最外层
+        .layer(middleware::from_fn(security::security_headers));
 
     info!("HTTP API 服务启动于 http://{}", addr);
     if has_extra_routes {
@@ -207,10 +219,15 @@ pub async fn start_http_server_with(
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| anyhow::anyhow!("绑定 TCP 监听地址 {} 失败: {}", addr, e))?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
+    // `into_make_service_with_connect_info`：让 handler / 中间件能取到 TCP 对端地址，
+    // `OAUTH_TRUSTED_CIDRS` 白名单在未配置 `TRUST_PROXY_HEADERS` 时依赖它。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
 
     Ok(())
 }
@@ -221,6 +238,7 @@ fn create_router(pool: sqlx::PgPool) -> Router {
 
     // 公开路由（无需认证）
     let public_routes = Router::new()
+        .route("/healthz", get(health::healthz))
         .route("/api/auth/login", post(user_routes::login))
         .route("/api/auth/register", post(register_routes::register))
         // 刷新 / 登出：访问令牌可能已过期，必须公开（靠 refresh token 自身校验）
@@ -230,13 +248,18 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     // 公开路由 + OAuth 客户端端点（缺省不挂载，§16 T-7 缺省即安全）
     let public_routes = if oauth_routes::is_enabled() {
         info!(
-            "OAuth 2.1 端点已启用：/oauth/token、/oauth/introspect、/oauth/revoke、\
+            "OAuth 2.1 端点已启用：/oauth/authorize（方案 A JSON / 方案 B 浏览器）、/oauth/token、\
+             /oauth/introspect、/oauth/revoke、/api/auth/session、\
              /.well-known/oauth-authorization-server"
         );
-        public_routes.merge(oauth_routes::public_oauth_routes())
+        public_routes
+            .merge(oauth_routes::public_oauth_routes())
+            // 授权端点必须公开：方案 B 靠会话 Cookie，方案 A 在 handler 内部自行校验 Bearer
+            .merge(oauth_browser::browser_routes())
     } else {
         public_routes
     };
+
 
     // 需要认证的路由
     let protected_routes = Router::new()
@@ -485,18 +508,12 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             put(oauth_routes::update_oauth_client).delete(oauth_routes::delete_oauth_client),
         );
 
-    // OAuth 2.1 授权端点（方案 A：Bearer JWT + 同意页）
-    // 缺省不挂载（§16 T-7：OAUTH_* 未配置 = 端点不存在）
-    let protected_routes = if oauth_routes::is_enabled() {
-        protected_routes.route(
-            "/oauth/authorize",
-            get(oauth_routes::authorize_consent).post(oauth_routes::authorize_decision),
-        )
-    } else {
-        protected_routes
-    };
+    // OAuth 2.1 授权端点（`/oauth/authorize`）已移到公开路由：
+    // 方案 B（浏览器）靠会话 Cookie，方案 A（内部应用）在 handler 内自行校验 Bearer，
+    // 两种调用方共享同一 URL，因此不能再挂在 `auth_middleware` 之后。
 
     // L2 功能权限判定（内层：先认证再鉴权；`.layer` 后加的在外层）
+
     let protected_routes = protected_routes
         .layer(middleware::from_fn(authz::authz_middleware))
         .layer(middleware::from_fn(auth_middleware));
@@ -518,6 +535,47 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .merge(protected_routes)
         .merge(skill_routes)
         .with_state(state)
+}
+
+/// 过期数据清理间隔（秒）：默认 1 小时，可用 `OAUTH_CLEANUP_INTERVAL_SECS` 覆盖
+const CLEANUP_INTERVAL_DEFAULT_SECS: u64 = 3600;
+
+/// 读取清理间隔（0 / 非法值回落默认）
+fn cleanup_interval_secs() -> u64 {
+    std::env::var("OAUTH_CLEANUP_INTERVAL_SECS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(CLEANUP_INTERVAL_DEFAULT_SECS)
+}
+
+/// 启动后台清理任务（设计文档 §7.7：过期授权码 / 刷新令牌 / 会话）
+///
+/// 只在 HTTP 服务进程内运行（Tauri 桌面端不重复执行，避免双进程争抢）。
+/// 首次执行延迟 60s，之后每 `OAUTH_CLEANUP_INTERVAL_SECS` 秒一次；
+/// 任何一步失败都只记 WARN，不影响服务可用性。
+fn spawn_cleanup_task() {
+    let interval = cleanup_interval_secs();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        loop {
+            match service::oauth_service::cleanup_expired_grants().await {
+                Ok((codes, tokens)) => {
+                    info!("OAuth 过期数据清理完成: 授权码 {} 条, 令牌 {} 条", codes, tokens);
+                }
+                Err(e) => tracing::warn!("OAuth 过期数据清理失败: {}", e),
+            }
+            match service::session_service::cleanup_expired_sessions().await {
+                Ok(removed) => {
+                    if removed > 0 {
+                        info!("浏览器会话清理完成: {} 条", removed);
+                    }
+                }
+                Err(e) => tracing::warn!("浏览器会话清理失败: {}", e),
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        }
+    });
 }
 
 /// 优雅关闭信号处理

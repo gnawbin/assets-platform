@@ -35,6 +35,12 @@ pub const CLIENT_ID_PREFIX: &str = "oc";
 /// 客户端密钥前缀（与授权码区分，便于日志定位）
 pub const CLIENT_SECRET_PREFIX: &str = "ocs";
 
+/// 浏览器会话令牌前缀（方案 B：httpOnly Cookie，设计文档 §7.3）
+pub const SESSION_TOKEN_PREFIX: &str = "ss";
+
+/// CSRF 令牌前缀（双提交 Cookie，方案 B 的同意页表单）
+pub const CSRF_TOKEN_PREFIX: &str = "cs";
+
 /// 令牌段随机字节数（256 bit 熵）
 pub const TOKEN_BYTES: usize = 32;
 
@@ -113,6 +119,27 @@ pub fn is_access_token(token: &str) -> bool {
 /// 刷新令牌**只能**用于 `/oauth/token`，出现在资源请求里一律拒绝（§13.2 #3）。
 pub fn is_refresh_token(token: &str) -> bool {
     token.starts_with("rt_")
+}
+
+/// 生成浏览器会话令牌（`ss_<43>`，只存 SHA-256）
+///
+/// 方案 B：登录成功时写入 httpOnly Cookie，`/oauth/authorize` 据此识别
+/// 「已在浏览器里登录的终端用户」（设计文档 §7.3 方案 B）。
+pub fn generate_session_token() -> GeneratedSecret {
+    GeneratedSecret::from_plaintext(format!("{}_{}", SESSION_TOKEN_PREFIX, random_segment()))
+}
+
+/// 生成 CSRF 令牌（`cs_<43>`）
+///
+/// 双提交 Cookie：一份放非 httpOnly Cookie，一份放同意页表单隐藏域，
+/// 服务端比较两者是否一致（常数时间），防止第三方站点伪造同意请求。
+pub fn generate_csrf_token() -> String {
+    format!("{}_{}", CSRF_TOKEN_PREFIX, random_segment())
+}
+
+/// 判断是否为会话令牌（防御性校验：会话令牌不得出现在 `Authorization` 头里）
+pub fn is_session_token(token: &str) -> bool {
+    token.starts_with("ss_")
 }
 
 /// 常数时间字符串比较（长度不同直接返回 false）
@@ -241,6 +268,35 @@ mod tests {
         assert!(!constant_time_eq("abc", "abd"));
         assert!(!constant_time_eq("abc", "ab"));
         assert!(constant_time_eq("", ""));
+    }
+
+    // ===== 方案 B：会话 / CSRF 令牌（设计文档 §7.3）=====
+
+    #[test]
+    fn session_token_format_and_hash() {
+        let secret = generate_session_token();
+        // `ss_` + 43 字符 base64url
+        assert!(secret.plaintext.starts_with("ss_"));
+        assert_eq!(secret.plaintext.len(), 3 + 43);
+        assert_eq!(secret.hash.len(), 64);
+        assert_eq!(secret.hash, hash_secret(&secret.plaintext));
+        assert!(is_session_token(&secret.plaintext));
+        // 与其它前缀互不冲突
+        assert!(!is_access_token(&secret.plaintext));
+        assert!(!is_refresh_token(&secret.plaintext));
+        assert!(!secret.plaintext.starts_with("cs_"));
+
+        // 两次生成必须不同（256 bit 熵）
+        assert_ne!(generate_session_token().plaintext, secret.plaintext);
+    }
+
+    #[test]
+    fn csrf_token_format() {
+        let csrf = generate_csrf_token();
+        assert!(csrf.starts_with("cs_"));
+        assert_eq!(csrf.len(), 3 + 43);
+        assert_ne!(generate_csrf_token(), csrf);
+        assert!(!is_session_token(&csrf));
     }
 }
 

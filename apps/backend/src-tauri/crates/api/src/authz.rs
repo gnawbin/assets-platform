@@ -110,9 +110,6 @@ pub const SERVICE_FORBIDDEN_ROUTES: &[(&str, &str)] = &[
 pub const AUTH_ONLY_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/users/me"),
     ("GET", "/api/menus/user"),
-    // OAuth 2.1 方案 A（§7.3）：授权端点需要用户登录态，但没有对应权限点
-    ("GET", "/oauth/authorize"),
-    ("POST", "/oauth/authorize"),
 ];
 
 /// 完全公开（不经过认证中间件）的路由，仅用于自检对账
@@ -121,6 +118,14 @@ pub const PUBLIC_ROUTES_DECL: &[(&str, &str)] = &[
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/refresh"),
     ("POST", "/api/auth/logout"),
+    // 存活探测（无认证、无敏感信息）
+    ("GET", "/healthz"),
+    // OAuth 2.1 授权端点：方案 A 在 handler 内校验 Bearer，方案 B 靠会话 Cookie（§7.8）
+    ("GET", "/oauth/authorize"),
+    ("POST", "/oauth/authorize"),
+    // 浏览器会话查询 / 登出（只读 Cookie）
+    ("GET", "/api/auth/session"),
+    ("POST", "/api/auth/session/logout"),
 ];
 
 /// 代码侧兜底映射：`(HTTP 方法, 路由模板, 权限点)`
@@ -961,10 +966,18 @@ mod tests {
 
     #[test]
     fn oauth_routes_are_registered() {
-        // 授权端点只要求登录（方案 A），不登记权限点
-        assert!(is_auth_only_route("GET", "/oauth/authorize"));
-        assert!(is_auth_only_route("POST", "/oauth/authorize"));
+        // 授权端点是**完全公开**路由（方案 A 在 handler 内校验 Bearer，方案 B 靠会话 Cookie），
+        // 既不登记权限点，也不算「仅需登录」路由（§7.8）
+        assert!(!is_auth_only_route("GET", "/oauth/authorize"));
+        assert!(!is_auth_only_route("POST", "/oauth/authorize"));
+        assert!(PUBLIC_ROUTES_DECL.contains(&("GET", "/oauth/authorize")));
+        assert!(PUBLIC_ROUTES_DECL.contains(&("POST", "/oauth/authorize")));
         assert_eq!(static_perms_for("GET", "/oauth/authorize"), None);
+        // 浏览器会话端点同样公开
+        assert!(PUBLIC_ROUTES_DECL.contains(&("GET", "/api/auth/session")));
+        assert!(PUBLIC_ROUTES_DECL.contains(&("POST", "/api/auth/session/logout")));
+        // 健康检查公开
+        assert!(PUBLIC_ROUTES_DECL.contains(&("GET", "/healthz")));
 
         // 客户端管理接口必须有权限点，且落在 system: 前缀（API Key / OAuth 令牌不可调用）
         assert_eq!(
