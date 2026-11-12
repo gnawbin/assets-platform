@@ -109,6 +109,11 @@ impl ApiError {
         Self::new(404, message)
     }
 
+    /// 409 状态冲突（如沙箱状态已变化）
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(409, message)
+    }
+
     /// 429 请求过于频繁
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self::new(429, message)
@@ -117,6 +122,11 @@ impl ApiError {
     /// 500 服务器错误
     pub fn internal_error(message: impl Into<String>) -> Self {
         Self::new(500, message)
+    }
+
+    /// 503 依赖服务不可用（如沙箱未启用 / CubeAPI 不可达）
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self::new(503, message)
     }
 }
 
@@ -127,7 +137,9 @@ impl IntoResponse for ApiError {
             401 => StatusCode::UNAUTHORIZED,
             403 => StatusCode::FORBIDDEN,
             404 => StatusCode::NOT_FOUND,
+            409 => StatusCode::CONFLICT,
             429 => StatusCode::TOO_MANY_REQUESTS,
+            503 => StatusCode::SERVICE_UNAVAILABLE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
 

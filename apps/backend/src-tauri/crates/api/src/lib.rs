@@ -21,6 +21,7 @@ pub mod process_routes;
 pub mod register_routes;
 pub mod response;
 pub mod role_routes;
+pub mod sandbox_routes;
 pub mod security;
 pub mod skill_routes;
 pub mod tenant_routes;
@@ -116,6 +117,9 @@ pub async fn start_http_server_with(
     // ===== 后台清理任务（§7.7）：过期授权码 / 刷新令牌 / 浏览器会话 =====
     // 每小时跑一次，失败只记日志（不 panic、不影响服务）。
     spawn_cleanup_task();
+
+    // ===== 沙箱空闲回收（设计文档 §6.2）：未启用时内部直接返回 =====
+    service::sandbox_service::spawn_idle_reaper();
 
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
@@ -506,6 +510,40 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route(
             "/api/oauth-clients/{id}",
             put(oauth_routes::update_oauth_client).delete(oauth_routes::delete_oauth_client),
+        )
+        // AI Agent 沙箱（CubeSandbox；SANDBOX_ENABLED=false 时统一返回 503）
+        .route("/api/sandbox/health", get(sandbox_routes::health))
+        .route(
+            "/api/sandbox/sessions",
+            post(sandbox_routes::create_session),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}",
+            get(sandbox_routes::get_session).delete(sandbox_routes::delete_session),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/exec",
+            post(sandbox_routes::exec_code),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/command",
+            post(sandbox_routes::run_command),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/files",
+            post(sandbox_routes::upload_file).get(sandbox_routes::download_file),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/files/list",
+            get(sandbox_routes::list_files),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/pause",
+            post(sandbox_routes::pause),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/resume",
+            post(sandbox_routes::resume),
         );
 
     // OAuth 2.1 授权端点（`/oauth/authorize`）已移到公开路由：

@@ -9,6 +9,9 @@ version = "0.1.0"
 database.workspace = true
 storage.workspace = true
 utils.workspace = true
+# AI Agent 沙箱：契约 + CubeSandbox 实现（控制面 CubeAPI / 数据面 CubeProxy）
+sandbox.workspace = true
+sandbox-cube.workspace = true
 # LLM 协议适配：契约 + 两套协议实现（OpenAI Chat Completions / Anthropic Messages）
 llm.workspace = true
 llm-anthropic.workspace = true

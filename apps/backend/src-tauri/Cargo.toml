@@ -50,6 +50,10 @@ service = {path = "crates/service"}
 # 轻量级信任/知识图谱内核：纯内存、零 IO；service 负责从 knowledge_relation 构建图后传入
 trustgraph-lite = {path = "crates/trustgraph-lite"}
 storage = {path = "crates/storage"}
+# AI Agent 沙箱：crates/sandbox 只放 trait 与数据类型（零 HTTP），
+# CubeAPI / CubeProxy 的实现在 crates/sandbox-cube（独持 reqwest）
+sandbox = {path = "crates/sandbox"}
+sandbox-cube = {path = "crates/sandbox-cube"}
 utils = {path = "crates/utils"}
 # 向量数据存储：crates/vector 只放 trait 与数据类型，三个实现各自持有驱动、互不依赖
 vector = {path = "crates/vector"}
@@ -82,8 +86,11 @@ utoipa = {version = "6.0.0", features = ["axum_extras", "chrono", "decimal"]}
 # 离线构建时改成 features = ["axum", "vendored"]。
 utoipa-swagger-ui = {version = "10.0.2", features = ["axum"]}
 # stream：SSE 流式对话需要 Response::bytes_stream()（llm-openai / llm-anthropic 共用）
+# query：cube sandbox 的 /sandboxes?metadata=..&state=..&limit=.. 等查询参数需要
+#        RequestBuilder::query（reqwest 0.13 起该方法在 "query" feature 之后）
 reqwest = {version = "0.13.5", default-features = false, features = [
   "json",
+  "query",
   "rustls",
   "stream",
 ]}
@@ -372,6 +379,8 @@ engine.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
+# 沙箱命令层的返回类型（SandboxHandle / ExecResult / FileEntry / HealthInfo）
+sandbox.workspace = true
 service.workspace = true
 storage.workspace = true
 utils.workspace = true

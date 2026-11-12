@@ -1,0 +1,24 @@
+[package]
+edition = "2024"
+name = "sandbox"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# 契约 crate：只放类型、错误与 trait，刻意「零 HTTP / 零 IO 驱动」。
+# CubeSandbox 的具体实现（reqwest + CubeAPI/CubeProxy）在 crates/sandbox-cube，
+# 未来接 E2B / 本地 Docker 只需再新增一个实现 crate，本 crate 不动。
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+async-trait.workspace = true
+# 契约类型derive Serialize/Deserialize：api / Tauri 命令层可直接序列化，
+# 不必为每个字段再写一层 DTO
+serde.workspace = true
+# ToSchema：`crates/api` 直接把契约类型作为 OpenAPI 响应体（与 database::models 一致）
+utoipa.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+# `DisabledRuntime` 的契约测试需要 async 运行时
+tokio.workspace = true

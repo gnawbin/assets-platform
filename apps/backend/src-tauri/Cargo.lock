@@ -400,6 +400,7 @@ dependencies = [
  "engine",
  "futures",
  "jsonwebtoken",
+ "sandbox",
  "serde",
  "serde_json",
  "service",
@@ -762,6 +763,7 @@ dependencies = [
  "parking_lot 0.13.0",
  "pdf_oxide",
  "rayon",
+ "sandbox",
  "serde",
  "serde_json",
  "service",
@@ -3939,6 +3941,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "sandbox",
  "serde",
  "serde_json",
  "tokio",
@@ -9794,6 +9797,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls 0.26.4",
@@ -10133,6 +10137,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "utoipa",
+]
+
+[[package]]
+name = "sandbox-cube"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reqwest 0.13.5",
+ "sandbox",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -10553,6 +10581,8 @@ dependencies = [
  "parser",
  "rand 0.10.3",
  "reqwest 0.13.5",
+ "sandbox",
+ "sandbox-cube",
  "serde",
  "serde_json",
  "sqlx",
@@ -14319,6 +14349,7 @@ dependencies = [
  "chrono",
  "database",
  "engine-core",
+ "sandbox",
  "serde",
  "serde_json",
  "service",

@@ -41,6 +41,7 @@ graph TB
 | 多LLM厂商兼容设计 | [多LLM厂商兼容设计方案.md](./多LLM厂商兼容设计方案.md) | 适配器模式、密钥安全、负载均衡、用量统计 |
 | LLM协议适配crate设计 | [LLM协议适配crate设计方案.md](./LLM协议适配crate设计方案.md) | 双协议拆分：llm 契约 + llm-openai + llm-anthropic、真流式、工具调用 |
 | trustgraph-lite 信任图谱内核 | [trustgraph-lite轻量级信任图谱内核设计方案.md](./trustgraph-lite轻量级信任图谱内核设计方案.md) | 纯内存图内核、信任传播、快照导出，与 knowledge_relation 的边界 |
+| CubeSandbox 沙箱 crate 整合 | [CubeSandbox沙箱crate整合设计方案.md](./CubeSandbox沙箱crate整合设计方案.md) | 控制面 CubeAPI / 数据面 CubeProxy 拆解、沙箱生命周期与执行链路、会话亲和与降级策略 |
 | RAG多轮问答设计 | [智能问答系统（RAG多轮对话）设计方案.md](./智能问答系统（RAG多轮对话）设计方案.md) | RAG检索、会话管理、溯源引用、前端交互 |
 | 多模态问答设计 | [智能问答多模态（文件与视频上传）设计方案.md](./智能问答多模态（文件与视频上传）设计方案.md) | 聊天页文件/视频上传、视觉 LLM 理解、doc-parser 解析接入 |
 

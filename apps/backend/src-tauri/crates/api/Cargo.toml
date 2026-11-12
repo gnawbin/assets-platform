@@ -18,6 +18,8 @@ jsonwebtoken.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 service.workspace = true
+# 沙箱路由的响应类型（SandboxHandle / ExecResult / FileEntry / HealthInfo）
+sandbox.workspace = true
 sqlx.workspace = true
 storage.workspace = true
 tokio.workspace = true

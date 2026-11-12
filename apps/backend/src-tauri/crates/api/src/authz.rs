@@ -103,6 +103,17 @@ pub const SERVICE_FORBIDDEN_ROUTES: &[(&str, &str)] = &[
     ("PUT", "/api/assets/hardware/{id}"),
     ("POST", "/api/assets/intangible"),
     ("PUT", "/api/assets/intangible/{id}"),
+    // 沙箱：全部 handler 都取 `UserContext`（租户 schema + user_id）作为会话键
+    ("POST", "/api/sandbox/sessions"),
+    ("GET", "/api/sandbox/sessions/{scope}"),
+    ("DELETE", "/api/sandbox/sessions/{scope}"),
+    ("POST", "/api/sandbox/sessions/{scope}/exec"),
+    ("POST", "/api/sandbox/sessions/{scope}/command"),
+    ("POST", "/api/sandbox/sessions/{scope}/files"),
+    ("GET", "/api/sandbox/sessions/{scope}/files"),
+    ("GET", "/api/sandbox/sessions/{scope}/files/list"),
+    ("POST", "/api/sandbox/sessions/{scope}/pause"),
+    ("POST", "/api/sandbox/sessions/{scope}/resume"),
 ];
 
 
@@ -297,6 +308,18 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ("POST", "/api/oauth-clients", "system:oauthclient:add"),
     ("PUT", "/api/oauth-clients/{id}", "system:oauthclient:edit"),
     ("DELETE", "/api/oauth-clients/{id}", "system:oauthclient:delete"),
+    // ===== AI Agent 沙箱（CubeSandbox）=====
+    ("GET", "/api/sandbox/health", "sandbox:health:read"),
+    ("POST", "/api/sandbox/sessions", "sandbox:session:create"),
+    ("GET", "/api/sandbox/sessions/{scope}", "sandbox:session:list"),
+    ("DELETE", "/api/sandbox/sessions/{scope}", "sandbox:session:delete"),
+    ("POST", "/api/sandbox/sessions/{scope}/exec", "sandbox:exec"),
+    ("POST", "/api/sandbox/sessions/{scope}/command", "sandbox:exec"),
+    ("POST", "/api/sandbox/sessions/{scope}/files", "sandbox:file:write"),
+    ("GET", "/api/sandbox/sessions/{scope}/files", "sandbox:file:read"),
+    ("GET", "/api/sandbox/sessions/{scope}/files/list", "sandbox:file:read"),
+    ("POST", "/api/sandbox/sessions/{scope}/pause", "sandbox:session:update"),
+    ("POST", "/api/sandbox/sessions/{scope}/resume", "sandbox:session:update"),
 ];
 
 /// 路由 → 权限点缓存：`(METHOD, 路由模板)` → (写入时刻, 权限点集合)

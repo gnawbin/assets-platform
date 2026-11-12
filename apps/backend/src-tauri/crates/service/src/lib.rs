@@ -16,6 +16,7 @@ pub mod process_service;
 pub mod rag_service;
 pub mod register_service;
 pub mod role_service;
+pub mod sandbox_service;
 pub mod session_service;
 pub mod tenant_service;
 pub mod user_service;

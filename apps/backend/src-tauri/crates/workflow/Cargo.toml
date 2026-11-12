@@ -11,6 +11,8 @@ bpmn-parser.workspace = true
 chrono.workspace = true
 database.workspace = true
 engine-core.workspace = true
+# 沙箱执行节点：只依赖契约，由调用方注入 Arc<dyn SandboxRuntime>
+sandbox.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 service.workspace = true

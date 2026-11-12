@@ -736,3 +736,48 @@ INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, or
 SELECT 49, 'OAuth 客户端', 5, '/settings/oauth-clients', '/settings/oauth-clients/page', 'IconApps', 10, true, 'system:oauthclient:list', 2, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
 WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 49);
 
+-- ===== AI Agent 沙箱（CubeSandbox）：权限点，路由见 crates/api/src/sandbox_routes.rs =====
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 280, '沙箱健康检查', 5, NULL, NULL, NULL, 20, true, 'sandbox:health:read', 3, true, NULL, 'GET', '/api/sandbox/health', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 280);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 281, '创建沙箱会话', 5, NULL, NULL, NULL, 21, true, 'sandbox:session:create', 3, true, NULL, 'POST', '/api/sandbox/sessions', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 281);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 282, '查询沙箱会话', 5, NULL, NULL, NULL, 22, true, 'sandbox:session:list', 3, true, NULL, 'GET', '/api/sandbox/sessions/{scope}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 282);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 283, '释放沙箱会话', 5, NULL, NULL, NULL, 23, true, 'sandbox:session:delete', 3, true, NULL, 'DELETE', '/api/sandbox/sessions/{scope}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 283);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 284, '沙箱执行代码', 5, NULL, NULL, NULL, 24, true, 'sandbox:exec', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/exec', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 284);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 285, '沙箱执行命令', 5, NULL, NULL, NULL, 25, true, 'sandbox:exec', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/command', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 285);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 286, '沙箱写文件', 5, NULL, NULL, NULL, 26, true, 'sandbox:file:write', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/files', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 286);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 287, '沙箱读文件', 5, NULL, NULL, NULL, 27, true, 'sandbox:file:read', 3, true, NULL, 'GET', '/api/sandbox/sessions/{scope}/files', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 287);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 288, '沙箱列目录', 5, NULL, NULL, NULL, 28, true, 'sandbox:file:read', 3, true, NULL, 'GET', '/api/sandbox/sessions/{scope}/files/list', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 288);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 289, '暂停沙箱会话', 5, NULL, NULL, NULL, 29, true, 'sandbox:session:update', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/pause', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 289);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 290, '恢复沙箱会话', 5, NULL, NULL, NULL, 30, true, 'sandbox:session:update', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/resume', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 290);
+

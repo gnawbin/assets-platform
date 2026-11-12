@@ -243,6 +243,17 @@ pub fn run() {
             commands::ops_commands::collect_ops_resources,
             commands::ops_commands::get_ops_links,
             commands::ops_commands::bind_ops_link,
+            // AI Agent 沙箱（CubeSandbox；SANDBOX_ENABLED=false 时统一返回错误）
+            commands::sandbox_commands::sandbox_health,
+            commands::sandbox_commands::sandbox_session,
+            commands::sandbox_commands::sandbox_exec_code,
+            commands::sandbox_commands::sandbox_run_command,
+            commands::sandbox_commands::sandbox_upload_file,
+            commands::sandbox_commands::sandbox_read_file,
+            commands::sandbox_commands::sandbox_list_files,
+            commands::sandbox_commands::sandbox_pause_session,
+            commands::sandbox_commands::sandbox_resume_session,
+            commands::sandbox_commands::sandbox_release_session,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {

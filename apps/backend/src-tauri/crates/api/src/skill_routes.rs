@@ -94,22 +94,60 @@ async fn execute_skill_handler(
     State(state): State<Arc<SkillRouterState>>,
     Json(req): Json<ExecuteSkillRequest>,
 ) -> Result<Json<SkillResult>, String> {
-    let registry = state.registry.lock().await;
-    let skill = registry
-        .get_skill(&req.skill_id)
-        .ok_or_else(|| format!("Skill '{}' 未找到", req.skill_id))?;
+    // 先在锁内取出名称，随后立即释放锁（执行可能耗时数十秒）
+    let skill_name = {
+        let registry = state.registry.lock().await;
+        registry
+            .get_skill(&req.skill_id)
+            .map(|skill| skill.name.clone())
+            .ok_or_else(|| format!("Skill '{}' 未找到", req.skill_id))?
+    };
 
-    // TODO: 实际调用 Python 运行时
-    let result = SkillResult::new(
-        format!(
-            "> 🤖 **{} 执行结果**\n>\n> Skill '{}' 已执行完成。\n>\n> *Python 运行时尚未就绪，当前为模拟输出。*",
-            skill.name, skill.name
-        ),
-        "markdown",
-        "after_selection",
+    // 待执行代码：优先取 config.code（显式脚本），否则把选中文本交给沙箱解释器
+    let code = req
+        .config
+        .get("code")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| req.input_text.clone());
+
+    let key = service::sandbox_service::SessionKey::new(
+        database::current_schema_name(),
+        req.user_id,
+        format!("skill:{}", req.skill_id),
     );
 
-    Ok(Json(result))
+    // 沙箱不可用时也返回 200 + 可读 markdown（保持改造前的响应契约，不抛 5xx）
+    match service::sandbox_service::exec_code(key, code, None).await {
+        Ok(result) => {
+            let output = if result.is_ok() {
+                result.combined_output()
+            } else {
+                let detail = result
+                    .error
+                    .as_ref()
+                    .map_or_else(|| result.combined_output(), |failure| {
+                        format!("{}: {}", failure.name, failure.value)
+                    });
+                format!("> ⚠️ **{} 执行失败**（exit {})\n>\n> {detail}", skill_name, result.exit_code)
+            };
+
+            let mut metadata = HashMap::new();
+            metadata.insert("skill_id".to_string(), req.skill_id.clone());
+            metadata.insert("exit_code".to_string(), result.exit_code.to_string());
+            metadata.insert("duration_ms".to_string(), result.duration_ms.to_string());
+            metadata.insert("sandbox".to_string(), "cube".to_string());
+
+            Ok(Json(
+                SkillResult::new(output, "markdown", "after_selection").with_metadata(metadata),
+            ))
+        }
+        Err(message) => Ok(Json(SkillResult::new(
+            format!("> ⚠️ **{skill_name} 未能执行**\n>\n> {message}"),
+            "markdown",
+            "after_selection",
+        ))),
+    }
 }
 
 /// 注册自定义 Skill
