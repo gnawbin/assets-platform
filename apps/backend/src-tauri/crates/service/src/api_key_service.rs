@@ -532,8 +532,32 @@ fn touch_last_used(id: i64) {
 
 /// 清除单个 API Key 的校验缓存（吊销 / 轮换后立即调用）
 pub fn invalidate_api_key(id: i64) {
+    clear_local_api_key(id);
+    if let Some(hook) = api_key_invalidator() {
+        hook(id);
+    }
+}
+
+/// 只清本实例的校验缓存（供 NOTIFY listener 调用，避免回环广播）
+pub fn clear_local_api_key(id: i64) {
     verify_cache().retain(|_, (_, auth)| auth.id != id);
     last_used_throttle().remove(&id);
+}
+
+/// API Key 失效广播的注入点（设计文档附录 D.3，修 B8：30s 跨实例窗口）
+///
+/// 与 `api::auth::install_auth_invalidator` 同构：`service` 不感知传输方式，
+/// 由进程入口注入「发 NOTIFY」的实现；桌面形态不注入，行为与改造前一致。
+static API_KEY_INVALIDATOR: OnceLock<std::sync::Arc<dyn Fn(i64) + Send + Sync>> = OnceLock::new();
+
+/// 安装失效广播器（幂等，仅启动期调用一次）
+pub fn install_api_key_invalidator(f: std::sync::Arc<dyn Fn(i64) + Send + Sync>) {
+    let _ = API_KEY_INVALIDATOR.set(f);
+}
+
+/// 当前失效广播器（未安装时返回 `None`）
+fn api_key_invalidator() -> Option<&'static std::sync::Arc<dyn Fn(i64) + Send + Sync>> {
+    API_KEY_INVALIDATOR.get()
 }
 
 /// 清空全部校验缓存（权限配置变更后由管理端调用）

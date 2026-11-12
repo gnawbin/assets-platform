@@ -36,6 +36,8 @@ bootstrap = {path = "crates/bootstrap"}
 # OpenAPI 规范汇总 + Swagger UI：依赖 api（只读其 handler 标注），api 不反向依赖它
 apidoc = {path = "crates/apidoc"}
 database = {path = "crates/database"}
+# 业务网关（多实例 HTTP + SSE，PostgreSQL 单一依赖）：入口 bin assets-gateway
+gateway = {path = "crates/gateway"}
 engine = {path = "crates/engine"}
 
 ast = {path = "crates/ast"}
@@ -117,7 +119,8 @@ tokio = {version = "1.54.1", default-features = false, features = [
 parking_lot = "0.13.0"
 rayon = "1.12.0"
 tokio-util = {version = "0.7.20", features = ["full"]}
-tower-http = {version = "0.7.1", features = ["cors", "trace"]}
+# compression-gzip：网关可选响应压缩（GATEWAY_GZIP=1；CompressionLayer 默认排除 SSE）
+tower-http = {version = "0.7.1", features = ["cors", "trace", "compression-gzip"]}
 # ──────────────────────────────────────────────────────────────────────────────
 # 向量数据存储（crates/vector-redis、crates/vector-pgvector、crates/vector-lance）
 #   版本与 features 只在此处定义一次；三个实现 crate 各自持有自己的驱动，

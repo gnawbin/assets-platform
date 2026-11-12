@@ -2633,3 +2633,43 @@ SELECT pid, objid, mode FROM pg_locks WHERE locktype = 'advisory';
 - **已确认的 8 个现状缺陷**：B1 trace propagator、B2 单实例限流注释、B3 SSE 事件格式、B4 错误码、B5 `build_router`、B6 liveness 查 DB、B7 upload/chat 路由复用、B8 API Key 缓存不跨实例（清单见 §15.1，其中 B3/B5/B6/B7 在 P0 修，B4/B8 在 P1，B2 在 P2，B1 在 P5）。
 - **上线门槛**：`/livez` 与 `/readyz` 分离、SSE buffering 关闭、优雅退出顺序正确、worker id 唯一。
 - **零中间件可选项**：环境不允许 Redis 时，按附录 D 用 PostgreSQL（LISTEN/NOTIFY + sys_gateway_event / sse_ticket / instance / rate_limit + advisory lock）承接全部跨实例职责，进程模型与阶段划分不变。
+
+---
+
+### D.15 落地记录（P0–P3 已实现，2026-11-12）
+
+本节记录**代码实际落地**与上文设计的差异，便于后续维护与验收对照。
+
+#### D.15.1 文件清单
+
+| 文件 | 变更 |
+|---|---|
+| `crates/database/src/sql/gateway_migration.sql` | 新增：4 张 `sys_gateway_*` 表 + 5 个索引，全部 `IF NOT EXISTS`（事务内执行，故不用 `CONCURRENTLY`） |
+| `crates/database/src/postgres.rs` | 新增 `MIGRATION_LOCK_KEY`、`migrate_gateway_tables()`、`acquire_migration_lock()` / `release_migration_lock()`；`init_postgres_database` 串行化 DDL 并追加网关表步骤 |
+| `crates/api/src/lib.rs` | 抽出 `pub async fn build_router(pool, llm_router, extra_routes) -> Result<Router>`（上传 / SSE 子路由装配搬入）；抽出 `pub async fn cleanup_once()` 供 leader 循环复用 |
+| `crates/api/src/auth.rs` | `AuthPrincipal` / `PrincipalKind` 加 `Serialize/Deserialize`；新增 `AuthInvalidator` trait + `install_auth_invalidator()`、`clear_local_user_authority()`、`clear_local_authority_cache()` |
+| `crates/service/src/api_key_service.rs` | 新增 `install_api_key_invalidator()`、`clear_local_api_key()`（修 B8 的 30s 跨实例窗口） |
+| `crates/gateway/**` | 新增 crate（bin `assets-gateway`）：`config` / `state` / `coord` / `worker` / `sse` / `rate_limit` / `health` / `router` / `lib` / `main` |
+| `Cargo.toml`（workspace） | `tower-http` 增加 `compression-gzip`；`workspace.dependencies` 增加 `gateway` |
+
+#### D.15.2 与设计的偏差（均为实现约束导致，行为等价或更保守）
+
+1. **迁移锁用会话级 `pg_advisory_lock`**（非 `pg_advisory_xact_lock`）：现有初始化函数都是 `&PgPool` 的多语句 DDL，无法整体套进一个事务；`acquire().detach()` 取独占连接并设 `lock_timeout='300s'`，获取失败只告警（迁移脚本幂等）。
+2. **票据接口无请求体**：`POST /api/auth/sse-ticket` 直接用主体上绑定的租户签发，避免 `Option<Json<_>>` 提取器在前端发空 body 时的歧义；响应 `{"ticket", "expires_in"}`。
+3. **限流桶键**：`tok:<凭证哈希>`（有 `Authorization`）/ `ip:<对端地址>`（`GATEWAY_RATE_LIMIT_ENFORCE_GLOBAL=1` 时）。默认只限制带凭证流量，探针路由不挂限流层；`GATEWAY_RATE_LIMIT_FAIL_OPEN=1`（默认）保证计数失败不阻断业务。
+4. **限流为固定窗口 60s / 600 次**（`rate_limit.rs` 常量），未做令牌桶：设计目标是「跨实例总额准确」，固定窗口单语句 UPSERT 已满足。
+5. **优雅退出新增 `GATEWAY_DRAIN_SECS`**（默认 15s）：收到信号后先置 `/readyz` 为 503、给所有 SSE 连接推 `event: shutdown`（带 `retry_after_ms`），最多等待该时长后强制断开；随后释放 worker 租约。
+6. **gzip 用 `tower-http` 的 `CompressionLayer`**（`GATEWAY_GZIP=1` 才挂）：默认谓词已排除 `text/event-stream`，不需要手写排除逻辑。
+7. **联调端点**：`GATEWAY_DEV_ENDPOINTS=1` 时挂 `POST /api/gateway/events`（普通认证），用于「A 发布 → B 收到」的验收。
+8. **`gateway` 依赖 `bootstrap`**：复用 `init_database_and_schema()`（租户 schema、缓存预热）与 `init_llm_router()`，避免复制启动序列。
+9. **SSE 事件正文回表取**：`NOTIFY` 只带 `{k:'sse',t,id}`，各实例按 id 读 `sys_gateway_event`，规避 payload 8000 字节上限；回放先注册连接再查库，并用连接水位去重，避免回放期间的新事件重复或丢失。
+
+#### D.15.3 验证
+
+```bash
+cargo check -p gateway                    # 通过（gateway lib + bin）
+cargo test  -p gateway --lib              # config 解析 / 租约间隔单测
+```
+
+> 离线环境编译注意：`utoipa-swagger-ui` 的 build script 会下载 Swagger UI 静态资源。无外网时可二选一：把 `SWAGGER_UI_DOWNLOAD_URL` 指向本地 zip（`file:///path/to/v5.32.6.zip`），或把 workspace 里的 features 改为 `["axum", "vendored"]`（见 `docs/API-Swagger规范.md` §5）。
+

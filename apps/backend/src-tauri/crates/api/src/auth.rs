@@ -51,7 +51,7 @@ pub struct UserContext {
 }
 
 /// 主体类型（设计文档 §5.4）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PrincipalKind {
     /// 登录用户（JWT）
     User,
@@ -67,7 +67,7 @@ pub enum PrincipalKind {
 /// - JWT 请求同时注入 `UserContext` / `Claims` / `AuthPrincipal`，老 handler 照常工作；
 /// - API Key 请求**只**注入 `AuthPrincipal`（服务身份没有 `user_id`），
 ///   因此需要 `claims.sub` 的接口对它一律 403（由 `authz` 层拦截）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthPrincipal {
     /// 主体类型
     pub kind: PrincipalKind,
@@ -124,14 +124,55 @@ fn authority_cache() -> &'static DashMap<i64, (Instant, UserAuthority)> {
     CACHE.get_or_init(DashMap::new)
 }
 
-/// 清除某个用户的授权缓存（改角色 / 改角色菜单 / 禁用 / 登出后调用）
-pub fn invalidate_user_authority(user_id: i64) {
+/// 只清本实例的 L1 授权快照（供 NOTIFY listener 调用，避免再次广播形成回环）
+pub fn clear_local_user_authority(user_id: i64) {
     authority_cache().remove(&user_id);
+}
+
+/// 清除某个用户的授权缓存（改角色 / 改角色菜单 / 禁用 / 登出后调用）
+///
+/// 签名与改造前一致，现有调用点无需改动：先清本实例 L1，再触发跨实例广播。
+pub fn invalidate_user_authority(user_id: i64) {
+    clear_local_user_authority(user_id);
+    if let Some(invalidator) = auth_invalidator() {
+        invalidator.on_invalidate_user(user_id);
+    }
 }
 
 /// 清空全部用户授权缓存（权限配置批量变更后调用）
 pub fn clear_user_authority_cache() {
+    clear_local_authority_cache();
+    if let Some(invalidator) = auth_invalidator() {
+        invalidator.on_clear_all();
+    }
+}
+
+/// 只清本实例的全部授权快照（供 NOTIFY listener 调用）
+pub fn clear_local_authority_cache() {
     authority_cache().clear();
+}
+
+/// 认证失效广播的注入点（设计文档附录 D.3）
+///
+/// `api` crate 不感知 Redis / PostgreSQL：真正的广播实现由进程入口注入。
+/// 桌面形态不注入，[`invalidate_user_authority`] 的行为与改造前完全一致。
+pub trait AuthInvalidator: Send + Sync {
+    /// 某用户权限失效（改角色 / 改角色菜单 / 禁用 / 登出）
+    fn on_invalidate_user(&self, user_id: i64);
+    /// 全量失效（权限配置批量变更）
+    fn on_clear_all(&self);
+}
+
+static AUTH_INVALIDATOR: OnceLock<std::sync::Arc<dyn AuthInvalidator>> = OnceLock::new();
+
+/// 安装失效广播器（幂等，仅启动期调用一次）
+pub fn install_auth_invalidator(invalidator: std::sync::Arc<dyn AuthInvalidator>) {
+    let _ = AUTH_INVALIDATOR.set(invalidator);
+}
+
+/// 当前失效广播器（未安装时返回 `None`，桌面形态即如此）
+fn auth_invalidator() -> Option<&'static std::sync::Arc<dyn AuthInvalidator>> {
+    AUTH_INVALIDATOR.get()
 }
 
 /// 读取用户授权快照（带 60s 缓存，回源失败按「无权限」处理）

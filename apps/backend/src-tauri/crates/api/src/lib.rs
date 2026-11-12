@@ -156,6 +156,46 @@ pub async fn start_http_server_with(
         ])
         .allow_headers(Any);
 
+    // 构建路由（上传 / SSE / 注入路由的装配见 build_router）
+    let app = build_router(pool, llm_router, extra_routes)
+        .await?
+        .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        // 安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）挂最外层
+        .layer(middleware::from_fn(security::security_headers));
+
+    info!("HTTP API 服务启动于 http://{}", addr);
+    // 启动 HTTP 服务
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("绑定 TCP 监听地址 {} 失败: {}", addr, e))?;
+    // `into_make_service_with_connect_info`：让 handler / 中间件能取到 TCP 对端地址，
+    // `OAUTH_TRUSTED_CIDRS` 白名单在未配置 `TRUST_PROXY_HEADERS` 时依赖它。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
+
+    Ok(())
+}
+
+/// 构建 HTTP 路由器（桌面 / 网关共用）
+///
+/// 只做「路由装配」：不含 CORS / Trace / 安全响应头 / 监听，调用方按需叠加：
+/// - 桌面形态：`start_http_server_with` 叠加三层中间件后自己 bind
+/// - 网关形态：`crates/gateway` 先 merge 网关自有路由（`/livez`、`/readyz`、
+///   `/api/events` 等）再叠加自己的中间件与监听
+///
+/// 上传（`/api/upload/*`）与 SSE（`/api/chat/stream`）子路由在此装配：两者各自
+/// 持有独立 `State`，必须在各自 `with_state()` 之后单独挂 auth / authz 中间件。
+pub async fn build_router(
+    pool: sqlx::PgPool,
+    llm_router: Option<std::sync::Arc<service::llm_gateway_service::LLMRouter>>,
+    extra_routes: Option<Router>,
+) -> anyhow::Result<Router> {
     // 初始化大文件上传路由（S3 客户端初始化需要 async 上下文）
     let upload_router = {
         let s3_config = storage::s3::S3Config::from_env().unwrap_or_default();
@@ -201,39 +241,16 @@ pub async fn start_http_server_with(
             .layer(middleware::from_fn(auth_middleware))
     };
 
-    // 构建路由（上传 / SSE 各自已挂 auth_middleware；外部注入的路由在顶层合并，
-    // 不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
+    // 合并所有路由（外部注入的路由在顶层合并，不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
     let has_extra_routes = extra_routes.is_some();
     let mut app = create_router(pool).merge(upload_router).merge(chat_router);
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
     }
-    let app = app
-        .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        // 安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）挂最外层
-        .layer(middleware::from_fn(security::security_headers));
-
-    info!("HTTP API 服务启动于 http://{}", addr);
     if has_extra_routes {
         info!("OpenAPI 文档已挂载：/swagger-ui、/api-docs/openapi.json");
     }
-
-    // 启动 HTTP 服务
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| anyhow::anyhow!("绑定 TCP 监听地址 {} 失败: {}", addr, e))?;
-    // `into_make_service_with_connect_info`：让 handler / 中间件能取到 TCP 对端地址，
-    // `OAUTH_TRUSTED_CIDRS` 白名单在未配置 `TRUST_PROXY_HEADERS` 时依赖它。
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await
-    .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
-
-    Ok(())
+    Ok(app)
 }
 
 /// 创建路由
@@ -587,34 +604,42 @@ fn cleanup_interval_secs() -> u64 {
         .unwrap_or(CLEANUP_INTERVAL_DEFAULT_SECS)
 }
 
-/// 启动后台清理任务（设计文档 §7.7：过期授权码 / 刷新令牌 / 会话）
+/// 执行一次过期数据清理（设计文档 §7.7：授权码 / 刷新令牌 / 浏览器会话）
 ///
-/// 只在 HTTP 服务进程内运行（Tauri 桌面端不重复执行，避免双进程争抢）。
-/// 首次执行延迟 60s，之后每 `OAUTH_CLEANUP_INTERVAL_SECS` 秒一次；
-/// 任何一步失败都只记 WARN，不影响服务可用性。
+/// 拆成公开函数供网关 leader 循环调用（实现方案附录 D.8）：多实例部署时只有
+/// leader 真正执行，避免 N 个实例重复扫表；任何一步失败都只记 WARN，不影响可用性。
+pub async fn cleanup_once() {
+    match service::oauth_service::cleanup_expired_grants().await {
+        Ok((codes, tokens)) => {
+            info!("OAuth 过期数据清理完成: 授权码 {} 条, 令牌 {} 条", codes, tokens);
+        }
+        Err(e) => tracing::warn!("OAuth 过期数据清理失败: {}", e),
+    }
+    match service::session_service::cleanup_expired_sessions().await {
+        Ok(removed) => {
+            if removed > 0 {
+                info!("浏览器会话清理完成: {} 条", removed);
+            }
+        }
+        Err(e) => tracing::warn!("浏览器会话清理失败: {}", e),
+    }
+}
+
+/// 启动后台清理任务（桌面 / 单实例形态）
+///
+/// 首次执行延迟 60s，之后每 `OAUTH_CLEANUP_INTERVAL_SECS` 秒调用一次
+/// [`cleanup_once`]；网关多实例形态不调用它，改由 leader 循环驱动。
 fn spawn_cleanup_task() {
     let interval = cleanup_interval_secs();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         loop {
-            match service::oauth_service::cleanup_expired_grants().await {
-                Ok((codes, tokens)) => {
-                    info!("OAuth 过期数据清理完成: 授权码 {} 条, 令牌 {} 条", codes, tokens);
-                }
-                Err(e) => tracing::warn!("OAuth 过期数据清理失败: {}", e),
-            }
-            match service::session_service::cleanup_expired_sessions().await {
-                Ok(removed) => {
-                    if removed > 0 {
-                        info!("浏览器会话清理完成: {} 条", removed);
-                    }
-                }
-                Err(e) => tracing::warn!("浏览器会话清理失败: {}", e),
-            }
+            cleanup_once().await;
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         }
     });
 }
+
 
 /// 优雅关闭信号处理
 async fn shutdown_signal() {
@@ -680,3 +705,4 @@ mod tests {
         assert!(check_jwt_secret(Some("assets-platform-default-secret-key")).is_ok());
     }
 }
+
