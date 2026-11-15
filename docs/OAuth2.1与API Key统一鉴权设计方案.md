@@ -1139,3 +1139,23 @@ Phase 0 的三处改动都遵循本约束：
 | `crates/api/src/lib.rs` | 分层挂载 authz 层、把 upload/chat 纳入认证 |
 | `crates/api/src/response.rs` | 403 增加 `scope` 字段 |
 | `crates/apidoc/src/lib.rs` | 注册新 tag 与路径 |
+
+---
+
+## 附录 B：Bearer 令牌资源访问路径的待测待开发与回归口径
+
+「把 `at_` 令牌当资源凭证用」这条路径（`at_` → `parse_credential` → `verify_access_token` → `authz`）的测试覆盖、已知行为缝、页面 ↔ 后端接口对齐，单独整理在：
+
+> **《OAuth2.1 Bearer Token待测待开发清单.md》**（同目录）
+
+速查：
+
+| 类别 | 内容 | 详见 |
+|---|---|---|
+| 已覆盖 | `ApiError` 的 401 / 403 挑战头（`response.rs` 单测）、OAuth 主体非超管（`authz.rs`）、签发侧 26 条（`--lib oauth`） | 待测清单 §3 F-8、§4.1 A-10 |
+| 未覆盖 | `parse_credential` 的 `at_` / `rt_` 分流（0 条断言）、`verify_access_token`（0 条断言，需 DB）、`at_` 端到端调用（`crates/api` 无 `tests/`） | 待测清单 §4.1 / §4.2 / §4.4 |
+| 待开发 | 资源侧不校验用户状态；禁用 / 删除用户不吊销 `sys_oauth_token`；OAuth 令牌无限流；上传通道无 401 续期；前端 base URL 双 `/api` | 待测清单 §5 D-2…D-7 |
+| 页面 ↔ 接口 | `/settings/oauth-clients` 四个动作 ↔ 路由 / 权限点 / DTO / 错误体 | 待测清单 §6 |
+
+**注意**：`oauth_routes::tests::bearer_header_is_not_treated_as_client_credentials` 测的是 `/oauth/token` 的 `client_secret_basic` 解析，**不能**作为「Bearer 资源访问已测」的证据。详见待测清单 §2。
+

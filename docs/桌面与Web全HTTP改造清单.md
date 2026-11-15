@@ -759,6 +759,12 @@ get_conversation_messages: { method: 'GET', path: '/conversations/{conversationI
 > 冒烟脚本：`/tmp/smoke_upl.sh`（一次性验证用，未入库）。
 > 注意 `file_uploads` 无自增（`id` 为 `bigint` 无默认值），冒烟需显式给 `id`；`created_by` 在 DTO 里是 `i64`（非 Option），造数时不能留空。
 
+> **待测待开发提示（2026-11-16）**：本清单落地的接口全部经 `auth_middleware` + `authz_middleware`，凭证分流（`ak_` / `at_` / `rt_` / JWT）的测试覆盖与已知行为缝单独整理在 **《OAuth2.1 Bearer Token待测待开发清单.md》**。其中两项会直接影响 Web 模式的既有功能，建议优先处理：
+>
+> 1. **R1**：`httpAdapter.ts:36` 的默认 base 自带 `/api`，而映射表路径也以 `/api/` 开头 → 未设 `NEXT_PUBLIC_API_BASE_URL` 时请求变成 `/api/api/...`（对应该文档 D-6）。
+> 2. **R2**：`HttpUploadAdapter` 只有 `withAuth`、没有 401 续期，大文件分片跨过令牌过期点会整批失败（对应该文档 D-7）。
+
+
 
 
 
@@ -783,6 +789,7 @@ get_conversation_messages: { method: 'GET', path: '/conversations/{conversationI
 | 2026-11-14 | LLM 验证全绿：`cargo test -p api --lib` **95 passed**、`cargo test -p service llm` **16 passed**、`cargo test -p apidoc` 4 passed、`pnpm test -- httpAdapter` 4 passed；实机冒烟 12 项（密钥密文入库不回显、占位符不覆盖真实 Key、偏好取令牌、404/400/401、Swagger 98 路径） |
 | 2026-11-14 | **P0-A 第 6 模块落地：上传版本历史 1 条路由**。`upload_routes.rs` 新增 `get_version_history`（复用 `UploadRouterState.upload_mgr`，无重复构造 S3 客户端）+ `UploadVersionItem`（camelCase 逐字对齐命令，`id` 为字符串、`createdAt` RFC3339）+ 1 条序列化单测；`lib.rs` 在 `upload_router` 挂 `GET /api/upload/versions/{fileGroupId}`（占位符复用命令参数名，`extractParams` 才能剥离；静态段不遮蔽 `/api/upload/{id}/progress`）；`authz.rs` 复用既有 `upload:file:list`；`public_migration.sql` 补 `sys_menu` 308；`openapi.rs` 登记；`httpAdapter.ts` 加映射并移出 `TAURI_ONLY_COMMANDS`（**该集合现仅剩 RAG 2 条**）。**路由从原计划的 `/api/upload/{uploadId}/versions` 改为 `/api/upload/versions/{fileGroupId}`** |
 | 2026-11-14 | 上传版本历史验证全绿：`cargo test -p api --lib` **96 passed**、`cargo test -p apidoc` 4 passed、`pnpm test -- httpAdapter` 4 passed、`pnpm test -- uploadService` **24 passed**；实机冒烟 15 项（pending/deleted 过滤、倒序、纯 camelCase、`id` 字符串、空分组 200+`[]`、401、兄弟路由未遮蔽、Swagger 99 路径、冒烟数据已清理）。同时修掉前端 `HttpUploadAdapter.getVersionHistory` 指向**不存在**的 `/upload/version-history/{id}`（Web 模式此前必 404），改为 `/upload/versions/{id}` + `encodeURIComponent`，并补 4 条单测 |
+| 2026-11-16 | **新增《OAuth2.1 Bearer Token待测待开发清单.md》**：首次系统梳理「`at_` 令牌 → `auth_middleware` → `authz`」这条**资源访问路径**的测试覆盖。结论：26 条 `--lib oauth` 单测全在**签发侧**，`parse_credential` 的分流与 `verify_access_token` 均 **0 条断言**，`crates/api` 无 `tests/` 集成目录。列出 4 个后端行为缝（资源侧不校验用户状态 / 禁用用户不吊销 `sys_oauth_token` / OAuth 令牌无限流 / `auth_middleware` 注释过时）与 4 处页面对齐缺口（`httpAdapter` 默认 base 与映射表路径重复 `/api`；上传通道无 401 续期；前端不透出 `ApiError.message`；二次 401 不清会话），并给出 A/B/C/E 四组用例（E 组为端到端冒烟）、D-1…D-10 开发项与 PR 切分。同时在《OAuth2.1与API Key统一鉴权设计方案.md》新增附录 B 做交叉引用 |
 
 ---
 
