@@ -279,6 +279,65 @@ describe('UploadService', () => {
     });
   });
 
+  // ======================== getVersionHistory ========================
+  // 后端路由：GET /api/upload/versions/{fileGroupId}
+  // 响应形状与 Tauri 命令 upload_get_version_history 一致（camelCase）
+
+  describe('getVersionHistory', () => {
+    const mockVersions = [
+      {
+        id: '990002',
+        version: 2,
+        isLatest: true,
+        originalFilename: '手册-v2.pdf',
+        fileSize: 2048,
+        fileUrl: 'https://minio.local/k/a-v2.pdf',
+        changeReason: '修订',
+        createdAt: '2026-11-13T07:49:07.809372+00:00',
+      },
+    ];
+
+    it('应请求 /upload/versions/{fileGroupId} 并原样返回 camelCase 数组', async () => {
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse(mockVersions));
+
+      const result = await service.getVersionHistory('group-001');
+
+      expect(global.fetch).toHaveBeenCalledWith('/api/upload/versions/group-001', {
+        headers: {},
+      });
+      expect(result).toEqual(mockVersions);
+      expect(result[0].id).toBe('990002');
+      expect(result[0].isLatest).toBe(true);
+    });
+
+    it('已登录时应附加 Bearer 令牌', async () => {
+      localStorage.setItem('auth_token', 'token-abc');
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse([]));
+
+      await service.getVersionHistory('group-001');
+
+      expect(global.fetch).toHaveBeenCalledWith('/api/upload/versions/group-001', {
+        headers: { Authorization: 'Bearer token-abc' },
+      });
+    });
+
+    it('分组 ID 应做 URL 编码', async () => {
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse([]));
+
+      await service.getVersionHistory('group/with slash');
+
+      expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe(
+        '/api/upload/versions/group%2Fwith%20slash'
+      );
+    });
+
+    it('查询失败时应抛出错误', async () => {
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse({}, 500));
+
+      await expect(service.getVersionHistory('group-001')).rejects.toThrow('获取版本历史失败');
+    });
+  });
+
   // ======================== 自定义 baseUrl ========================
 
   describe('自定义 baseUrl', () => {

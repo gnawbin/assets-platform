@@ -71,6 +71,19 @@ const MAX_VIDEO_FRAMES: usize = 6;
 /// 图片 data URL 长度上限（约 10MB 原始图的 base64）
 const MAX_IMAGE_DATA_URL_LEN: usize = 14 * 1024 * 1024;
 
+/// 会话不可访问的统一错误文案
+///
+/// 「会话不存在」与「会话不属于当前用户」返回同一条消息，调用方无法据此区分，
+/// 避免越权探测他人会话是否存在。HTTP 层按「未找到」映射为 404。
+pub const CONVERSATION_NOT_FOUND: &str = "会话未找到（不存在或不属于当前用户）";
+
+/// 归属判定（纯函数，便于单测）
+///
+/// `owner` 为 `None` 表示会话不存在——与「属于别人」同样不可访问。
+fn is_owned_by(owner: Option<i64>, user_id: i64) -> bool {
+    matches!(owner, Some(owner_id) if owner_id == user_id)
+}
+
 /// 临时解析目录 guard（Drop 时自动清理）
 struct ParseJobDir(std::path::PathBuf);
 
@@ -632,11 +645,8 @@ impl ConversationService {
         model_name: Option<String>,
         attachments: &[AttachmentParam],
     ) -> Result<ConversationResponse, String> {
-        // 验证会话所有权
-        let conv = Self::get_conversation_by_id(conv_id).await?;
-        if conv.user_id != user_id {
-            return Err("无权访问此会话".to_string());
-        }
+        // 验证会话归属（不存在 / 不属于当前用户统一报 CONVERSATION_NOT_FOUND）
+        let conv = Self::ensure_conversation_owned(conv_id, user_id).await?;
 
         // 保存用户消息（含附件元数据）
         let user_meta = if attachments.is_empty() {
@@ -803,11 +813,8 @@ impl ConversationService {
         provider_id: Option<i64>,
         model_name: Option<String>,
     ) -> Result<ConversationResponse, String> {
-        // 验证会话所有权
-        let conv = Self::get_conversation_by_id(conv_id).await?;
-        if conv.user_id != user_id {
-            return Err("无权访问此会话".to_string());
-        }
+        // 验证会话归属（不存在 / 不属于当前用户统一报 CONVERSATION_NOT_FOUND）
+        let conv = Self::ensure_conversation_owned(conv_id, user_id).await?;
 
         // 保存用户消息
         Self::insert_message(conv_id, "user", question, None, None, 0, 0).await?;
@@ -992,8 +999,11 @@ impl ConversationService {
         Ok(row.0)
     }
 
-    /// 获取单条会话
-    async fn get_conversation_by_id(conv_id: i64) -> Result<Conversation, String> {
+    /// 查询单条会话（不存在或已逻辑删除时返回 `None`）
+    ///
+    /// 与「查询失败」区分开：`Err` 只表示数据库错误，上层才能把「不存在」
+    /// 映射成 404、把真实故障映射成 500。
+    async fn find_conversation(conv_id: i64) -> Result<Option<Conversation>, String> {
         let pool = database::get_read_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
         let prefix = database::schema_prefix();
 
@@ -1002,13 +1012,25 @@ impl ConversationService {
              FROM {}conversation WHERE id = $1 AND deleted = 0",
             prefix
         );
-        let conv = sqlx::query_as::<_, Conversation>(sqlx::AssertSqlSafe(sql))
+        sqlx::query_as::<_, Conversation>(sqlx::AssertSqlSafe(sql))
             .bind(conv_id)
-            .fetch_one(&pool)
+            .fetch_optional(&pool)
             .await
-            .map_err(|e| format!("查询会话失败: {}", e))?;
+            .map_err(|e| format!("查询会话失败: {}", e))
+    }
 
-        Ok(conv)
+    /// 校验会话存在且归属 `user_id`，并返回会话
+    ///
+    /// 服务端归属校验的唯一入口：按 `conv_id` 操作的 HTTP 端点必须先过这里，
+    /// **不能信任请求体里的 `userId`**（客户端可任意伪造）。
+    pub async fn ensure_conversation_owned(
+        conv_id: i64,
+        user_id: i64,
+    ) -> Result<Conversation, String> {
+        match Self::find_conversation(conv_id).await? {
+            Some(conv) if is_owned_by(Some(conv.user_id), user_id) => Ok(conv),
+            _ => Err(CONVERSATION_NOT_FOUND.to_string()),
+        }
     }
 
     /// 生成会话标题
@@ -1056,6 +1078,73 @@ impl ConversationService {
             .await
             .map_err(|e| format!("更新会话标题失败: {}", e))?;
 
+        Ok(())
+    }
+
+    /// 获取会话消息（带服务端归属校验，HTTP 层使用）
+    pub async fn get_conversation_messages_for_user(
+        conv_id: i64,
+        user_id: i64,
+        page: i32,
+        page_size: i32,
+    ) -> Result<Vec<Message>, String> {
+        Self::ensure_conversation_owned(conv_id, user_id).await?;
+        Self::get_conversation_messages(conv_id, page, page_size).await
+    }
+
+    /// 更新会话标题（带服务端归属校验）
+    ///
+    /// 单条 UPDATE 同时按 `id` 与 `user_id` 过滤，避免「先查归属再更新」的 TOCTOU；
+    /// 影响行数为 0 即视为不可访问（不存在 / 不属于当前用户 / 已删除）。
+    pub async fn update_conversation_title_for_user(
+        conv_id: i64,
+        user_id: i64,
+        title: &str,
+    ) -> Result<(), String> {
+        let pool = database::get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+        let prefix = database::schema_prefix();
+
+        let sql = format!(
+            "UPDATE {}conversation SET title = $1, updated_at = NOW() \
+             WHERE id = $2 AND user_id = $3 AND deleted = 0",
+            prefix
+        );
+        let result = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(title)
+            .bind(conv_id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("更新会话标题失败: {}", e))?;
+
+        if result.rows_affected() == 0 {
+            return Err(CONVERSATION_NOT_FOUND.to_string());
+        }
+        Ok(())
+    }
+
+    /// 删除会话（逻辑删除，带服务端归属校验）
+    ///
+    /// 与 [`Self::update_conversation_title_for_user`] 同样在单条 UPDATE 内完成归属过滤。
+    pub async fn delete_conversation_for_user(conv_id: i64, user_id: i64) -> Result<(), String> {
+        let pool = database::get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
+        let prefix = database::schema_prefix();
+
+        let sql = format!(
+            "UPDATE {}conversation SET deleted = 1, updated_at = NOW() \
+             WHERE id = $1 AND user_id = $2 AND deleted = 0",
+            prefix
+        );
+        let result = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(conv_id)
+            .bind(user_id)
+            .execute(&pool)
+            .await
+            .map_err(|e| format!("删除会话失败: {}", e))?;
+
+        if result.rows_affected() == 0 {
+            return Err(CONVERSATION_NOT_FOUND.to_string());
+        }
         Ok(())
     }
 
@@ -1279,11 +1368,8 @@ impl ConversationService {
         router: &LLMRouter,
         tx: mpsc::Sender<String>,
     ) -> Result<ConversationResponse, String> {
-        // 验证会话所有权
-        let conv = Self::get_conversation_by_id(conv_id).await?;
-        if conv.user_id != user_id {
-            return Err("无权访问此会话".to_string());
-        }
+        // 验证会话归属（不存在 / 不属于当前用户统一报 CONVERSATION_NOT_FOUND）
+        let conv = Self::ensure_conversation_owned(conv_id, user_id).await?;
 
         // 保存用户消息
         Self::insert_message(conv_id, "user", question, None, None, 0, 0).await?;
@@ -1489,11 +1575,8 @@ impl ConversationService {
         tx: mpsc::Sender<String>,
         attachments: &[AttachmentParam],
     ) -> Result<ConversationResponse, String> {
-        // 验证会话所有权
-        let conv = Self::get_conversation_by_id(conv_id).await?;
-        if conv.user_id != user_id {
-            return Err("无权访问此会话".to_string());
-        }
+        // 验证会话归属（不存在 / 不属于当前用户统一报 CONVERSATION_NOT_FOUND）
+        let conv = Self::ensure_conversation_owned(conv_id, user_id).await?;
 
         // 保存用户消息（含附件元数据）
         let user_meta = if attachments.is_empty() {
@@ -1559,3 +1642,46 @@ impl ConversationService {
     }
 
 }
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    /// 本人会话可访问
+    #[test]
+    fn owner_can_access_own_conversation() {
+        assert!(is_owned_by(Some(7), 7));
+    }
+
+    /// 他人会话不可访问（即使会话确实存在）
+    #[test]
+    fn other_user_cannot_access_conversation() {
+        assert!(!is_owned_by(Some(8), 7));
+    }
+
+    /// 会话不存在与「属于别人」同样不可访问，调用方无法区分二者
+    #[test]
+    fn missing_conversation_is_indistinguishable_from_foreign_one() {
+        assert!(!is_owned_by(None, 7));
+        // 两种情况的判定结果必须一致，越权探测才无法区分
+        assert_eq!(is_owned_by(None, 7), is_owned_by(Some(8), 7));
+    }
+
+    /// 错误文案必须能被 HTTP 层按「未找到」映射为 404
+    ///
+    /// `crates/api/src/conversation_routes.rs::map_service_error` 依赖该约定，
+    /// 改动文案会同时改变 HTTP 状态码，因此这里锁住契约。
+    #[test]
+    fn not_found_message_stays_http_mappable() {
+        assert!(
+            CONVERSATION_NOT_FOUND.contains("未找到"),
+            "HTTP 层按「未找到」映射 404，文案必须保留该关键词：{}",
+            CONVERSATION_NOT_FOUND
+        );
+        assert!(
+            !CONVERSATION_NOT_FOUND.contains("无权"),
+            "不要用「无权」误导成 403——会话存在性对调用方不应可见"
+        );
+    }
+}
+

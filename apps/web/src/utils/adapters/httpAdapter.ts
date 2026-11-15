@@ -159,6 +159,53 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     update_knowledge: { method: 'PUT', path: '/api/knowledge/{id}' },
     delete_knowledge: { method: 'DELETE', path: '/api/knowledge/{id}' },
 
+    // ======================== 知识库 - OKF 知识资产（新表 knowledge_asset） ========================
+    // 路径占位符沿用命令参数名（{treeNodeId} / {id} / {assetId}），
+    // 其余参数按命令参数形状原样作为 body / query 发送
+    list_knowledge_assets: { method: 'GET', path: '/api/knowledge/asset' },
+    get_knowledge_asset_by_tree_node: { method: 'GET', path: '/api/knowledge/asset/by-tree-node/{treeNodeId}' },
+    get_knowledge_asset: { method: 'GET', path: '/api/knowledge/asset/{id}' },
+    create_knowledge_asset: { method: 'POST', path: '/api/knowledge/asset' },
+    update_knowledge_asset: { method: 'PUT', path: '/api/knowledge/asset/{id}' },
+    delete_knowledge_asset: { method: 'DELETE', path: '/api/knowledge/asset/{id}' },
+    // assetId 走路径，文件信息留在 body
+    attach_file_to_knowledge: { method: 'POST', path: '/api/knowledge/asset/{assetId}/attach' },
+
+    // ======================== LLM 厂商 / 模型 / 用户偏好 ========================
+    // 厂商响应里的 api_key 一律是脱敏占位符 ******；更新时回传该值表示「不修改」
+    get_llm_providers: { method: 'GET', path: '/api/llm/providers' },
+    get_llm_provider: { method: 'GET', path: '/api/llm/providers/{id}' },
+    create_llm_provider: { method: 'POST', path: '/api/llm/providers' },
+    update_llm_provider: { method: 'PUT', path: '/api/llm/providers/{id}' },
+    delete_llm_provider: { method: 'DELETE', path: '/api/llm/providers/{id}' },
+    // providerId 走路径（占位符与命令参数同名）
+    fetch_llm_models: { method: 'POST', path: '/api/llm/providers/{providerId}/fetch-models' },
+    get_llm_models: { method: 'GET', path: '/api/llm/models' },
+    create_llm_model: { method: 'POST', path: '/api/llm/models' },
+    update_llm_model: { method: 'PUT', path: '/api/llm/models/{id}' },
+    delete_llm_model: { method: 'DELETE', path: '/api/llm/models/{id}' },
+    // 用户偏好：userId 仅作兼容（服务端以令牌为准），GET 走 query、POST 走 body
+    get_user_llm_setting: { method: 'GET', path: '/api/llm/user-setting' },
+    save_user_llm_setting: { method: 'POST', path: '/api/llm/user-setting' },
+
+    // ======================== 单据编号规则 ========================
+    get_numbering_rules: { method: 'GET', path: '/api/numbering/rules' },
+    get_numbering_rule: { method: 'GET', path: '/api/numbering/rules/{bizType}' },
+    // body 形状与命令参数一致：{ id?, input }
+    save_numbering_rule: { method: 'POST', path: '/api/numbering/rules' },
+    // bizType 走路径，resetKey 留在 body
+    reset_numbering_sequence: { method: 'POST', path: '/api/numbering/rules/{bizType}/reset' },
+
+    // ======================== 智能问答 - 会话管理 ========================
+    // 归属校验在服务端完成（以令牌 sub 为准），body/query 里的 userId 仅作兼容告警
+    get_conversations: { method: 'GET', path: '/api/conversations' },
+    create_conversation: { method: 'POST', path: '/api/conversations' },
+    // convId 走路径，page/pageSize 作为 query string
+    get_conversation_messages: { method: 'GET', path: '/api/conversations/{convId}/messages' },
+    send_message: { method: 'POST', path: '/api/conversations/{convId}/messages' },
+    update_conversation_title: { method: 'PUT', path: '/api/conversations/{convId}/title' },
+    delete_conversation: { method: 'DELETE', path: '/api/conversations/{convId}' },
+
     // ======================== 流程管理 - 领用 ========================
     get_receives: { method: 'GET', path: '/api/process/receive' },
     insert_receive: { method: 'POST', path: '/api/process/receive' },
@@ -213,6 +260,8 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     upload_get_progress: { method: 'GET', path: '/api/upload/{uploadId}/progress' },
     upload_complete: { method: 'POST', path: '/api/upload/{uploadId}/complete' },
     upload_abort: { method: 'DELETE', path: '/api/upload/{uploadId}' },
+    // 版本历史：fileGroupId 走路径
+    upload_get_version_history: { method: 'GET', path: '/api/upload/versions/{fileGroupId}' },
 };
 
 // ======================== 仅 Tauri 模式支持的命令 ========================
@@ -224,57 +273,12 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
  * httpCall() 会抛出明确错误，避免使用不存在的虚拟路由导致 404 混淆。
  *
  * 后续为以下模块补充 HTTP 路由后，应同步从本集合移除并加入 COMMAND_ROUTE_MAP：
- * - llm_provider：LLM 厂商 / 模型 / 用户偏好
- * - knowledge_asset：OKF 知识资产（/api/knowledge/asset/... 路由尚未实现）
- * - conversation：智能问答会话（当前仅有 /api/chat/stream SSE 流式接口）
- * - numbering：单据编号规则
  * - rag：RAG 检索
- * - upload_get_version_history：上传版本历史
  */
 export const TAURI_ONLY_COMMANDS: ReadonlySet<string> = new Set<string>([
-    // ======================== LLM 厂商/模型 ========================
-    'get_llm_providers',
-    'get_llm_provider',
-    'create_llm_provider',
-    'update_llm_provider',
-    'delete_llm_provider',
-    'get_llm_models',
-    'create_llm_model',
-    'update_llm_model',
-    'delete_llm_model',
-    'fetch_llm_models',
-    'get_user_llm_setting',
-    'save_user_llm_setting',
-
-    // ======================== 知识资产（OKF 新表） ========================
-    'get_knowledge_asset_by_tree_node',
-    'get_knowledge_asset',
-    'list_knowledge_assets',
-    'create_knowledge_asset',
-    'update_knowledge_asset',
-    'delete_knowledge_asset',
-    'attach_file_to_knowledge',
-
-    // ======================== 智能问答对话 ========================
-    'create_conversation',
-    'send_message',
-    'get_conversations',
-    'get_conversation_messages',
-    'update_conversation_title',
-    'delete_conversation',
-
-    // ======================== 编号规则 ========================
-    'get_numbering_rules',
-    'get_numbering_rule',
-    'save_numbering_rule',
-    'reset_numbering_sequence',
-
     // ======================== RAG ========================
     'chunk_and_vectorize',
     'test_rag_retrieval',
-
-    // ======================== 上传版本历史 ========================
-    'upload_get_version_history',
 ]);
 
 // ======================== 工具函数 ========================

@@ -2,7 +2,6 @@
 //!
 //! 全新 knowledge_asset 表命令，与现有 knowledge_commands.rs 完全独立。
 
-use database::models::KnowledgeAsset;
 use service;
 
 /// 根据 tree_node_id 获取关联的知识资产（未关联时返回 null）
@@ -55,35 +54,17 @@ pub async fn create_knowledge_asset(
         _ => None,
     };
 
-    let asset = KnowledgeAsset {
-        id: 0, // GENERATED ALWAYS AS IDENTITY
+    service::knowledge_asset_service::create_knowledge_asset_from_input(
         tree_node_id,
         title,
+        okfType,
         content,
-        content_html: None,
-        okf_type: okfType,
         summary,
         source,
-        confidence: Some(1.0),
-        status: "draft".to_string(),
-        effective_at: None,
-        expire_at: None,
-        relation_ids: None,
         tags,
-        file_url: None,
-        file_name: None,
-        file_size: None,
-        file_mime: None,
-        file_md5: None,
-        editor_mode: "wysiwyg".to_string(),
-        created_by: cb,
-        created_at: None,
-        updated_by: None,
-        updated_at: None,
-        deleted: 0,
-    };
-
-    service::knowledge_asset_service::create_knowledge_asset(&asset).await
+        cb,
+    )
+    .await
 }
 
 /// 更新知识资产

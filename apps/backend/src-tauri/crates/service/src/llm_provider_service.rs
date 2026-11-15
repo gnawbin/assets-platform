@@ -7,6 +7,61 @@ use database::models::{LlmModel, LlmProvider, UserLLmSetting};
 
 use crate::llm_factory::{create_provider as build_provider, resolve_api_key};
 
+/// LLM 厂商不存在（含已软删除）
+///
+/// 文案必须带「未找到」——`crates/api` 的 `map_service_error` 依赖该关键字映射为 **404**。
+pub const LLM_PROVIDER_NOT_FOUND: &str = "LLM 厂商未找到（不存在或已删除）";
+
+/// LLM 模型不存在（含已软删除）
+pub const LLM_MODEL_NOT_FOUND: &str = "LLM 模型未找到（不存在或已删除）";
+
+/// 响应里 API Key 的脱敏占位符
+///
+/// 厂商列表/详情对外一律返回该常量（不返回密文，更不返回明文）；
+/// 前端回传该值时视为「未修改」，不会被当成新 Key 保存。
+pub const API_KEY_MASK: &str = "******";
+
+/// 构造厂商实体（含 API Key 加密）
+///
+/// 桌面命令 `create_llm_provider` 与 HTTP 路由 `POST /api/llm/providers` 共用，
+/// 保证默认值一致：`enable = true`、`is_local` 缺省 `false`、`secret_key`/`extra_config` 留空。
+pub fn build_provider_entity(
+    provider_code: String,
+    provider_name: String,
+    base_url: Option<String>,
+    api_key: Option<String>,
+    weight: Option<i32>,
+    is_local: Option<bool>,
+    created_by: Option<i64>,
+) -> LlmProvider {
+    // 加密 API Key（加密失败时保留原值，与桌面命令行为一致）
+    let encrypted_key = match &api_key {
+        Some(key) if !key.is_empty() => match utils::crypto::encrypt_api_key(key) {
+            Ok(ek) => Some(ek),
+            Err(_) => api_key.clone(),
+        },
+        _ => api_key.clone(),
+    };
+
+    LlmProvider {
+        id: 0,
+        provider_code,
+        provider_name,
+        base_url,
+        api_key: encrypted_key,
+        secret_key: None,
+        extra_config: None,
+        weight,
+        is_local: is_local.unwrap_or(false),
+        enable: true,
+        created_by,
+        created_at: None,
+        updated_at: None,
+        deleted: 0,
+    }
+}
+
+
 // ======================== 厂商 CRUD ========================
 
 pub async fn get_providers() -> Result<Vec<LlmProvider>, String> {
@@ -36,10 +91,10 @@ pub async fn get_provider(id: i64) -> Result<LlmProvider, String> {
     );
     let item = sqlx::query_as::<_, LlmProvider>(sqlx::AssertSqlSafe(sql))
         .bind(id)
-        .fetch_one(&pool)
+        .fetch_optional(&pool)
         .await
         .map_err(|e| format!("查询厂商失败: {}", e))?;
-    Ok(item)
+    item.ok_or_else(|| LLM_PROVIDER_NOT_FOUND.to_string())
 }
 
 pub async fn create_provider(p: &LlmProvider) -> Result<LlmProvider, String> {
@@ -110,12 +165,18 @@ pub async fn update_provider(
 pub async fn delete_provider(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
-    let sql = format!("UPDATE {}llm_provider SET deleted=1 WHERE id=$1", prefix);
-    sqlx::query(sqlx::AssertSqlSafe(sql))
+    let sql = format!(
+        "UPDATE {}llm_provider SET deleted=1 WHERE id=$1 AND deleted=0",
+        prefix
+    );
+    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
         .map_err(|e| format!("删除厂商失败: {}", e))?;
+    if result.rows_affected() == 0 {
+        return Err(LLM_PROVIDER_NOT_FOUND.to_string());
+    }
     Ok(())
 }
 
@@ -206,9 +267,10 @@ pub async fn update_model(
         prefix
     )))
     .bind(id)
-    .fetch_one(&pool)
+    .fetch_optional(&pool)
     .await
-    .map_err(|e| format!("查询模型失败: {}", e))?;
+    .map_err(|e| format!("查询模型失败: {}", e))?
+    .ok_or_else(|| LLM_MODEL_NOT_FOUND.to_string())?;
 
     let new_code = model_code.unwrap_or(&existing.model_code);
     let new_name = model_name.unwrap_or(&existing.model_name);
@@ -242,12 +304,18 @@ pub async fn update_model(
 pub async fn delete_model(id: i64) -> Result<(), String> {
     let pool = database::get_write_pool().map_err(|e| format!("数据库连接失败: {}", e))?;
     let prefix = database::schema_prefix();
-    let sql = format!("UPDATE {}llm_model SET deleted=1 WHERE id=$1", prefix);
-    sqlx::query(sqlx::AssertSqlSafe(sql))
+    let sql = format!(
+        "UPDATE {}llm_model SET deleted=1 WHERE id=$1 AND deleted=0",
+        prefix
+    );
+    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .execute(&pool)
         .await
         .map_err(|e| format!("删除模型失败: {}", e))?;
+    if result.rows_affected() == 0 {
+        return Err(LLM_MODEL_NOT_FOUND.to_string());
+    }
     Ok(())
 }
 
@@ -398,3 +466,81 @@ pub async fn upsert_user_llm_setting(setting: &UserLLmSetting) -> Result<UserLLm
         .map_err(|e| format!("保存用户偏好失败: {}", e))?;
     Ok(inserted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 新建厂商：默认值 + API Key 加密入库（明文不得直存）
+    #[test]
+    fn build_provider_encrypts_api_key() {
+        // SAFETY: edition 2024 起 set_var 为 unsafe；本测试独占该变量。
+        unsafe { std::env::set_var("LLM_KEY_ENCRYPT_KEY", "abcdefghijklmnopqrstuvwxyz123456") };
+
+        let p = build_provider_entity(
+            "openai".to_string(),
+            "OpenAI".to_string(),
+            Some("https://api.openai.com/v1".to_string()),
+            Some("sk-test-api-key-12345".to_string()),
+            Some(10),
+            None,
+            Some(7),
+        );
+
+        assert_eq!(p.id, 0, "自增列占位为 0");
+        assert!(p.enable, "新建厂商默认启用");
+        assert!(!p.is_local, "is_local 缺省 false");
+        assert_eq!(p.weight, Some(10));
+        assert_eq!(p.created_by, Some(7));
+        assert_eq!(p.deleted, 0);
+        assert!(p.secret_key.is_none());
+        assert!(p.extra_config.is_none());
+
+        let stored = p.api_key.expect("应写入密钥");
+        assert_ne!(stored, "sk-test-api-key-12345", "明文不得直接入库");
+        assert_eq!(
+            utils::crypto::decrypt_api_key(&stored).expect("密文应可解密"),
+            "sk-test-api-key-12345"
+        );
+
+        // SAFETY: 同上，清理本测试设置的变量。
+        unsafe { std::env::remove_var("LLM_KEY_ENCRYPT_KEY") };
+    }
+
+    /// 空串 / 缺省密钥原样保留（与桌面命令一致），空串不会被加密成密文
+    #[test]
+    fn build_provider_keeps_blank_key() {
+        let p = build_provider_entity(
+            "local".to_string(),
+            "本地模型".to_string(),
+            None,
+            Some(String::new()),
+            None,
+            Some(true),
+            None,
+        );
+        assert_eq!(p.api_key.as_deref(), Some(""));
+        assert!(p.is_local);
+        assert!(p.created_by.is_none());
+
+        let p = build_provider_entity(
+            "local".to_string(),
+            "本地模型".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(p.api_key.is_none());
+    }
+
+    /// 文案必须保留「未找到」，否则 api 层无法映射成 404
+    #[test]
+    fn not_found_messages_map_to_404() {
+        assert!(LLM_PROVIDER_NOT_FOUND.contains("未找到"));
+        assert!(LLM_MODEL_NOT_FOUND.contains("未找到"));
+        assert!(!API_KEY_MASK.contains("sk-"), "脱敏占位符不得泄露真实前缀");
+    }
+}
+

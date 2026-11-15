@@ -9,9 +9,13 @@ pub mod auth;
 pub mod authz;
 pub mod category_routes;
 pub mod chat_routes;
+pub mod conversation_routes;
 pub mod department_routes;
 pub mod health;
 pub mod knowledge_routes;
+pub mod knowledge_asset_routes;
+pub mod llm_routes;
+pub mod numbering_routes;
 pub mod oauth_browser;
 pub mod oauth_error;
 pub mod oauth_routes;
@@ -77,6 +81,40 @@ fn check_jwt_secret(secret: Option<&str>) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// 绑定监听端口，失败时给出可操作的错误信息
+///
+/// 单独抽出来是为了让「端口被占用」的提示可以被单测覆盖，
+/// 且保证 `start_http_server_with` 只在**绑定成功之后**才打印启动日志。
+async fn bind_listener(addr: SocketAddr) -> anyhow::Result<tokio::net::TcpListener> {
+    match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => Ok(listener),
+        Err(err) => Err(anyhow::anyhow!("{}", bind_error_message(addr, &err))),
+    }
+}
+
+/// 端口占用时附上排查命令，其余 IO 错误保持原样（纯函数，便于单测）
+///
+/// 特别注意提示里那句「改 `.env.toml` 的 `[api] port`」：`bootstrap::config`
+/// 会把 TOML 的每个键无条件 `set_var`，因此 `API_PORT=3002 pnpm dev:server`
+/// 这类环境变量覆盖**不生效**，必须改配置文件（或用 `ASSETS_CONFIG_DIR`
+/// 指向另一份改过端口的 `.env.toml`）。
+fn bind_error_message(addr: SocketAddr, err: &std::io::Error) -> String {
+    if err.kind() == std::io::ErrorKind::AddrInUse {
+        format!(
+            "绑定 TCP 监听地址 {} 失败: 端口已被占用（{}），很可能已有实例在运行。\
+             排查：`ss -ltnp | grep :{port}` 或 `lsof -i :{port}`；\
+             停止残留实例：`pkill -f target/debug/assets-server`。\
+             如需换端口，请修改 .env.toml 的 [api] port（该键会覆盖同名环境变量 API_PORT），\
+             或设置 ASSETS_CONFIG_DIR 指向另一份 .env.toml",
+            addr,
+            err,
+            port = addr.port()
+        )
+    } else {
+        format!("绑定 TCP 监听地址 {} 失败: {}", addr, err)
+    }
 }
 
 /// 启动 HTTP API 服务（可注入额外路由）
@@ -164,11 +202,10 @@ pub async fn start_http_server_with(
         // 安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）挂最外层
         .layer(middleware::from_fn(security::security_headers));
 
+    // 先绑定再打印：端口被占用时不能出现「启动于 …」的假成功日志（曾导致排查时
+    // 误以为服务已起来，实际是旧实例占着端口）。
+    let listener = bind_listener(addr).await?;
     info!("HTTP API 服务启动于 http://{}", addr);
-    // 启动 HTTP 服务
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| anyhow::anyhow!("绑定 TCP 监听地址 {} 失败: {}", addr, e))?;
     // `into_make_service_with_connect_info`：让 handler / 中间件能取到 TCP 对端地址，
     // `OAUTH_TRUSTED_CIDRS` 白名单在未配置 `TRUST_PROXY_HEADERS` 时依赖它。
     axum::serve(
@@ -222,28 +259,71 @@ pub async fn build_router(
                 post(upload_routes::complete_upload),
             )
             .route("/api/upload/{id}", delete(upload_routes::abort_upload))
+            // 文件版本历史：占位符用 `{fileGroupId}`（命令参数名），extractParams 才能剥离
+            .route(
+                "/api/upload/versions/{fileGroupId}",
+                get(upload_routes::get_version_history),
+            )
             .with_state(state)
             // 上传接口必须登录（改造前匿名可调用：在 auth_middleware 之外 merge）
             .layer(middleware::from_fn(authz::authz_middleware))
             .layer(middleware::from_fn(auth_middleware))
     };
 
-    // 初始化智能问答 SSE 流式路由（LLM Router 全局共享）
-    let chat_router = {
-        let llm_router = llm_router
-            .ok_or_else(|| anyhow::anyhow!("LLM Router 未初始化，无法注册 /api/chat/stream"))?;
-        let state = std::sync::Arc::new(chat_routes::ChatRouterState { llm_router });
-        Router::new()
+    // 初始化智能问答路由（SSE 流式对话 + 会话管理，LLM Router 全局共享）
+    let (chat_router, conversation_router) = {
+        let llm_router = llm_router.ok_or_else(|| {
+            anyhow::anyhow!(
+                "LLM Router 未初始化，无法注册 /api/chat/stream 与 /api/conversations*"
+            )
+        })?;
+
+        let chat_state = std::sync::Arc::new(chat_routes::ChatRouterState {
+            llm_router: llm_router.clone(),
+        });
+        let chat_router = Router::new()
             .route("/api/chat/stream", post(chat_routes::chat_stream))
-            .with_state(state)
+            .with_state(chat_state)
             // SSE 对话必须登录（改造前匿名可调用：在 auth_middleware 之外 merge）
             .layer(middleware::from_fn(authz::authz_middleware))
-            .layer(middleware::from_fn(auth_middleware))
+            .layer(middleware::from_fn(auth_middleware));
+
+        // 会话管理：路径占位符沿用命令参数名 {convId}，前端 extractParams 才能剥离
+        let conversation_state =
+            std::sync::Arc::new(conversation_routes::ConversationRouterState { llm_router });
+        let conversation_router = Router::new()
+            .route(
+                "/api/conversations",
+                get(conversation_routes::list_conversations)
+                    .post(conversation_routes::create_conversation),
+            )
+            .route(
+                "/api/conversations/{convId}/messages",
+                get(conversation_routes::list_messages).post(conversation_routes::send_message),
+            )
+            .route(
+                "/api/conversations/{convId}/title",
+                put(conversation_routes::update_title),
+            )
+            .route(
+                "/api/conversations/{convId}",
+                delete(conversation_routes::delete_conversation),
+            )
+            .with_state(conversation_state)
+            // 会话数据按令牌 sub 隔离，必须登录
+            .layer(middleware::from_fn(authz::authz_middleware))
+            .layer(middleware::from_fn(auth_middleware));
+
+        (chat_router, conversation_router)
     };
 
     // 合并所有路由（外部注入的路由在顶层合并，不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
     let has_extra_routes = extra_routes.is_some();
-    let mut app = create_router(pool).merge(upload_router).merge(chat_router);
+    let mut app = create_router(pool)
+        .merge(upload_router)
+        .merge(chat_router)
+        .merge(conversation_router);
+
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
     }
@@ -420,6 +500,77 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route(
             "/api/knowledge/{id}",
             delete(knowledge_routes::delete_knowledge),
+        )
+        // OKF 知识资产（新表 knowledge_asset）
+        // 注：路径占位符沿用命令参数名（{treeNodeId} / {id} / {assetId}），
+        // 前端 extractParams 才能把参数从 body 里剥离。
+        // `/api/knowledge/asset` 为静态段，与上面的 `/api/knowledge/{id}` 共存（matchit 静态优先）。
+        .route(
+            "/api/knowledge/asset",
+            get(knowledge_asset_routes::list_assets).post(knowledge_asset_routes::create_asset),
+        )
+        .route(
+            "/api/knowledge/asset/by-tree-node/{treeNodeId}",
+            get(knowledge_asset_routes::get_by_tree_node),
+        )
+        .route(
+            "/api/knowledge/asset/{id}",
+            get(knowledge_asset_routes::get_asset)
+                .put(knowledge_asset_routes::update_asset)
+                .delete(knowledge_asset_routes::delete_asset),
+        )
+        .route(
+            "/api/knowledge/asset/{assetId}/attach",
+            post(knowledge_asset_routes::attach_file),
+        )
+        // LLM 厂商 / 模型 / 用户偏好
+        // 注：`fetch-models` 的占位符用 `{providerId}`（命令参数名），
+        // 其余路径占位符 `{id}` 对应命令的 `id`，前端 extractParams 才能剥离。
+        // 用户偏好两条只要求登录（个人配置，不设权限点），在 authz::AUTH_ONLY_ROUTES 登记。
+        .route(
+            "/api/llm/providers",
+            get(llm_routes::list_providers).post(llm_routes::create_provider),
+        )
+        .route(
+            "/api/llm/providers/{id}",
+            get(llm_routes::get_provider)
+                .put(llm_routes::update_provider)
+                .delete(llm_routes::delete_provider),
+        )
+        .route(
+            "/api/llm/providers/{providerId}/fetch-models",
+            post(llm_routes::fetch_models),
+        )
+        .route(
+            "/api/llm/models",
+            get(llm_routes::list_models).post(llm_routes::create_model),
+        )
+        .route(
+            "/api/llm/models/{id}",
+            put(llm_routes::update_model).delete(llm_routes::delete_model),
+        )
+        .route(
+            "/api/llm/user-setting",
+            get(llm_routes::get_user_setting).post(llm_routes::save_user_setting),
+        )
+        // 单据编号规则
+        // 注：`save_numbering_rule(id, input)` / `reset_numbering_sequence(bizType, resetKey)`
+        // 的请求体形状必须与 Tauri 命令参数逐字一致（前端 extractParams 只剥路径参数）。
+        .route(
+            "/api/numbering/rules",
+            get(numbering_routes::get_rules),
+        )
+        .route(
+            "/api/numbering/rules",
+            post(numbering_routes::save_rule),
+        )
+        .route(
+            "/api/numbering/rules/{bizType}",
+            get(numbering_routes::get_rule),
+        )
+        .route(
+            "/api/numbering/rules/{bizType}/reset",
+            post(numbering_routes::reset_sequence),
         )
         // 菜单
         .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
@@ -703,6 +854,38 @@ mod tests {
         assert!(check_jwt_secret(Some(&"a".repeat(32))).is_ok());
         // 内置默认值（Tauri 桌面模式使用的兜底值）也必须通过，保证本地 HTTP 可用
         assert!(check_jwt_secret(Some("assets-platform-default-secret-key")).is_ok());
+    }
+
+    // ===== 端口占用提示（避免「启动于 …」假成功日志 + 给出可操作排查步骤）=====
+
+    #[test]
+    fn bind_error_message_addrinuse_is_actionable() {
+        let addr: SocketAddr = "0.0.0.0:3001".parse().expect("合法地址");
+        let err = std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            "Address already in use (os error 98)",
+        );
+        let msg = bind_error_message(addr, &err);
+        // 保留原错误上下文，便于和系统报错对照
+        assert!(msg.contains("Address already in use"), "{}", msg);
+        // 明确「端口被占用」而不是含糊的「启动失败」
+        assert!(msg.contains("端口已被占用"), "{}", msg);
+        // 给出定位与清理命令、以及换端口的正确做法（改 TOML，而非环境变量）
+        assert!(msg.contains("ss -ltnp | grep :3001"), "{}", msg);
+        assert!(msg.contains("pkill -f target/debug/assets-server"), "{}", msg);
+        assert!(msg.contains("[api] port"), "{}", msg);
+        assert!(msg.contains("ASSETS_CONFIG_DIR"), "{}", msg);
+    }
+
+    #[test]
+    fn bind_error_message_other_errors_keep_original() {
+        let addr: SocketAddr = "127.0.0.1:3001".parse().expect("合法地址");
+        // 非端口占用（例如无权限绑定特权端口）：不应误报「端口已被占用」
+        let err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+        let msg = bind_error_message(addr, &err);
+        assert!(msg.contains("绑定 TCP 监听地址 127.0.0.1:3001 失败"), "{}", msg);
+        assert!(msg.contains("permission denied"), "{}", msg);
+        assert!(!msg.contains("端口已被占用"), "{}", msg);
     }
 }
 

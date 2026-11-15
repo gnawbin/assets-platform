@@ -247,7 +247,9 @@ class HttpUploadAdapter implements UploadAdapter {
   }
 
   async getVersionHistory(fileGroupId: string): Promise<UploadVersionInfo[]> {
-    const res = await fetch(`${this.baseUrl}/upload/version-history/${fileGroupId}`, {
+    // 后端路由：GET /api/upload/versions/{fileGroupId}
+    // 响应与 Tauri 命令 upload_get_version_history 同形（camelCase，id 为字符串）
+    const res = await fetch(`${this.baseUrl}/upload/versions/${encodeURIComponent(fileGroupId)}`, {
       headers: withAuth(),
     });
     if (!res.ok) throw new Error(`获取版本历史失败: ${res.statusText}`);

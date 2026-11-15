@@ -78,6 +78,33 @@ pub struct UploadRouterState {
     pub upload_mgr: UploadManager,
 }
 
+/// 文件版本历史条目（形状与 Tauri 命令 `upload_get_version_history` 一致）
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct UploadVersionItem {
+    /// 上传记录 ID（字符串形式的 i64，避免 JS 精度丢失）
+    pub id: String,
+    /// 版本号（从 1 开始递增）
+    pub version: i32,
+    /// 是否最新版本
+    #[serde(rename = "isLatest")]
+    pub is_latest: bool,
+    /// 原始文件名
+    #[serde(rename = "originalFilename")]
+    pub original_filename: String,
+    /// 文件大小（字节）
+    #[serde(rename = "fileSize")]
+    pub file_size: i64,
+    /// 文件访问地址
+    #[serde(rename = "fileUrl")]
+    pub file_url: Option<String>,
+    /// 变更原因
+    #[serde(rename = "changeReason")]
+    pub change_reason: Option<String>,
+    /// 创建时间（RFC3339）
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
 // ======================== 路由处理函数 ========================
 
 /// 初始化分片上传（占位）
@@ -347,3 +374,80 @@ pub async fn abort_upload(
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
+
+/// GET /api/upload/versions/{fileGroupId} - 文件版本历史
+///
+/// 对应 Tauri 命令 `upload_get_version_history(fileGroupId)`：只返回已 `committed`
+/// 的版本，按版本号倒序。返回形状与命令逐字一致（`id` 为字符串、时间字段为 RFC3339）。
+#[utoipa::path(
+    get,
+    path = "/api/upload/versions/{fileGroupId}",
+    tag = "大文件上传",
+    params(("fileGroupId" = String, Path, description = "文件分组 ID（同组不同版本共用）")),
+    responses(
+        (status = 200, description = "版本历史数组（按版本号倒序）"),
+        (status = 500, description = "服务端错误", body = ApiError),
+    )
+)]
+pub async fn get_version_history(
+    State(state): State<Arc<UploadRouterState>>,
+    Path(file_group_id): Path<String>,
+) -> Result<Json<ApiResponse<Vec<UploadVersionItem>>>, ApiError> {
+    let schema = database::current_schema_name();
+
+    let records = state
+        .upload_mgr
+        .get_version_history(&schema, &file_group_id)
+        .await
+        .map_err(ApiError::internal_error)?;
+
+    // 形状与桌面命令 upload_get_version_history 保持一致
+    let versions: Vec<UploadVersionItem> = records
+        .into_iter()
+        .map(|r| UploadVersionItem {
+            id: r.id.to_string(),
+            version: r.version,
+            is_latest: r.is_latest,
+            original_filename: r.original_filename,
+            file_size: r.file_size,
+            file_url: r.file_url,
+            change_reason: r.change_reason,
+            created_at: r.created_at.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(ApiResponse::success(versions)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 版本历史响应必须是 camelCase（与 Tauri 命令形状逐字一致）
+    #[test]
+    fn version_item_is_camel_case() {
+        let item = UploadVersionItem {
+            id: "42".to_string(),
+            version: 2,
+            is_latest: true,
+            original_filename: "手册.pdf".to_string(),
+            file_size: 2048,
+            file_url: Some("https://minio.local/k/a.pdf".to_string()),
+            change_reason: Some("修订".to_string()),
+            created_at: "2026-11-14T05:00:00+00:00".to_string(),
+        };
+
+        let json = serde_json::to_value(&item).expect("应可序列化");
+        assert_eq!(json["id"], "42");
+        assert_eq!(json["isLatest"], true);
+        assert_eq!(json["originalFilename"], "手册.pdf");
+        assert_eq!(json["fileSize"], 2048);
+        assert_eq!(json["fileUrl"], "https://minio.local/k/a.pdf");
+        assert_eq!(json["changeReason"], "修订");
+        assert_eq!(json["createdAt"], "2026-11-14T05:00:00+00:00");
+        // 不得出现 snake_case 字段名
+        assert!(json.get("is_latest").is_none());
+        assert!(json.get("original_filename").is_none());
+    }
+}
+

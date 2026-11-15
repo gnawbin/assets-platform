@@ -114,6 +114,13 @@ pub const SERVICE_FORBIDDEN_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/sandbox/sessions/{scope}/files/list"),
     ("POST", "/api/sandbox/sessions/{scope}/pause"),
     ("POST", "/api/sandbox/sessions/{scope}/resume"),
+    // 会话管理：全部 handler 以令牌 sub 作为归属键（服务身份没有 UserContext）一律 403
+    ("GET", "/api/conversations"),
+    ("POST", "/api/conversations"),
+    ("GET", "/api/conversations/{convId}/messages"),
+    ("POST", "/api/conversations/{convId}/messages"),
+    ("PUT", "/api/conversations/{convId}/title"),
+    ("DELETE", "/api/conversations/{convId}"),
 ];
 
 
@@ -121,6 +128,9 @@ pub const SERVICE_FORBIDDEN_ROUTES: &[(&str, &str)] = &[
 pub const AUTH_ONLY_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/users/me"),
     ("GET", "/api/menus/user"),
+    // LLM 用户偏好：个人配置，只需要登录（归属取令牌 sub）
+    ("GET", "/api/llm/user-setting"),
+    ("POST", "/api/llm/user-setting"),
 ];
 
 /// 完全公开（不经过认证中间件）的路由，仅用于自检对账
@@ -220,6 +230,45 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ("PUT", "/api/knowledge/node/{id}/move", "knowledge:edit"),
     ("DELETE", "/api/knowledge/{id}", "knowledge:delete"),
     ("DELETE", "/api/knowledge/node/{id}", "knowledge:delete"),
+    // ===== OKF 知识资产（新表 knowledge_asset，复用知识库权限点）=====
+    ("GET", "/api/knowledge/asset", "knowledge:list"),
+    (
+        "GET",
+        "/api/knowledge/asset/by-tree-node/{treeNodeId}",
+        "knowledge:list",
+    ),
+    ("GET", "/api/knowledge/asset/{id}", "knowledge:list"),
+    ("POST", "/api/knowledge/asset", "knowledge:add"),
+    ("PUT", "/api/knowledge/asset/{id}", "knowledge:edit"),
+    ("DELETE", "/api/knowledge/asset/{id}", "knowledge:delete"),
+    // 绑定文件属于修改资产内容
+    ("POST", "/api/knowledge/asset/{assetId}/attach", "knowledge:edit"),
+    // ===== LLM 厂商 / 模型 =====
+    // 读写统一走 LLM 管理权限点：读 `knowledge:llm:list`（既有），写 `knowledge:llm:edit`（新增）
+    ("GET", "/api/llm/providers", "knowledge:llm:list"),
+    ("GET", "/api/llm/providers/{id}", "knowledge:llm:list"),
+    ("POST", "/api/llm/providers", "knowledge:llm:edit"),
+    ("PUT", "/api/llm/providers/{id}", "knowledge:llm:edit"),
+    ("DELETE", "/api/llm/providers/{id}", "knowledge:llm:edit"),
+    // 拉取模型会写库（批量 upsert），按写权限处理
+    (
+        "POST",
+        "/api/llm/providers/{providerId}/fetch-models",
+        "knowledge:llm:edit",
+    ),
+    ("GET", "/api/llm/models", "knowledge:llm:list"),
+    ("POST", "/api/llm/models", "knowledge:llm:edit"),
+    ("PUT", "/api/llm/models/{id}", "knowledge:llm:edit"),
+    ("DELETE", "/api/llm/models/{id}", "knowledge:llm:edit"),
+    // ===== 单据编号规则 =====
+    ("GET", "/api/numbering/rules", "system:numbering:list"),
+    ("GET", "/api/numbering/rules/{bizType}", "system:numbering:list"),
+    ("POST", "/api/numbering/rules", "system:numbering:edit"),
+    (
+        "POST",
+        "/api/numbering/rules/{bizType}/reset",
+        "system:numbering:reset",
+    ),
     // ===== 流程（领用 / 归还 / 调拨 / 维修 / 报废 / 采购）=====
     ("GET", "/api/process/receive", "process:receive:list"),
     ("POST", "/api/process/receive", "process:receive:add"),
@@ -289,8 +338,17 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ("POST", "/api/upload/{id}/commit", "upload:file:add"),
     ("GET", "/api/upload/{id}/progress", "upload:file:list"),
     ("DELETE", "/api/upload/{id}", "upload:file:delete"),
+    // 文件版本历史（只读）
+    ("GET", "/api/upload/versions/{fileGroupId}", "upload:file:list"),
     // ===== 智能问答（SSE）=====
     ("POST", "/api/chat/stream", "chat:completion:add"),
+    // ===== 智能问答（会话管理，按令牌 sub 隔离）=====
+    ("GET", "/api/conversations", "chat:conversation:list"),
+    ("POST", "/api/conversations", "chat:completion:add"),
+    ("GET", "/api/conversations/{convId}/messages", "chat:conversation:list"),
+    ("POST", "/api/conversations/{convId}/messages", "chat:completion:add"),
+    ("PUT", "/api/conversations/{convId}/title", "chat:conversation:edit"),
+    ("DELETE", "/api/conversations/{convId}", "chat:conversation:delete"),
     // ===== Agent Skill =====
     ("GET", "/api/skills", "system:skill:list"),
     ("GET", "/api/skills/count", "system:skill:list"),
