@@ -678,6 +678,70 @@ mod tests {
         assert!(response.headers().get("content-security-policy").is_some());
         assert!(response.headers().get(header::SET_COOKIE).is_some());
     }
+
+    // ==================== 授权码流程的主体限制（A-6…A-9）====================
+    //
+    // `bearer_principal` 是 L4（`/oauth/authorize`）的入口守卫：
+    // 只有**用户 JWT** 能发起授权，API Key / OAuth 令牌一律 `access_denied`。
+    // 这些分支都在触库之前返回，因此无需数据库即可断言。
+
+    /// A-6：`at_` 访问令牌不得用于授权码流程（不触库）
+    #[tokio::test]
+    async fn bearer_principal_rejects_oauth_access_token() {
+        let token = utils::oauth::generate_access_token().plaintext;
+        let headers = header_map(&[("authorization", &format!("Bearer {token}"))]);
+
+        let err = bearer_principal(&headers)
+            .await
+            .expect_err("OAuth 访问令牌必须被拒绝");
+        assert_eq!(err.body.error, "access_denied");
+    }
+
+    /// A-7：API Key 不得用于授权码流程（不触库）
+    #[tokio::test]
+    async fn bearer_principal_rejects_api_key() {
+        let key = utils::api_key::generate_api_key(utils::api_key::ApiKeyEnv::Live).plaintext;
+        let headers = header_map(&[("authorization", &format!("Bearer {key}"))]);
+
+        let err = bearer_principal(&headers)
+            .await
+            .expect_err("API Key 必须被拒绝");
+        assert_eq!(err.body.error, "access_denied");
+    }
+
+    /// A-8：缺头 / 非 Bearer 方案 → `invalid_request`（格式提示）
+    #[tokio::test]
+    async fn bearer_principal_requires_bearer_scheme() {
+        let missing = header_map(&[]);
+        let err = bearer_principal(&missing)
+            .await
+            .expect_err("缺少请求头应拒绝");
+        assert_eq!(err.body.error, "invalid_request");
+
+        let wrong_scheme = header_map(&[("authorization", "Token abc")]);
+        let err = bearer_principal(&wrong_scheme)
+            .await
+            .expect_err("非 Bearer 方案应拒绝");
+        assert_eq!(err.body.error, "invalid_request");
+        assert!(
+            err.body
+                .error_description
+                .as_deref()
+                .is_some_and(|d| d.contains("Bearer")),
+            "文案应提示 Bearer 格式"
+        );
+    }
+
+    /// A-9：Bearer 里是坏 JWT → `invalid_token`（验签失败，不触库）
+    #[tokio::test]
+    async fn bearer_principal_rejects_invalid_jwt() {
+        let headers = header_map(&[("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.bad.signature")]);
+
+        let err = bearer_principal(&headers)
+            .await
+            .expect_err("坏 JWT 必须被拒绝");
+        assert_eq!(err.body.error, "invalid_token");
+    }
 }
 
 

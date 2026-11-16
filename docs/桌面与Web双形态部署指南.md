@@ -66,16 +66,17 @@ pnpm build:web
 PGPASSWORD=123456 psql -h 127.0.0.1 -U postgres -c 'CREATE DATABASE ceshi8'
 
 # 1) 后端 HTTP（终端 A）——所有 /api/* 由它提供，后台形态无需图形环境
-ASSETS_CONFIG_DIR="$PWD/apps/backend" pnpm dev:server
-#    ⚠️ 必须带 ASSETS_CONFIG_DIR：cargo 的工作目录是 src-tauri，
-#    服务端候选路径（./.env.toml、./src-tauri/.env.toml、/etc/assets-platform/.env.toml）
-#    都不含 apps/backend/.env.toml，缺配置会因 S3 参数为空而启动失败
+pnpm dev:server
+#    配置自动发现：cargo 的 cwd 是 src-tauri，候选表包含上一级 ../.env.toml，
+#    即 apps/backend/.env.toml（与桌面 tauri dev 用的是同一份），无需任何环境变量。
+#    配置在别处 / 并排多实例时再显式指定：ASSETS_CONFIG_DIR="$PWD/apps/backend" pnpm dev:server（见 §3.2）
 
 # 2) 前端 Web（终端 B）——浏览器里自动选 http 适配器（非 Tauri 环境）
 pnpm dev:web                                  # http://localhost:1480
 #    指向其它后端：NEXT_PUBLIC_API_BASE_URL=http://<host>:3001/api pnpm dev:web
+#    也可以先启动再改：浏览器打开 http://localhost:1480/settings/server 填地址并保存（免重启）
 
-# 3) 桌面壳（可选，终端 C）—— 同一份前端，走 Tauri invoke
+# 3) 桌面壳（可选，终端 C）—— 同一份前端，走 HTTP 到内置的 127.0.0.1:3001
 pnpm tauri-dev
 ```
 
@@ -124,6 +125,55 @@ ASSETS_CONFIG_DIR=/tmp/assets-dev2 pnpm dev:server
 ⚠️ 两个实例连同一个库时 `[snowflake] worker_id` 必须不同，否则并发写会撞主键。
 前端指向第二个实例：`NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:3002/api pnpm dev:web`。
 
+#### 3.0.1 运行中切换后端地址（`/settings/server`）
+
+不想重启前端 / 重新构建时，直接改地址即可（保存后整页重载生效）：
+
+| 场景 | 操作 |
+|---|---|
+| Web / 桌面同进程调试 | 打开 `/settings/server` → 填 `http://192.168.1.10:3001` → 「测试连接」→「保存并重载」 |
+| 桌面端首次启动连不上内置服务 | 首屏直接出现「先连接服务器」表单（Gate），填好即进系统 |
+| 只想看当前连的是谁 | 同页「连接诊断」：`/healthz` 可达性、`db` 状态、往返延迟、`openapi` 版本、地址**来源** |
+| 排查远程不可达 | 点「复制诊断信息」贴给运维（含 Origin / UA / 延迟 / 状态码） |
+
+注意：
+1. 保存会清掉本地 `auth_token` / `refresh_token` / 用户与租户缓存（跨服务器的令牌无意义），需要重新登录；
+2. 非 `localhost` / `127.0.0.1` 的 `http://` 地址会先弹**二次确认**（令牌明文传输风险），确认后才保存；
+3. `NEXT_PUBLIC_API_BASE_URL` / `window.__API_BASE__` / 同源反代属于**部署固定**地址，页面保存只覆盖当前浏览器；
+4. 浏览器的 `fetch` 无法区分「端口不通 / DNS 失败 / 证书无效 / CORS 被拒」，诊断页统一显示「网络不可达 / CORS」，
+   需结合服务端日志与 `curl -v http://<host>:3001/healthz` 进一步定位。
+
+#### 3.0.2 启动即退出：`数据库初始化失败`（本质是配置没被加载）
+
+典型日志（2026-11-16 修复前，`pnpm dev:server` 必现）：
+
+```text
+WARN  bootstrap::config: 未找到 .env TOML 配置文件，将使用环境变量与各模块默认值
+WARN  database::postgres: 自动创建数据库失败: …password authentication failed for user "postgres"
+ERROR assets_server: 数据库初始化失败，服务终止: Failed to create PostgreSQL pool: …
+```
+
+成因不在数据库：cargo 的 cwd 是 `apps/backend/src-tauri`，唯一配置在上一级 `apps/backend/.env.toml`，
+而候选表当时没有 `../.env.toml` → 配置整体没加载 → PG 账号密码回落默认值 → 无头形态「失败即退出」。
+
+现在候选表已包含 `../.env.toml`（§3.2），正常情况下启动日志里能看到：
+
+```text
+INFO bootstrap::config: 已加载 .env TOML 配置文件 config=../.env.toml
+```
+
+若仍失败，按启动日志里的两条新提示逐项核对：
+
+| 检查 | 命令 / 判据 |
+|---|---|
+| 配置到底有没有加载 | `grep -a '已加载 .env TOML' <日志>`；无此行即配置没找到 |
+| 强制指定配置目录 | `ASSETS_CONFIG_DIR="$PWD/apps/backend" pnpm dev:server` |
+| 库是否存在 | `[postgres] database` 指定的库必须先建好（见本节第 0 步） |
+| PG 是否可达 | `PGPASSWORD=123456 psql -h 127.0.0.1 -U postgres -c 'select 1'` |
+
+> 失败时 `assets-server` 会额外打印一行 `排查顺序：① 是否加载 .env.toml（含当前 cwd）② PG 主机/端口/库名/密码 ③ 库是否已创建 ④ 服务端是否可达`，
+> 以及所有尝试过的候选路径（`tried=…`），排查时可直接复制。
+
 ### 3.1 生产 / 手动启动
 
 ```bash
@@ -142,12 +192,19 @@ API_PORT=3001 \
 `assets-server` 依次尝试（命中第一个可读文件即停止）：
 
 1. `$ASSETS_CONFIG_DIR/.env.toml`
-2. `./.env.toml`（当前工作目录）
+2. `./.env.toml`（当前工作目录 / 部署目录）
 3. `./src-tauri/.env.toml`
-4. `/etc/assets-platform/.env.toml`
+4. `../.env.toml`（**仓库开发布局**：cwd = `apps/backend/src-tauri` → `apps/backend/.env.toml`）
+5. `apps/backend/.env.toml`（从仓库根启动时）
+6. `/etc/assets-platform/.env.toml`
 
 > 服务端**刻意不使用** `CARGO_MANIFEST_DIR`：编译期绝对路径在换机器 / 容器后必然失效。
 > 桌面入口保持原有三条候选路径不变（含 `apps/backend/.env.toml`）。
+>
+> 第 4 条是 2026-11-16 补的：此前候选表只有 1/2/3/6，`pnpm dev:server`（cwd = `src-tauri`）
+> 读不到上一级的 `apps/backend/.env.toml`，会静默回落默认值并在数据库认证处退出
+> （详见 §3.0.2）。`[api] port` 等键由 `.env.toml` **无条件覆盖**同名环境变量，所以并排多实例
+> 也必须靠换配置文件（或 `ASSETS_CONFIG_DIR`）而非 `API_PORT=…`。
 
 文件格式见 `apps/backend/.env.example.toml`，`[section] key` 会映射为环境变量 `SECTION_KEY`
 （例如 `[api] bind` → `API_BIND`）。也可以完全不写配置文件，直接用环境变量注入。

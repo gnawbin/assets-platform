@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { api } from '@/utils/api';
+import { getApiBase } from '@/utils/apiBase';
 import { refreshAccessToken, revokeRefreshTokenOnServer } from '@/utils/adapters/httpAdapter';
 
 export interface TenantInfo {
@@ -136,6 +137,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   init: async () => {
     set({ isInitializing: true });
+
+    // 连基址都确定不了（SSR / 未知宿主）时不发请求：由 ServerConfigGate 引导用户填地址
+    if (!getApiBase()) {
+      set({ isInitializing: false });
+      return;
+    }
 
     let storedToken = localStorage.getItem('auth_token');
     const storedUser = localStorage.getItem('auth_user');

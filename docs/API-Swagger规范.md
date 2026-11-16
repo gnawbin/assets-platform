@@ -13,6 +13,15 @@ HTTP 服务默认监听 `http://127.0.0.1:3001`（可用环境变量 `API_PORT` 
 | `http://127.0.0.1:3001/swagger-ui` | Swagger UI 页面（可直接调试接口） |
 | `http://127.0.0.1:3001/api-docs/openapi.json` | OpenAPI 3.1 规范 JSON（可导入 Apifox / Postman / 代码生成器） |
 
+页面自检（服务已启动时执行，两条都应立刻返回）：
+
+```bash
+# 第一行必须是 <!-- HTML for static distribution bundle build -->
+curl -s http://127.0.0.1:3001/swagger-ui | head -1
+# 响应体约 1526593 字节（v5.32.6），几十～几百字节说明嵌的是占位资源（见 §5.2）
+curl -s -o /dev/null -w '%{size_download}\n' http://127.0.0.1:3001/swagger-ui/swagger-ui-bundle.js
+```
+
 调试受保护接口：
 
 1. `POST /api/auth/login` 拿到 `data.token`（公开接口，不需要认证）；
@@ -113,21 +122,61 @@ cargo test  -p apidoc   # 真正生成规范并序列化，捕获递归 panic �
 - **tag 划分**：认证、用户、注册审核、资产分类、固定资产、无形资产、部门、角色、菜单、
   租户、知识库、流程管理-{领用,归还,调拨,维修,报废,采购}、运维采集、大文件上传、智能问答、技能。
 
-## 5. 构建注意事项
+## 5. 构建注意事项（Swagger UI 静态资源）
 
-`utoipa-swagger-ui` 在 **build script** 阶段下载 Swagger UI 静态资源（Windows 上默认走
-`reqwest`），首次编译需要外网。离线 / 内网构建时改成 vendored 资源：
+`utoipa-swagger-ui` 在 **build script** 阶段下载 swagger-ui 官方的 `dist/`，用
+`include_bytes!` 生成 `embed.rs` 嵌进二进制（`SwaggerUiDist`），因此 **首次编译需要外网**。
+它只校验 zip 里能解出 `dist/`，**不校验文件内容** —— 于是有了 §5.2 的坑。
+
+### 5.1 离线 / 内网构建（二选一）
 
 ```toml
+# 方案 A（推荐）：资源来自 utoipa-swagger-ui-vendored crate，构建期完全不联网
 # apps/backend/src-tauri/Cargo.toml
 utoipa-swagger-ui = {version = "10.0.2", features = ["axum", "vendored"]}
 ```
 
-或用环境变量指向本地 zip：
-
 ```bash
+# 方案 B：指向本地 zip（必须是官方 release zip，内部结构 swagger-ui-5.32.6/dist/…）
 SWAGGER_UI_DOWNLOAD_URL=file:///D:/deps/swagger-ui-5.32.6.zip
 ```
+
+### 5.2 ⚠️ 占位 zip 会让 `/swagger-ui` 变成一行纯文本
+
+若把 `SWAGGER_UI_DOWNLOAD_URL` 指向自己拼的「占位 zip」（只放几个几十字节的桩文件以求编译通过），
+编译会成功，但服务起来后：
+
+```text
+$ curl -s http://127.0.0.1:3001/swagger-ui
+/* fake index.html */ url: "https://x" deepLinking: true, layout: "StandaloneLayout"
+```
+
+浏览器里就是这段纯文本（没有页面、没有接口列表）。原因是 `index.html`、
+`swagger-ui-bundle.js`、`swagger-ui.css` 全是桩文件，被 `include_bytes!` 原样嵌进了二进制。
+
+更麻烦的是 cargo 会缓存这次 build script 的输出（`target/*/build/utoipa-swagger-ui-*/out/`），
+之后即使把 `SWAGGER_UI_DOWNLOAD_URL` 去掉，只要 build script 没有重跑，二进制里仍是占位资源。
+
+排查与恢复：
+
+```bash
+# 1. 确认症状（返回一行注释 = 占位资源）
+curl -s http://127.0.0.1:3001/swagger-ui | head -1
+
+# 2. 看构建时用的是哪个 zip
+grep -a SWAGGER_UI_DOWNLOAD_URL target/debug/build/utoipa-swagger-ui-*/output
+
+# 3. 重跑 build script（需联网，或先按 §5.1 方案 B 准备好真实 zip）
+cargo clean -p utoipa-swagger-ui && cargo build -p server
+```
+
+护栏：`crates/apidoc::dist_problem()` 会在启动时体检内嵌资源并打 WARN
+（`Swagger UI 静态资源不可用，/swagger-ui 会显示成纯文本: …`）；
+`cargo test -p apidoc` 里的 `embedded_swagger_ui_dist_is_real` 在占位资源下直接失败，
+连同 `dist_problem_from` 的占位 index / 真实 dist / 半成品 dist 三条样本用例（共 8 条测试），
+把问题挡在 CI 里。
+
+### 5.3 版本配对
 
 版本必须成对：`utoipa-swagger-ui 10.x` 依赖 `utoipa ^6`，两个大版本并存会导致
 `SwaggerUi::url` 的 `OpenApi` 参数类型不匹配。

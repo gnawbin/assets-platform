@@ -415,43 +415,62 @@ pub fn run() {
 
 ### 5.2 新增：`apps/web/src/utils/apiBase.ts`
 
-优先级（T2 版）：
+优先级（T2 版，**带来源标记**，`getApiBaseSource()` 逐一对应）：
 
 ```
-1. window.__API_BASE__              ← Tauri 可选注入（企业预置地址，免手工填写）
-2. localStorage['api_base_url']     ← 用户在配置页填写的
-3. process.env.NEXT_PUBLIC_API_BASE_URL
-4. window.location.origin + '/api'  ← 浏览器同源（nginx 反代）
-5. 无 → 返回 null，触发 ServerConfigGate（不发任何业务请求）
+1. window.__API_BASE__              ← 宿主注入（企业预置地址，免手工填写）      source=injected
+2. localStorage['api_base_url']     ← 用户在 /settings/server 填写的            source=storage
+3. process.env.NEXT_PUBLIC_API_BASE_URL                                      source=env
+4. Tauri 运行时 127.0.0.1:3001      ← 兼容兜底（探活失败即触发 Gate）          source=tauri-default
+5. next dev（NODE_ENV=development） ← 兼容兜底（localhost:3001）              source=dev-default
+6. window.location.origin + '/api'  ← 浏览器同源（nginx 反代）                 source=same-origin
+7. 无 → 返回 null，触发 ServerConfigGate（不发任何业务请求）                   source=none
 ```
 
 对外导出：
 
 ```ts
+export type ApiBaseSource = 'injected' | 'storage' | 'env' | 'tauri-default'
+                          | 'dev-default' | 'same-origin' | 'none';
+
 export function getApiBase(): string | null;      // 含 /api 后缀
-export function hasServerConfigured(): boolean;
-export function setApiBase(url: string): void;    // 校验 + 规范化 + 持久化
-export function normalizeApiBase(input: string): string;  // 去尾斜杠、补/去 /api
+export function getApiOrigin(): string | null;    // 去掉 /api，用于 /healthz 与路由拼装
+export function getApiBaseSource(): ApiBaseSource;
+export function isFallbackBase(): boolean;        // 4 / 5 两条兜底
+export function describeApiBase(): { base, origin, source, isFallback, configured };
+export function hasServerConfigured(): boolean;   // 兜底也算 true，不能用于判断「用户填过没有」
+export function normalizeApiBase(input: string): string;
+export function isInsecureRemote(input: string): boolean;
+export function probeServer(origin: string, opts?: { timeoutMs?: number }): Promise<ProbeResult>;
+export function setApiBase(url: string, opts?: { allowInsecure?: boolean }): string;
 export function clearApiBase(): void;
+export class InsecureTransportError extends Error;  // code = 'INSECURE_TRANSPORT'
 ```
 
-> **必须删除 `http://127.0.0.1:3001/api` 兜底**。T2 下该兜底会让桌面静默连本机空端口，症状表现为"登录一直转圈"，极难排查。
+> **兜底保留、但只在探活失败时拦住用户**。原计划是「必须有地址才渲染」，落地时改为
+> `isFallbackBase() && /healthz 不通` 才阻断：桌面内置服务端仍在本机 3001，直接删兜底会让
+> 「一切正常」的桌面用户也被迫填地址；而兜底连不通（用户其实想连远程）时，首屏只会是一屏 401 /
+> 网络错误，照样拦不住。兜底本身随 P0-D 桌面瘦身再删除。
 
-### 5.3 新增：首次启动 Gate（阻断式）
+### 5.3 新增：首次启动 Gate（探活失败式阻断）
 
 ```
 apps/web/src/components/ServerConfigGate.tsx   [新增，'use client']
    └── 挂在 apps/web/src/app/layout.tsx 中包裹 {children}
-        · 未配置 → 全屏配置表单（地址 + 测试连接 + 保存），不渲染业务页面
-        · 已配置 → 正常渲染 children
+        · 首帧统一渲染 Loader（避免静态导出的水合不一致）
+        · getApiBase() 为 null                → 全屏配置表单，不渲染业务页面
+        · isFallbackBase() 且 /healthz 不通   → 全屏配置表单（表单内可直接测试连接）
+        · 其余（storage / env / injected / 同源）→ 直接渲染 children，不做探活
 ```
+
+探活成功按 origin 缓存到 `sessionStorage['api_base_probe_ok']`（5 分钟），换地址后 origin 不匹配即失效。
 
 同时必须短路 `authStore.init()`，否则首屏会先打 `/api/auth/session` 并刷一屏网络错误：
 
 ```ts
 // store/authStore.ts -> init()
-if (!hasServerConfigured()) {
-  set({ isInitializing: false, isLoggedIn: false });
+if (!getApiBase()) {
+  set({ isInitializing: false });
   return;
 }
 ```
@@ -460,23 +479,34 @@ if (!hasServerConfigured()) {
 
 ### 5.4 新增：`apps/web/src/app/settings/server/page.tsx`（连接配置与诊断）
 
+> 该页**不套 `Layout`**：桌面首次启动 / 浏览器打开静态站点时还没有令牌，侧边栏无数据可用；
+> 该路径已加入 `app/layout.tsx` 的未登录重定向白名单 `PUBLIC_PATHS`。
+
 | 区域 | 内容 |
 |---|---|
-| 服务器地址 | 输入框 + 「测试连接」+ 「保存并重载」 |
-| 连接诊断 | ① `GET /livez` 可达性 ② `/api-docs/openapi.json` 的 `info.version` ③ 往返延迟（ms）④ 当前页面 Origin ⑤ 解析后的 API 基址 |
-| 错误分类 | 超时 / DNS 失败 / TLS 证书 / CORS 拒绝 / 404（路径配错）/ 401（需登录）/ 5xx |
-| 辅助 | 「恢复默认」「复制诊断信息」（一键贴给运维）；「最近使用」列表为 P2 |
-| Web 版 | 浏览器同源，本页只读展示当前地址 |
+| 服务器地址 | 输入框 + 「测试连接」+ 「保存并重载」+「恢复默认」（组件：`components/ServerConnectionForm.tsx`，与 Gate 共用） |
+| 连接诊断 | ① `GET /healthz` 可达性 + `db` 字段 ② `/api-docs/openapi.json` 的 `info.version` ③ 往返延迟（ms）④ 当前页面 Origin ⑤ 解析后的 API 基址与**来源** |
+| 错误分类 | 超时（`timeout`）/ 网络不可达含 CORS 与证书（`network`）/ 404 等路径配错（`http-4xx`）/ 5xx 服务异常（`http-5xx`） |
+| 辅助 | 「恢复默认」「复制诊断信息」（一键贴给运维：基址 / 来源 / Origin / healthz / db / 版本 / UA）；「最近使用」列表为 P2 |
+| 部署固定来源 | `env` / `injected` / `same-origin` 时顶部提示「此处保存只影响当前浏览器」 |
 
-入口：`app/settings/page.tsx` 增加「服务端连接」卡片（现有 `settings/*` 已含 users/roles/llm/api-keys 等 12 个子页，风格保持一致）。
+入口（4 处）：
+1. `app/settings/page.tsx` 首张卡片「服务端连接」；
+2. `components/Layout.tsx` 用户菜单 →「服务端连接」；
+3. `app/login/page.tsx` 底部「服务端连接设置」；
+4. `ServerConfigGate` 的内部表单（`mode="gate"`）。
 
 ### 5.5 地址校验与切换规则
 
-1. 必须以 `http://` 或 `https://` 开头，自动去尾斜杠；
+1. 必须以 `http://` 或 `https://` 开头（裸主机自动补 `http://`），自动去尾斜杠；
 2. 填 `https://host` → 内部补 `/api`；填 `https://host/api` → 不重复补；
-3. **非 `localhost`/`127.0.0.1` 的 `http://` → 阻断**，提示改用 HTTPS（防 token 明文）；
-4. 保存时**清空 `auth_token` / `refresh_token`**（跨服务器 token 无意义，且会引发 401 死循环），随后 `location.reload()`；
-5. `setApiBase` 成功后立即用新地址探活一次，失败则回滚并提示。
+3. **非 `localhost`/`127.0.0.1` 的 `http://` → 默认拒绝**（`InsecureTransportError`），
+   表单捕获后弹**内联二次确认**（黄色 Alert：说明令牌会明文传输，按钮「仍要保存」/「取消」），
+   确认后以 `setApiBase(url, { allowInsecure: true })` 重试 —— 内网部署仍可用，但用户明确知情；
+4. 保存时**清空 5 个会话键**（`auth_token` / `refresh_token` / `auth_user` / `available_tenants` /
+   `selected_tenant_id`，跨服务器令牌无意义且会引发 401 死循环），随后 `location.reload()`；
+5. 「测试连接」= `GET {origin}/healthz`（免鉴权），可在未登录状态下验证；保存不做探活回滚
+   （由用户自行先测后存，避免「先写地址又回滚」造成困惑）。
 
 ### 5.6 前端映射表补录（42 条）
 
@@ -610,7 +640,7 @@ get_conversation_messages: { method: 'GET', path: '/conversations/{conversationI
 | P0-A | 上传版本历史 | 1 | ✅ 完成 | `upload_routes.rs`（+1 handler + 1 条 camelCase 单测，复用 `UploadRouterState.upload_mgr`）+ `lib.rs` + `authz.rs`（复用 `upload:file:list`）+ `openapi.rs` + `httpAdapter.ts`（`TAURI_ONLY_COMMANDS` 仅剩 RAG 2 条）+ `sys_menu` 308 |
 | P0-A | RAG | 2 | ⬜ 推迟 P2 | — |
 | P0-B | `/livez` + 版本 + CORS | — | ⬜ 待做 | — |
-| P0-C | `apiBase.ts` + Gate + 诊断页 + 删适配器 | — | ⬜ 待做 | — |
+| P0-C | `apiBase.ts` + Gate + 诊断页 + 删适配器 | — | ✅ 完成 | ✅ `utils/apiBase.ts`（统一基址解析 + 来源标记 + `probeServer` + 明文 http 校验，2026-11-16）<br>✅ 删适配器：`tauriAdapter.ts` / `manager.ts` 已删除，`adapters/index.ts` 收敛为 HTTP-only，前端已无 `invoke()` 调用点<br>✅ `ServerConfigGate`（兜底来源 + `/healthz` 探活失败才阻断，`sessionStorage` 缓存 5 分钟）<br>✅ `settings/server` 诊断页 + `components/ServerConnectionForm`（与 Gate 共用），入口 4 处（设置卡片 / 用户菜单 / 登录页 / Gate）<br>✅ 验证：`jest` **155 passed / 2 failed**（157 条，失败项仍为 `FileUploader.test.tsx` 历史用例）、`tsc --noEmit` 通过 |
 | P0-D | 桌面瘦身 | — | ⬜ 待做 | — |
 
 **已落地验证（2026-11-13）**
@@ -759,10 +789,10 @@ get_conversation_messages: { method: 'GET', path: '/conversations/{conversationI
 > 冒烟脚本：`/tmp/smoke_upl.sh`（一次性验证用，未入库）。
 > 注意 `file_uploads` 无自增（`id` 为 `bigint` 无默认值），冒烟需显式给 `id`；`created_by` 在 DTO 里是 `i64`（非 Option），造数时不能留空。
 
-> **待测待开发提示（2026-11-16）**：本清单落地的接口全部经 `auth_middleware` + `authz_middleware`，凭证分流（`ak_` / `at_` / `rt_` / JWT）的测试覆盖与已知行为缝单独整理在 **《OAuth2.1 Bearer Token待测待开发清单.md》**。其中两项会直接影响 Web 模式的既有功能，建议优先处理：
+> **待测待开发提示（2026-11-16）**：本清单落地的接口全部经 `auth_middleware` + `authz_middleware`，凭证分流（`ak_` / `at_` / `rt_` / JWT）的测试覆盖与已知行为缝单独整理在 **《OAuth2.1 Bearer Token待测待开发清单.md》**。两项曾直接影响 Web 模式的功能，均已于 2026-11-16 修复：
 >
-> 1. **R1**：`httpAdapter.ts:36` 的默认 base 自带 `/api`，而映射表路径也以 `/api/` 开头 → 未设 `NEXT_PUBLIC_API_BASE_URL` 时请求变成 `/api/api/...`（对应该文档 D-6）。
-> 2. **R2**：`HttpUploadAdapter` 只有 `withAuth`、没有 401 续期，大文件分片跨过令牌过期点会整批失败（对应该文档 D-7）。
+> 1. ~~**R1**：`httpAdapter.ts:36` 的默认 base 自带 `/api`，而映射表路径也以 `/api/` 开头 → 未设 `NEXT_PUBLIC_API_BASE_URL` 时请求变成 `/api/api/...`~~ → ✅ 已由 `utils/apiBase.ts` 的 `getApiOrigin()` 统一（对应该文档 D-6），并新增 `/settings/server` 运行时改址。
+> 2. ~~**R2**：`HttpUploadAdapter` 只有 `withAuth`、没有 401 续期，大文件分片跨过令牌过期点会整批失败~~ → ✅ 已补 `request()` 内建续期（对应该文档 D-7）。
 
 
 
@@ -790,6 +820,11 @@ get_conversation_messages: { method: 'GET', path: '/conversations/{conversationI
 | 2026-11-14 | **P0-A 第 6 模块落地：上传版本历史 1 条路由**。`upload_routes.rs` 新增 `get_version_history`（复用 `UploadRouterState.upload_mgr`，无重复构造 S3 客户端）+ `UploadVersionItem`（camelCase 逐字对齐命令，`id` 为字符串、`createdAt` RFC3339）+ 1 条序列化单测；`lib.rs` 在 `upload_router` 挂 `GET /api/upload/versions/{fileGroupId}`（占位符复用命令参数名，`extractParams` 才能剥离；静态段不遮蔽 `/api/upload/{id}/progress`）；`authz.rs` 复用既有 `upload:file:list`；`public_migration.sql` 补 `sys_menu` 308；`openapi.rs` 登记；`httpAdapter.ts` 加映射并移出 `TAURI_ONLY_COMMANDS`（**该集合现仅剩 RAG 2 条**）。**路由从原计划的 `/api/upload/{uploadId}/versions` 改为 `/api/upload/versions/{fileGroupId}`** |
 | 2026-11-14 | 上传版本历史验证全绿：`cargo test -p api --lib` **96 passed**、`cargo test -p apidoc` 4 passed、`pnpm test -- httpAdapter` 4 passed、`pnpm test -- uploadService` **24 passed**；实机冒烟 15 项（pending/deleted 过滤、倒序、纯 camelCase、`id` 字符串、空分组 200+`[]`、401、兄弟路由未遮蔽、Swagger 99 路径、冒烟数据已清理）。同时修掉前端 `HttpUploadAdapter.getVersionHistory` 指向**不存在**的 `/upload/version-history/{id}`（Web 模式此前必 404），改为 `/upload/versions/{id}` + `encodeURIComponent`，并补 4 条单测 |
 | 2026-11-16 | **新增《OAuth2.1 Bearer Token待测待开发清单.md》**：首次系统梳理「`at_` 令牌 → `auth_middleware` → `authz`」这条**资源访问路径**的测试覆盖。结论：26 条 `--lib oauth` 单测全在**签发侧**，`parse_credential` 的分流与 `verify_access_token` 均 **0 条断言**，`crates/api` 无 `tests/` 集成目录。列出 4 个后端行为缝（资源侧不校验用户状态 / 禁用用户不吊销 `sys_oauth_token` / OAuth 令牌无限流 / `auth_middleware` 注释过时）与 4 处页面对齐缺口（`httpAdapter` 默认 base 与映射表路径重复 `/api`；上传通道无 401 续期；前端不透出 `ApiError.message`；二次 401 不清会话），并给出 A/B/C/E 四组用例（E 组为端到端冒烟）、D-1…D-10 开发项与 PR 切分。同时在《OAuth2.1与API Key统一鉴权设计方案.md》新增附录 B 做交叉引用 |
+| 2026-11-16 | **前端切换为纯 HTTP 单通道（Tauri IPC 通道整体下线）**。新增 `apps/web/src/utils/apiBase.ts`（`getApiBase()` 含 `/api`、`getApiOrigin()` 不含、`normalizeApiBase`/`setApiBase`/`clearApiBase`，优先级 `window.__API_BASE__` → `localStorage['api_base_url']` → `NEXT_PUBLIC_API_BASE_URL` → 桌面/本机 3001 兜底 → 同源 `/api`）；`httpAdapter.buildUrl()` 改用 `getApiOrigin()`，**`/api/api` 双前缀 bug 消失**；`!response.ok` 走 `extractServerMessage()` 透出后端 `message`（403 的 `scope` 挂 `err.scope`），续期后仍 401 立即 `clearAuthSession()`；`uploadService` 改为运行时解析基址 + `request()` 内建 401 续期（S3 presigned PUT 仍不带 `Authorization`）；`useChatStream` SSE 改用 `getApiOrigin()` + 401 重放一次；`adapters/index.ts` 重写为 HTTP-only（`getAdapterType()` 恒 `'http'`），删除 `tauriAdapter.ts` / `manager.ts`，`layout.tsx` 的适配器自动探测 `useEffect` 移除；`TAURI_ONLY_COMMANDS` 改为 `UNEXPOSED_BACKEND_COMMANDS`（仅 RAG 2 条无 HTTP 路由的命令）。**验证**：`jest` **129 passed / 2 failed**（失败项为 `FileUploader.test.tsx` 两条文件大小/类型校验断言，属组件历史用例失配，本轮未触及该组件）、`tsc --noEmit` 通过；新增 `apiBase.test.ts` 15 条、`oauthClientService.test.ts` 5 条（C-6）、`httpAdapter` 认证续期 4 条 + URL 拼装 3 条 + `extractServerMessage` 5 条、`uploadService` 24→28 条、`useChunkedUpload` 13 条按两步提交重写 |
+| 2026-11-16 | **OAuth2.1 清单 PR-1 落地（纯测试 + 注释，零行为变更）**：`api/src/auth.rs` 补 A-1…A-5（`at_`/`rt_`/`ak_`/空令牌/JWT 五条分流断言，用 `utils::oauth` / `utils::api_key` 的真实生成器造 token，避免手写字面量长度写错）+ 反向用例「`ak_` 格式非法不得降级为 JWT」；`api/src/oauth_browser.rs` 补 A-6…A-9（`bearer_principal` 拒绝 `at_` / `ak_`、缺头与非 Bearer 方案、坏 JWT，均 4 条 `#[tokio::test]` 且在触库前返回）；`auth_middleware` 文档注释按 D-8 重写为四分支（`ak_` / `at_` / `rt_` / JWT）。`cargo test -p api --lib` **96 → 106 passed** |
+| 2026-11-16 | **P0-C 收尾：服务器地址配置 UI + 首屏 Gate + 连接诊断页**。`utils/apiBase.ts` 增加 `ApiBaseSource` / `getApiBaseSource()` / `isFallbackBase()` / `describeApiBase()` / `isInsecureRemote()` / `probeServer()` / `InsecureTransportError`，`setApiBase(url, { allowInsecure })` 保存时清空 5 个会话键；新增 `components/ServerConnectionForm.tsx`（`mode: 'gate' | 'page'`，内联二次确认非回环 `http://`）、`components/ServerConfigGate.tsx`（**只在「兜底来源 + `/healthz` 探活失败」时阻断**，`sessionStorage` 缓存 5 分钟）、`app/settings/server/page.tsx`（地址表单 + `/healthz` / `db` / 延迟 / `openapi` 版本 / 来源 / 一键复制，**不套 `Layout`**）；入口 4 处（设置卡片 / 用户菜单 / 登录页底部 / Gate）；`layout.tsx` 白名单 `PUBLIC_PATHS` 放行 `/settings/server`；`authStore.init()` 在 `getApiBase()` 为 `null` 时短路；3 处「未配置服务器地址」文案统一指向「系统配置 → 服务端连接」。**验证**：`jest` **155 passed / 2 failed**（157 条，失败项仍为 `FileUploader.test.tsx` 历史用例、未触及该组件）、`tsc --noEmit` 通过；新增 `apiBase.test.ts` 15 → 31 条、`ServerConnectionForm.test.tsx` 6 条、`ServerConfigGate.test.tsx` 4 条 |
+| 2026-11-16 | **修复「后端 http server 无法启动」**：`crates/server/src/main.rs::config_candidates()` 漏了仓库开发布局的 `../.env.toml`，而 `pnpm dev:server` 的 cwd 是 `apps/backend/src-tauri`，唯一的配置却在上一级 `apps/backend/.env.toml` → 配置整体未加载、PG 账号密码回落默认值 → `数据库初始化失败…password authentication failed for user "postgres"` → 无头形态「失败即退出」（桌面形态不受影响，因其 `load_env()` 用的是 `CARGO_MANIFEST_DIR`）。候选表改为 6 条：`$ASSETS_CONFIG_DIR` → `./` → `./src-tauri/` → **`../`** → `apps/backend/` → `/etc/assets-platform/`，并把逻辑抽成纯函数 `config_candidates_from(Option<&str>)`（空白 `ASSETS_CONFIG_DIR` 视为未设置）；配置未加载时 WARN 追加 `tried=<所有候选路径>`，数据库初始化失败时追加「排查顺序：① 是否加载 .env.toml（含 cwd）② PG 主机/端口/库名/密码 ③ 库是否已创建 ④ 服务端是否可达」。**实证**：`cargo test -p server` **5 passed**（新增 5 条候选路径断言）；不带任何环境变量启动 `target/debug/assets-server` → `已加载 .env TOML 配置文件 config=../.env.toml` → `HTTP API 服务启动于 http://0.0.0.0:3001` → `/healthz` `{"db":"up","status":"ok"}`、`/api-docs/openapi.json` `0.1.0`、`POST /api/auth/login` 200 带 token。指南 §3.0 命令去掉「必须 `ASSETS_CONFIG_DIR`」的旧结论，新增 §3.0.2「启动即退出：数据库初始化失败」排查表，§3.2 候选顺序同步为 6 条 |
+| 2026-11-16 | **修复 `/swagger-ui` 返回一行纯文本（Swagger UI 静态资源是占位桩）**：症状为 `GET /swagger-ui` 200 但仅 85 B，内容是 `/* fake index.html */ url: "https://x" deepLinking: true, layout: "StandaloneLayout"`，`swagger-ui-bundle.js` 只有 95 B，浏览器里没有任何页面。根因：`utoipa-swagger-ui` 的 build script 曾从 `SWAGGER_UI_DOWNLOAD_URL=file:///tmp/fake_swagger.zip` 取资源（见 `target/debug/build/utoipa-swagger-ui-5f2d25a2af5ce12f/output`），那个 zip 的 `dist/` 里只有 5 个几十字节的桩文件，被 `include_bytes!` 原样嵌进二进制；而 cargo 缓存了这次 build script 产物，所以之后即使不再设环境变量，只要脚本没重跑，二进制里仍是桩资源（同目录另一个 build unit `…-215d74c38ae45f29` 里才是真实 dist：13 个文件、bundle 1.5 MB）。修复：把真实 dist 复制回该 build unit、按其 `embed.rs` 清单重新生成并 touch 触发重编译（`/tmp/repair_dist.sh`）后 `cargo build -p server`。**实证**：`/swagger-ui` 200 `text/html` 734 B（首行 `<!-- HTML for static distribution bundle build -->`）、`/swagger-ui/swagger-initializer.js` 200 且带 `"url": "/api-docs/openapi.json"` + `deepLinking` + `persistAuthorization` + `StandaloneLayout`、`swagger-ui.css` 178977 B / `swagger-ui-bundle.js` 1526593 B / `swagger-ui-standalone-preset.js` 251800 B 全部 200、`/api-docs/openapi.json` 200。**护栏**：`crates/apidoc` 新增 `dist_problem()` / 纯函数内核 `dist_problem_from()`（校验 `index.html` 是 HTML、`swagger-ui-bundle.js` ≥ 100 KB），`docs_router()` 命中即打 WARN，并新增 4 条单测（`embedded_swagger_ui_dist_is_real` + 占位 index / 真实 dist / 半成品 dist 各 1 条，`cargo test -p apidoc` **8 passed**）；《API-Swagger规范.md》§1 增加页面自检命令、§5 重写为 5.1 离线构建 / 5.2 占位 zip 的坑与恢复 / 5.3 版本配对 |
 
 ---
 

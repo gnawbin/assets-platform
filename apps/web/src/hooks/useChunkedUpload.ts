@@ -375,7 +375,7 @@ export function useChunkedUpload(
         return;
       }
       // 收集完整错误详情
-      // Tauri invoke() 抛出的 Error 中，message 可能为空/通用，真正信息在 toString() 中
+      // 错误来源可能是 fetch 网络异常（TypeError）或后端 ApiError（message 已带业务文案）
       const errMsg = err.message || (err.toString ? err.toString() : '') || '上传失败';
       const errStack = err.stack || '';
       const errToString = err.toString ? err.toString() : '';

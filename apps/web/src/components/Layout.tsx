@@ -16,7 +16,8 @@ import {
   Stack,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconLogout, IconUser, IconBuildingStore } from '@tabler/icons-react';
+import Link from 'next/link';
+import { IconLogout, IconUser, IconBuildingStore, IconServer } from '@tabler/icons-react';
 import Sidebar from './Sidebar';
 import { useAuthStore } from '@/store/authStore';
 import { api } from '@/utils/api';
@@ -119,6 +120,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                     {user.real_name || user.username}
                   </Menu.Item>
                   <Menu.Divider />
+                  <Menu.Item
+                    component={Link}
+                    href="/settings/server"
+                    leftSection={<IconServer size={14} />}
+                  >
+                    服务端连接
+                  </Menu.Item>
                   <Menu.Item
                     color="red"
                     leftSection={<IconLogout size={14} />}

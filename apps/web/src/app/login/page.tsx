@@ -120,6 +120,11 @@ const LoginPage: React.FC = () => {
                 立即注册
               </Anchor>
             </Text>
+            <Text ta="center" size="xs" c="dimmed">
+              <Anchor component={Link} href="/settings/server" size="xs">
+                服务端连接设置
+              </Anchor>
+            </Text>
           </Stack>
         </Paper>
       </Container>

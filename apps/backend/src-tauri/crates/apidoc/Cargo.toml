@@ -9,6 +9,8 @@ version = "0.1.0"
 api.workspace = true
 axum.workspace = true
 serde_json.workspace = true
+# 内嵌 Swagger UI 资源的体检结果用 WARN 输出（构建期占位资源只在运行时可见）
+tracing.workspace = true
 utoipa.workspace = true
 utoipa-swagger-ui.workspace = true
 

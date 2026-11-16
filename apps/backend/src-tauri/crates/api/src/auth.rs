@@ -409,13 +409,21 @@ async fn resolve_tenant_schema(tenant_id: Option<i64>) -> String {
 
 /// 认证中间件
 ///
-/// 1. 拒绝 URL 参数传令牌（400）
-/// 2. 从 `Authorization: Bearer <token>` 提取凭证并按前缀分流（§5.1）
-///    - `ak_*` → API Key：哈希查表 → 服务主体（无 `user_id`）
-///    - 其它 → JWT：验签 → 用户主体（同时注入 `UserContext` / `Claims`）
-/// 3. 注入 [`AuthPrincipal`]（两种主体都有）
+/// 1. 拒绝 URL 参数传令牌（400，`?access_token=` 之类直接拒绝，避免令牌进日志）
+/// 2. 从 `Authorization: Bearer <token>` 提取凭证，按**前缀**分流（设计文档 §5.1）：
+///    - `ak_*` → API Key：格式校验 → 哈希查表 → 服务主体（`PrincipalKind::Service`，
+///      无 `user_id`；真正查表在 `service::api_key_service::verify_api_key`）
+///    - `at_*` → OAuth 访问令牌：哈希查表（`oauth_service::verify_access_token`）→
+///      `PrincipalKind::OAuth`，**不注入** `UserContext` / `Claims`，`authz` 始终 enforce
+///    - `rt_*` → **一律 401**：刷新令牌只能用于 `/oauth/token`（设计文档 §13.2 #3），
+///      出现在资源路径上属误用，文案直接点明用途
+///    - 其余（`eyJ...` 及历史无前缀令牌）→ JWT：验签 → 用户主体，
+///      同时注入 `UserContext` / `Claims`
+/// 3. 注入 [`AuthPrincipal`]（三种主体都有）
 /// 4. 通过 `with_schema` 设置 task_local 供 service 层使用
 /// 5. 之后由 `authz_middleware` 做 L2 功能权限判定
+///
+/// 分流逻辑本体在 [`parse_credential`]，单测见本文件 `mod tests` 的 A-1…A-5。
 pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, ApiError> {
     reject_token_in_query(&req)?;
 
@@ -647,6 +655,82 @@ mod tests {
         assert!(audience.contains(&service::user_service::jwt_audience()));
         let issuer = validation.iss.expect("issuer 必须显式设置");
         assert!(issuer.contains(&service::user_service::jwt_issuer()));
+    }
+
+    // ==================== 凭证前缀分流（OAuth2.1 Bearer，A-1…A-5）====================
+
+    /// A-1：`at_` 访问令牌必须分流为 [`Credential::AccessToken`]
+    ///
+    /// 这是「第三方系统 → 业务接口」整条链路的总开关：一旦分流错，
+    /// `at_` 会被当成 JWT 去验签（必然失败 → 全站 401），或者被当成 API Key 查表。
+    #[test]
+    fn access_token_prefix_is_routed_to_oauth() {
+        let token = utils::oauth::generate_access_token().plaintext;
+        assert!(token.starts_with("at_"));
+        match parse_credential(&token) {
+            Ok(Credential::AccessToken(value)) => assert_eq!(value, token),
+            other => panic!("at_ 前缀应解析为 AccessToken，实际: {other:?}"),
+        }
+    }
+
+    /// A-2：刷新令牌出现在资源请求里必须 401，且文案点明「刷新令牌」
+    ///
+    /// `rt_` 只能用于 `/oauth/token`（设计文档 §13.2 #3），错误文案要能让集成方自查。
+    #[test]
+    fn refresh_token_prefix_is_rejected_with_actionable_message() {
+        let token = utils::oauth::generate_refresh_token().plaintext;
+        assert!(token.starts_with("rt_"));
+
+        let err = parse_credential(&token).expect_err("刷新令牌不得用于资源请求");
+        assert_eq!(err.code, 401);
+        assert!(
+            err.message.contains("刷新令牌"),
+            "错误文案应提示刷新令牌用途，实际: {}",
+            err.message
+        );
+    }
+
+    /// A-3：格式合法的 `ak_` 密钥分流为 [`Credential::ApiKey`]
+    #[test]
+    fn api_key_prefix_is_routed_to_api_key() {
+        let key = utils::api_key::generate_api_key(utils::api_key::ApiKeyEnv::Live).plaintext;
+        match parse_credential(&key) {
+            Ok(Credential::ApiKey(value)) => assert_eq!(value, key),
+            other => panic!("ak_ 前缀应解析为 ApiKey，实际: {other:?}"),
+        }
+    }
+
+    /// A-3 反向：`ak_` 前缀但格式非法 → 401，**不得**降级为 JWT 继续验签
+    #[test]
+    fn malformed_api_key_is_rejected_instead_of_falling_back_to_jwt() {
+        let err = parse_credential("ak_live_tooshort_tooshort").expect_err("格式非法应拒绝");
+        assert_eq!(err.code, 401);
+        assert_eq!(err.message, "凭证无效或已过期");
+    }
+
+    /// A-4：空 / 纯空白令牌 → 401「认证令牌为空」
+    #[test]
+    fn empty_credential_is_rejected() {
+        for raw in ["", "   ", "\t\n"] {
+            let err = parse_credential(raw).expect_err("空令牌应拒绝");
+            assert_eq!(err.code, 401);
+            assert!(
+                err.message.contains("认证令牌为空"),
+                "实际文案: {}",
+                err.message
+            );
+        }
+    }
+
+    /// A-5：无前缀的 JWT 仍然走原有分支（回归：别把 JWT 误判成 OAuth 令牌）
+    #[test]
+    fn jwt_is_routed_to_jwt_branch() {
+        let token = sign(&claims_with_scope());
+        assert!(token.starts_with("eyJ"), "JWT 应以 eyJ 开头");
+        match parse_credential(&token) {
+            Ok(Credential::Jwt(value)) => assert_eq!(value, token),
+            other => panic!("JWT 应走 Jwt 分支，实际: {other:?}"),
+        }
     }
 }
 

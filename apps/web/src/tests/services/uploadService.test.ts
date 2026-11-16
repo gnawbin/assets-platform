@@ -57,6 +57,7 @@ function createMockResponse(body: unknown, status = 200, headers: Record<string,
     status,
     statusText: status >= 200 && status < 300 ? 'OK' : 'Error',
     json: jest.fn().mockResolvedValue(body),
+    text: jest.fn().mockResolvedValue(typeof body === 'string' ? body : JSON.stringify(body)),
     headers: {
       get: (name: string) => normalizedHeaders[name.toLowerCase()] ?? null,
       has: (name: string) => name.toLowerCase() in normalizedHeaders,
@@ -335,6 +336,93 @@ describe('UploadService', () => {
       (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(createMockResponse({}, 500));
 
       await expect(service.getVersionHistory('group-001')).rejects.toThrow('获取版本历史失败');
+    });
+  });
+
+  // ======================== 401 续期（D-7） ========================
+
+  describe('401 自动续期', () => {
+    /** 401 响应（后端 ApiError） */
+    function unauthorizedResponse() {
+      return createMockResponse({ code: 'UNAUTHORIZED', message: '访问令牌已过期' }, 401);
+    }
+
+    /** 续期成功响应（`POST /api/auth/refresh`，后端 `ApiResponse` 包裹在 `data` 中） */
+    function refreshedResponse(token = 'token-new') {
+      return createMockResponse({ code: 0, message: 'ok', data: { token, refresh_token: 'refresh-new' } });
+    }
+
+    it('应续期并重放一次，成功后返回数据', async () => {
+      localStorage.setItem('auth_token', 'token-old');
+      localStorage.setItem('refresh_token', 'refresh-old');
+
+      (global.fetch as jest.Mock) = jest
+        .fn()
+        // 首次 complete：401
+        .mockResolvedValueOnce(unauthorizedResponse())
+        // 续期请求
+        .mockResolvedValueOnce(refreshedResponse())
+        // 重放 complete：成功
+        .mockResolvedValueOnce(
+          createMockResponse({ file_url: 'https://storage.example.com/f.pdf', etag: '"e1"' })
+        );
+
+      const result = await service.complete('upload-001');
+
+      expect(result).toEqual({ fileUrl: 'https://storage.example.com/f.pdf', etag: '"e1"' });
+
+      const calls = (global.fetch as jest.Mock).mock.calls;
+      expect(calls).toHaveLength(3);
+      // 续期走统一基址（jsdom 下为 http://localhost/api）
+      expect(calls[1][0]).toBe(`${window.location.origin}/api/auth/refresh`);
+      // 重放时使用新令牌
+      expect(calls[2][1].headers).toEqual({ Authorization: 'Bearer token-new' });
+      // 新令牌已落盘，authStore 由事件同步
+      expect(localStorage.getItem('auth_token')).toBe('token-new');
+      expect(localStorage.getItem('refresh_token')).toBe('refresh-new');
+    });
+
+    it('续期失败时应清会话并抛出后端消息', async () => {
+      localStorage.setItem('auth_token', 'token-old');
+      localStorage.setItem('refresh_token', 'refresh-old');
+      localStorage.setItem('auth_user', '{"id":1}');
+
+      (global.fetch as jest.Mock) = jest
+        .fn()
+        .mockResolvedValueOnce(unauthorizedResponse())
+        // 续期失败
+        .mockResolvedValueOnce(createMockResponse({ code: 'INVALID_GRANT', message: '刷新令牌无效' }, 401));
+
+      await expect(service.complete('upload-001')).rejects.toThrow('访问令牌已过期');
+
+      // 会话被清空，避免「有令牌但一直 401」的僵死状态
+      expect(localStorage.getItem('auth_token')).toBeNull();
+      expect(localStorage.getItem('refresh_token')).toBeNull();
+      expect(localStorage.getItem('auth_user')).toBeNull();
+    });
+
+    it('未登录（无令牌）时不尝试续期', async () => {
+      (global.fetch as jest.Mock) = jest
+        .fn()
+        .mockResolvedValueOnce(unauthorizedResponse());
+
+      await expect(service.complete('upload-001')).rejects.toThrow('访问令牌已过期');
+
+      // 只有原始请求，没有额外的续期调用
+      expect((global.fetch as jest.Mock).mock.calls).toHaveLength(1);
+    });
+
+    it('S3 presigned PUT 不参与续期（不带 Authorization）', async () => {
+      localStorage.setItem('auth_token', 'token-old');
+      (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(
+        createMockResponse({}, 200, { etag: '"etag-001"' })
+      );
+
+      await service.uploadChunk('https://s3.example.com/part/1', new Blob(['x']), 1);
+
+      const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(init.headers.Authorization).toBeUndefined();
+      expect((global.fetch as jest.Mock).mock.calls).toHaveLength(1);
     });
   });
 

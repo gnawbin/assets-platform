@@ -420,6 +420,7 @@ dependencies = [
  "api",
  "axum",
  "serde_json",
+ "tracing",
  "utoipa",
  "utoipa-swagger-ui",
 ]

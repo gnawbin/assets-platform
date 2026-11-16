@@ -1,16 +1,21 @@
 /**
- * httpAdapter 映射表完整性测试
+ * httpAdapter 映射表完整性 + URL 拼装测试
  *
- * 验证 COMMAND_ROUTE_MAP 与 TAURI_ONLY_COMMANDS 覆盖了后端
- * apps/backend/src-tauri/src/lib.rs invoke_handler 中注册的全部 Tauri 命令，
- * 且映射表自身格式合法（路径以 /api/ 开头、方法合法、占位符格式正确）。
+ * 前端已切换为纯 HTTP 单通道（无 Tauri-only 例外），因此这里验证：
+ * 1. `COMMAND_ROUTE_MAP` 覆盖了后端 `apps/backend/src-tauri/src/lib.rs`
+ *    invoke_handler 中注册的全部 Tauri 命令（RAG 也在其中）；
+ * 2. 映射表自身格式合法（路径以 /api/ 开头、方法合法、占位符格式正确）；
+ * 3. 基址与映射路径拼接后**不出现** `/api/api/...`（历史 bug，见 D-6）；
+ * 4. 后端错误消息能透出到前端错误对象（D-5）。
  *
  * 当后端新增/移除 Tauri 命令时，需同步更新本文件的 REGISTERED_COMMANDS 列表。
  */
 
 import {
     COMMAND_ROUTE_MAP,
-    TAURI_ONLY_COMMANDS,
+    UNEXPOSED_BACKEND_COMMANDS,
+    extractServerMessage,
+    httpAdapter,
 } from '@/utils/adapters/httpAdapter';
 
 /**
@@ -177,21 +182,27 @@ const REGISTERED_COMMANDS: string[] = [
 ];
 
 describe('httpAdapter 命令路由映射表', () => {
-    it('覆盖后端注册的全部 Tauri 命令（映射表 或 Tauri-only 集合）', () => {
+    it('覆盖后端注册的全部 Tauri 命令（映射表 或 明确未暴露清单）', () => {
         const missing = REGISTERED_COMMANDS.filter(
             (command) =>
                 !Object.prototype.hasOwnProperty.call(COMMAND_ROUTE_MAP, command) &&
-                !TAURI_ONLY_COMMANDS.has(command),
+                !UNEXPOSED_BACKEND_COMMANDS.has(command),
         );
 
         expect(missing).toEqual([]);
     });
 
-    it('命令不会同时出现在映射表和 Tauri-only 集合中', () => {
-        const overlaps = Object.keys(COMMAND_ROUTE_MAP).filter((command) =>
-            TAURI_ONLY_COMMANDS.has(command),
-        );
+    it('未暴露清单保持最小且不与映射表重叠', () => {
+        // 该集合只应包含「后端有 Tauri 命令、无 HTTP 路由、前端无调用点」的命令；
+        // 一旦补了 HTTP 路由，请登记进 COMMAND_ROUTE_MAP 并从此集合移除。
+        expect([...UNEXPOSED_BACKEND_COMMANDS].sort()).toEqual([
+            'chunk_and_vectorize',
+            'test_rag_retrieval',
+        ]);
 
+        const overlaps = Object.keys(COMMAND_ROUTE_MAP).filter((command) =>
+            UNEXPOSED_BACKEND_COMMANDS.has(command),
+        );
         expect(overlaps).toEqual([]);
     });
 
@@ -210,15 +221,240 @@ describe('httpAdapter 命令路由映射表', () => {
         }
     });
 
-    it('映射表与 Tauri-only 集合中的命令名均为小写下划线风格', () => {
+    it('映射表与未暴露清单中的命令名均为小写下划线风格', () => {
         const NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
         for (const command of Object.keys(COMMAND_ROUTE_MAP)) {
             expect(command).toMatch(NAME_PATTERN);
         }
 
-        for (const command of TAURI_ONLY_COMMANDS) {
+        for (const command of UNEXPOSED_BACKEND_COMMANDS) {
             expect(command).toMatch(NAME_PATTERN);
         }
+    });
+});
+
+// ======================== URL 拼装（D-6：不得出现 /api/api） ========================
+
+describe('httpAdapter URL 拼装', () => {
+    /** 构造成功的 ApiResponse<T> 响应 */
+    function okResponse(data: unknown): Response {
+        return {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            json: jest.fn().mockResolvedValue({ code: 0, message: 'ok', data }),
+            text: jest.fn().mockResolvedValue(''),
+        } as unknown as Response;
+    }
+
+    /** 构造失败响应（后端 ApiError 形如 { code, message }） */
+    function errorResponse(status: number, body: string): Response {
+        return {
+            ok: false,
+            status,
+            statusText: status === 401 ? 'Unauthorized' : 'Bad Request',
+            json: jest.fn().mockResolvedValue({}),
+            text: jest.fn().mockResolvedValue(body),
+        } as unknown as Response;
+    }
+
+    afterEach(() => {
+        delete (window as Window & { __API_BASE__?: unknown }).__API_BASE__;
+    });
+
+    it('基址含 /api 时只拼一次（不出现 /api/api）', async () => {
+        (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = 'http://127.0.0.1:3001';
+        (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(okResponse([]));
+
+        await httpAdapter.get('get_categories');
+
+        const [url] = (global.fetch as jest.Mock).mock.calls[0];
+        expect(url).toBe('http://127.0.0.1:3001/api/categories');
+        expect(url).not.toContain('/api/api');
+    });
+
+    it('基址已带 /api 后缀时同样只拼一次', async () => {
+        (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = 'https://demo.example.com/api';
+        (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(okResponse([]));
+
+        await httpAdapter.get('get_categories');
+
+        const [url] = (global.fetch as jest.Mock).mock.calls[0];
+        expect(url).toBe('https://demo.example.com/api/categories');
+    });
+
+    it('映射表中的路径占位符应被参数替换', async () => {
+        (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = 'http://127.0.0.1:3001';
+        (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(okResponse(null));
+
+        await httpAdapter.delete('delete_category', { id: 7 });
+
+        const [url] = (global.fetch as jest.Mock).mock.calls[0];
+        expect(url).toBe('http://127.0.0.1:3001/api/categories/7');
+    });
+
+    it('后端 ApiError.message 应透出到错误对象（D-5）', async () => {
+        (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = 'http://127.0.0.1:3001';
+        (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(
+            errorResponse(
+                403,
+                JSON.stringify({
+                    code: 'FORBIDDEN',
+                    message: '缺少权限：asset:category:create',
+                    scope: 'asset:category:create',
+                }),
+            ),
+        );
+
+        await expect(
+            httpAdapter.post('insert_category', { category: {} }, { showError: false }),
+        ).rejects.toThrow('缺少权限：asset:category:create');
+
+        // 403 的 scope 挂到错误对象，页面可提示「缺少权限点」
+        const error = await httpAdapter
+            .post('insert_category', { category: {} }, { showError: false })
+            .catch((err: Error & { scope?: string }) => err);
+        expect((error as { scope?: string }).scope).toBe('asset:category:create');
+    });
+});
+
+// ======================== 认证头 / 401 续期（C-1…C-3） ========================
+
+describe('httpAdapter 认证与续期', () => {
+    function okResponse(data: unknown): Response {
+        return {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            json: jest.fn().mockResolvedValue({ code: 0, message: 'ok', data }),
+            text: jest.fn().mockResolvedValue(''),
+        } as unknown as Response;
+    }
+
+    function errorResponse(status: number, body: string, statusText = 'Unauthorized'): Response {
+        return {
+            ok: false,
+            status,
+            statusText,
+            json: jest.fn().mockResolvedValue({}),
+            text: jest.fn().mockResolvedValue(body),
+        } as unknown as Response;
+    }
+
+    /** 续期成功响应（`ApiResponse` 包裹在 `data`） */
+    function refreshOk(token = 'token-new'): Response {
+        return okResponse({ token, refresh_token: 'refresh-new' });
+    }
+
+    beforeEach(() => {
+        (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = 'http://127.0.0.1:3001';
+        localStorage.clear();
+    });
+
+    afterEach(() => {
+        delete (window as Window & { __API_BASE__?: unknown }).__API_BASE__;
+        localStorage.clear();
+    });
+
+    it('已登录时附加 Authorization: Bearer（C-1）', async () => {
+        localStorage.setItem('auth_token', 'token-abc');
+        (global.fetch as jest.Mock) = jest.fn().mockResolvedValue(okResponse([]));
+
+        await httpAdapter.get('get_categories');
+
+        const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+        expect((init as RequestInit).headers).toMatchObject({
+            Authorization: 'Bearer token-abc',
+        });
+    });
+
+    it('401 → 续期一次 → 用新令牌重放（C-2）', async () => {
+        localStorage.setItem('auth_token', 'token-old');
+        localStorage.setItem('refresh_token', 'refresh-old');
+
+        (global.fetch as jest.Mock) = jest
+            .fn()
+            // 首次：401
+            .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ code: 401, message: '访问令牌已过期' })))
+            // 续期
+            .mockResolvedValueOnce(refreshOk())
+            // 重放：成功
+            .mockResolvedValueOnce(okResponse([{ id: 1 }]));
+
+        const result = await httpAdapter.get<Array<{ id: number }>>('get_categories', {}, { showError: false });
+
+        expect(result).toEqual([{ id: 1 }]);
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        expect(calls).toHaveLength(3);
+        expect(calls[1][0]).toBe('http://127.0.0.1:3001/api/auth/refresh');
+        expect((calls[2][1] as RequestInit).headers).toMatchObject({
+            Authorization: 'Bearer token-new',
+        });
+        expect(localStorage.getItem('auth_token')).toBe('token-new');
+    });
+
+    it('续期失败 → 清会话并给出可操作文案（C-3）', async () => {
+        localStorage.setItem('auth_token', 'token-old');
+        localStorage.setItem('refresh_token', 'refresh-old');
+        localStorage.setItem('auth_user', '{"id":1}');
+
+        (global.fetch as jest.Mock) = jest
+            .fn()
+            .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ code: 401, message: '访问令牌已过期' })))
+            // 续期失败
+            .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ error: 'invalid_grant' }), 'Unauthorized'));
+
+        await expect(
+            httpAdapter.get('get_categories', {}, { showError: false }),
+        ).rejects.toThrow('访问令牌已过期');
+
+        expect(localStorage.getItem('auth_token')).toBeNull();
+        expect(localStorage.getItem('refresh_token')).toBeNull();
+        expect(localStorage.getItem('auth_user')).toBeNull();
+    });
+
+    it('认证端点 401 不触发续期（避免刷新递归）', async () => {
+        localStorage.setItem('auth_token', 'token-old');
+        localStorage.setItem('refresh_token', 'refresh-old');
+
+        (global.fetch as jest.Mock) = jest
+            .fn()
+            .mockResolvedValueOnce(errorResponse(401, JSON.stringify({ code: 401, message: '凭证无效' })));
+
+        await expect(
+            httpAdapter.post('login', { username: 'a', password: 'b' }, { showError: false }),
+        ).rejects.toThrow('凭证无效');
+
+        // 只有登录请求本身，没有额外续期
+        expect((global.fetch as jest.Mock).mock.calls).toHaveLength(1);
+    });
+});
+
+// ======================== 错误消息提取 ========================
+
+describe('extractServerMessage', () => {
+    it('识别 ApiError 的 message 字段', () => {
+        expect(extractServerMessage(JSON.stringify({ code: 'E', message: '上传会话已过期' })))
+            .toBe('上传会话已过期');
+    });
+
+    it('识别 OAuth 错误字段 error_description / error', () => {
+        expect(extractServerMessage(JSON.stringify({ error: 'invalid_grant', error_description: 'refresh token 已过期' })))
+            .toBe('refresh token 已过期');
+        expect(extractServerMessage(JSON.stringify({ error: 'invalid_client' })))
+            .toBe('invalid_client');
+    });
+
+    it('纯文本短消息按原文返回', () => {
+        expect(extractServerMessage('service unavailable')).toBe('service unavailable');
+    });
+
+    it('HTML 错误页（nginx 502）不返回，交由调用方回落到状态行', () => {
+        expect(extractServerMessage('<html><body>502 Bad Gateway</body></html>')).toBeNull();
+    });
+
+    it('空响应体返回 null', () => {
+        expect(extractServerMessage('')).toBeNull();
     });
 });

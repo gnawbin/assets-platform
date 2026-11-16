@@ -2671,5 +2671,5 @@ cargo check -p gateway                    # 通过（gateway lib + bin）
 cargo test  -p gateway --lib              # config 解析 / 租约间隔单测
 ```
 
-> 离线环境编译注意：`utoipa-swagger-ui` 的 build script 会下载 Swagger UI 静态资源。无外网时可二选一：把 `SWAGGER_UI_DOWNLOAD_URL` 指向本地 zip（`file:///path/to/v5.32.6.zip`），或把 workspace 里的 features 改为 `["axum", "vendored"]`（见 `docs/API-Swagger规范.md` §5）。
+> 离线环境编译注意：`utoipa-swagger-ui` 的 build script 会下载 Swagger UI 静态资源。无外网时可二选一：把 workspace 里的 features 改为 `["axum", "vendored"]`，或把 `SWAGGER_UI_DOWNLOAD_URL` 指向**官方 release zip**（`file:///path/to/v5.32.6.zip`，内部结构必须是 `swagger-ui-5.32.6/dist/…`）。**不要**用自己拼的占位 zip 骗过编译——build script 只校验能否解出 `dist/`、不校验内容，占位桩会被 `include_bytes!` 嵌进二进制，`/swagger-ui` 于是只剩一行 `/* fake index.html */ …`（详见 `docs/API-Swagger规范.md` §5.2）。
 

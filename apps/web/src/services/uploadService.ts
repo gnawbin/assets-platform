@@ -1,16 +1,23 @@
 /**
- * 大文件分片上传 API 服务
+ * 大文件分片上传 API 服务（**纯 HTTP**）
  *
- * 支持两种调用模式：
- * - tauri: 通过 Tauri invoke() 调用 Rust 命令（桌面版）
- * - http: 通过 HTTP fetch 调用后端 API（Web 版/兼容模式）
+ * 全部接口经 `fetch` 调用后端 `/api/upload/*`（`crates/api/src/upload_routes.rs`），
+ * 桌面版与 Web 版共用同一套代码，不再有 `invoke()` 调用点。
  *
- * S3 分片直传始终通过 HTTP（PUT presigned URL），与模式无关。
+ * - 基址由 `utils/apiBase.ts` 统一解析（禁止硬编码 `localhost:3001`）；
+ * - S3 分片直传始终以 presigned URL 直接 PUT，**不带** Authorization
+ *   （否则签名不匹配，S3 会返回 403）；
+ * - 401 处理：`/api/upload/*` 已纳入 `auth_middleware`，访问令牌过期时
+ *   先用 refresh token 静默续期并重放一次（与 `httpAdapter` 一致，见 D-7）。
  */
 
-import { invoke } from '@tauri-apps/api/core';
-
 import { getAuthToken } from '../utils/authToken';
+import { getApiBase } from '../utils/apiBase';
+import {
+  clearAuthSession,
+  extractServerMessage,
+  refreshAccessToken,
+} from '../utils/adapters/httpAdapter';
 
 // ======================== 类型定义 ========================
 
@@ -57,12 +64,9 @@ export interface UploadVersionInfo {
   createdAt: string;
 }
 
-// ======================== 适配器类型 ========================
+// ======================== 上传接口契约 ========================
 
-/** 调用模式 */
-export type UploadAdapterMode = 'tauri' | 'http';
-
-/** 适配器接口：定义上传服务需要的基础操作 */
+/** 上传接口契约：HTTP 实现（`HttpUploadAdapter`）需实现的基础操作 */
 interface UploadAdapter {
   init(filename: string, fileSize: number, mimeType: string, options?: {
     fileGroupId?: string;
@@ -89,86 +93,6 @@ interface UploadAdapter {
   abort(uploadId: string): Promise<void>;
 }
 
-// ======================== Tauri 适配器 ========================
-
-class TauriUploadAdapter implements UploadAdapter {
-  async init(
-    filename: string,
-    fileSize: number,
-    mimeType: string,
-    options?: { fileGroupId?: string; changeReason?: string; fileMd5?: string }
-  ): Promise<InitUploadResponse> {
-    const uploadId = await invoke<string>('upload_init', {
-      filename,
-      fileSize,
-      mimeType,
-      fileGroupId: options?.fileGroupId || null,
-      changeReason: options?.changeReason || null,
-      fileMd5: options?.fileMd5 || null,
-    });
-    return { uploadId, needStart: true };
-  }
-
-  async startUpload(uploadId: string): Promise<StartUploadResponse> {
-    const result = await invoke<StartUploadResponse>('upload_start', {
-      uploadId,
-    });
-    return result;
-  }
-
-  async commit(uploadId: string, contextType: string, contextId: string): Promise<void> {
-    await invoke('upload_commit', {
-      uploadId,
-      contextType,
-      contextId,
-    });
-  }
-
-  async getVersionHistory(fileGroupId: string): Promise<UploadVersionInfo[]> {
-    return invoke<UploadVersionInfo[]>('upload_get_version_history', {
-      fileGroupId,
-    });
-  }
-
-  /** 上报分片上传完成（通过 Tauri IPC） */
-  async reportChunk(uploadId: string, partNumber: number, etag: string): Promise<void> {
-    await invoke('upload_report_chunk', {
-      uploadId,
-      partNumber,
-      etag,
-    });
-  }
-
-  /** 完成上传合并分片（通过 Tauri IPC） */
-  async complete(uploadId: string): Promise<UploadCompleteResponse> {
-    const result = await invoke<{ fileUrl: string; etag: string }>('upload_complete', {
-      uploadId,
-    });
-    return { fileUrl: result.fileUrl, etag: result.etag };
-  }
-
-  /** 获取上传进度（通过 Tauri IPC） */
-  async getProgress(uploadId: string): Promise<UploadProgress> {
-    const result = await invoke<{
-      status: string;
-      receivedChunks: number[];
-      totalChunks: number;
-      progressPct: number;
-    }>('upload_get_progress', { uploadId });
-    return {
-      status: result.status,
-      receivedChunks: result.receivedChunks,
-      totalChunks: result.totalChunks,
-      progressPct: result.progressPct,
-    };
-  }
-
-  /** 取消上传（通过 Tauri IPC） */
-  async abort(uploadId: string): Promise<void> {
-    await invoke('upload_abort', { uploadId });
-  }
-}
-
 // ======================== HTTP 适配器 ========================
 
 /**
@@ -182,14 +106,80 @@ function withAuth(headers: Record<string, string> = {}): Record<string, string> 
   return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
 }
 
+/**
+ * 读取错误响应体（`res.text()` 在部分测试替身/流式响应上不存在）
+ */
+async function readErrorBody(res: Response): Promise<string> {
+  try {
+    return typeof res.text === 'function' ? await res.text() : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 抛出带业务消息的上传错误
+ *
+ * 优先使用后端 `ApiError.message`（如「上传会话已过期」），
+ * 拿不到时回落到 `HTTP 401 Unauthorized` 形式的状态行。
+ * 消息前缀（`初始化上传失败` 等）保持不变，便于页面按操作归类提示。
+ */
+async function throwHttpError(action: string, res: Response): Promise<never> {
+  const body = await readErrorBody(res);
+  const detail = extractServerMessage(body)
+    || `HTTP ${res.status} ${res.statusText}`.trim();
+  throw new Error(`${action}: ${detail}`);
+}
+
 class HttpUploadAdapter implements UploadAdapter {
-  private baseUrl: string;
+  /** 显式指定的基址（含 `/api`）；为空时由 `getApiBase()` 运行时解析 */
+  private readonly baseUrl: string;
 
   constructor(baseUrl?: string) {
-    const envBaseUrl = typeof process !== 'undefined'
-      ? process.env?.NEXT_PUBLIC_API_BASE_URL
-      : undefined;
-    this.baseUrl = baseUrl || envBaseUrl || 'http://localhost:3001/api';
+    this.baseUrl = baseUrl ?? '';
+  }
+
+  /** 当前基址：显式传入优先，其次运行时解析（localStorage / env / 同源 /api） */
+  private resolveBase(): string {
+    const base = this.baseUrl || getApiBase();
+    if (!base) {
+      throw new Error(
+        '未配置服务器地址：请到「系统配置 → 服务端连接」填写后端地址'
+        + '（或在构建时设置 NEXT_PUBLIC_API_BASE_URL）',
+      );
+    }
+    return base;
+  }
+
+  /**
+   * 发送带认证头的请求
+   *
+   * 401 → 用 refresh token 静默续期并重放一次（D-7）；
+   * 续期失败或重放仍 401 → 清会话（避免「有令牌但一直 401」的僵死状态）。
+   */
+  private async request(url: string, init: RequestInit = {}): Promise<Response> {
+    let res = await fetch(url, init);
+    if (res.status !== 401 || !getAuthToken()) {
+      return res;
+    }
+
+    const renewedToken = await refreshAccessToken();
+    if (!renewedToken) {
+      clearAuthSession();
+      return res;
+    }
+
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        ...(init.headers as Record<string, string> | undefined),
+        Authorization: `Bearer ${renewedToken}`,
+      },
+    });
+    if (res.status === 401) {
+      clearAuthSession();
+    }
+    return res;
   }
 
   async init(
@@ -198,7 +188,7 @@ class HttpUploadAdapter implements UploadAdapter {
     mimeType: string,
     options?: { fileGroupId?: string; changeReason?: string; fileMd5?: string }
   ): Promise<InitUploadResponse> {
-    const res = await fetch(`${this.baseUrl}/upload/init`, {
+    const res = await this.request(`${this.resolveBase()}/upload/init`, {
       method: 'POST',
       headers: withAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
@@ -210,7 +200,7 @@ class HttpUploadAdapter implements UploadAdapter {
         file_md5: options?.fileMd5,
       }),
     });
-    if (!res.ok) throw new Error(`初始化上传失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('初始化上传失败', res);
     const json = await res.json();
     const data = json.data || json;
     // HTTP 适配器返回 snake_case，转换为 camelCase
@@ -221,11 +211,11 @@ class HttpUploadAdapter implements UploadAdapter {
   }
 
   async startUpload(uploadId: string): Promise<StartUploadResponse> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/start`, {
+    const res = await this.request(`${this.resolveBase()}/upload/${uploadId}/start`, {
       method: 'POST',
       headers: withAuth(),
     });
-    if (!res.ok) throw new Error(`开始上传失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('开始上传失败', res);
     const json = await res.json();
     const data = json.data || json;
     return {
@@ -238,40 +228,40 @@ class HttpUploadAdapter implements UploadAdapter {
   }
 
   async commit(uploadId: string, contextType: string, contextId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/commit`, {
+    const res = await this.request(`${this.resolveBase()}/upload/${uploadId}/commit`, {
       method: 'POST',
       headers: withAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ context_type: contextType, context_id: Number(contextId) }),
     });
-    if (!res.ok) throw new Error(`提交上传失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('提交上传失败', res);
   }
 
   async getVersionHistory(fileGroupId: string): Promise<UploadVersionInfo[]> {
     // 后端路由：GET /api/upload/versions/{fileGroupId}
     // 响应与 Tauri 命令 upload_get_version_history 同形（camelCase，id 为字符串）
-    const res = await fetch(`${this.baseUrl}/upload/versions/${encodeURIComponent(fileGroupId)}`, {
+    const res = await this.request(`${this.resolveBase()}/upload/versions/${encodeURIComponent(fileGroupId)}`, {
       headers: withAuth(),
     });
-    if (!res.ok) throw new Error(`获取版本历史失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('获取版本历史失败', res);
     const json = await res.json();
     return json.data || json;
   }
 
   async reportChunk(uploadId: string, partNumber: number, etag: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/chunk`, {
+    const res = await this.request(`${this.resolveBase()}/upload/${uploadId}/chunk`, {
       method: 'POST',
       headers: withAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ part_number: partNumber, etag }),
     });
-    if (!res.ok) throw new Error(`上报分片失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('上报分片失败', res);
   }
 
   async complete(uploadId: string): Promise<UploadCompleteResponse> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/complete`, {
+    const res = await this.request(`${this.resolveBase()}/upload/${uploadId}/complete`, {
       method: 'POST',
       headers: withAuth(),
     });
-    if (!res.ok) throw new Error(`完成上传失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('完成上传失败', res);
     const json = await res.json();
     const data = json.data || json;
     return {
@@ -281,10 +271,10 @@ class HttpUploadAdapter implements UploadAdapter {
   }
 
   async getProgress(uploadId: string): Promise<UploadProgress> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}/progress`, {
+    const res = await this.request(`${this.resolveBase()}/upload/${uploadId}/progress`, {
       headers: withAuth(),
     });
-    if (!res.ok) throw new Error(`查询进度失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('查询进度失败', res);
     const json = await res.json();
     const data = json.data || json;
     return {
@@ -296,66 +286,35 @@ class HttpUploadAdapter implements UploadAdapter {
   }
 
   async abort(uploadId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/upload/${uploadId}`, {
+    const res = await this.request(`${this.resolveBase()}/upload/${uploadId}`, {
       method: 'DELETE',
       headers: withAuth(),
     });
-    if (!res.ok) throw new Error(`取消上传失败: ${res.statusText}`);
+    if (!res.ok) await throwHttpError('取消上传失败', res);
   }
 }
 
 // ======================== UploadService（统一入口）=================
 
 /**
- * 运行时检测是否应使用 Tauri 适配器
- * 避免在模块加载时（SSR/SSG）检测导致错误
+ * 上传服务（统一入口）
+ *
+ * 只有一条通道：HTTP（`HttpUploadAdapter`）。保留类形式是为了隔离
+ * 「分片直传 S3（不经过适配器）」与「后端 API 调用（带认证头）」两类请求。
  */
-export function shouldUseTauri(mode?: UploadAdapterMode): boolean {
-  if (mode) return mode === 'tauri';
-  // 1. 运行在 Tauri 运行时中
-  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) return true;
-  // 2. 环境变量（Next.js 构建时内联）
-  const envAdapter = typeof process !== 'undefined'
-    ? process.env?.NEXT_PUBLIC_API_ADAPTER
-    : undefined;
-  if (envAdapter === 'tauri') return true;
-  if (envAdapter === 'http') return false;
-  return false;
-}
-
 export class UploadService {
   private adapter: UploadAdapter;
-  private baseUrl: string;
 
   /**
-   * @param options 可选，支持三种方式：
-   *   - 不传：按优先级自动选择适配器（运行时检测 Tauri → NEXT_PUBLIC_API_ADAPTER → HTTP 兜底）
-   *   - 'tauri' | 'http'：强制指定适配器模式
-   *   - 字符串 baseUrl（如 '/api'）或 { mode?, baseUrl? }：自定义 HTTP API base URL
+   * @param options 可选：
+   *   - 不传：基址由 `utils/apiBase.ts` 运行时解析（localStorage / env / 同源 `/api`）
+   *   - 字符串 baseUrl（如 `'/api'` 或 `'https://host/api'`）：显式指定，
+   *     仅供测试与嵌入场景；生产代码不要硬编码
+   *   - `{ baseUrl? }`：同上，便于渐进迁移
    */
-  constructor(options?: UploadAdapterMode | string | { mode?: UploadAdapterMode; baseUrl?: string }) {
-    let mode: UploadAdapterMode | undefined;
-    let baseUrl: string | undefined;
-
-    if (typeof options === 'object' && options !== null) {
-      mode = options.mode;
-      baseUrl = options.baseUrl;
-    } else if (options === 'tauri' || options === 'http') {
-      mode = options;
-    } else if (typeof options === 'string') {
-      baseUrl = options;
-    }
-
-    const useTauri = shouldUseTauri(mode);
-    this.adapter = useTauri
-      ? new TauriUploadAdapter()
-      : new HttpUploadAdapter(baseUrl);
-    this.baseUrl = baseUrl || (() => {
-      const envBaseUrl = typeof process !== 'undefined'
-        ? process.env?.NEXT_PUBLIC_API_BASE_URL
-        : undefined;
-      return envBaseUrl || 'http://localhost:3001/api';
-    })();
+  constructor(options?: string | { baseUrl?: string }) {
+    const baseUrl = typeof options === 'string' ? options : options?.baseUrl;
+    this.adapter = new HttpUploadAdapter(baseUrl);
   }
 
   // ======================== 两步提交 API ========================

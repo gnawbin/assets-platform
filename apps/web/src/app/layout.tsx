@@ -9,7 +9,10 @@ import { useAuthStore } from '@/store/authStore';
 import { useAutoLogout } from '@/hooks/useAutoLogout';
 import { initTelemetry } from '@/utils/telemetry';
 import { logger } from '@/utils/logger';
-import { setAdapter } from '@/utils/adapters';
+import { ServerConfigGate } from '@/components/ServerConfigGate';
+
+/** 未登录也允许访问的路径：登录 / 注册 / 服务端连接配置 */
+const PUBLIC_PATHS = ['/login', '/register', '/settings/server'];
 
 export default function RootLayout({
   children,
@@ -28,33 +31,6 @@ export default function RootLayout({
     initTelemetry();
   }, []);
 
-  // 自动检测运行环境并设置适配器
-  // 优先级：环境变量 NEXT_PUBLIC_API_ADAPTER > 自动检测 > 默认 HTTP
-  useEffect(() => {
-    const envAdapter = process.env.NEXT_PUBLIC_API_ADAPTER;
-    if (envAdapter === 'tauri' || envAdapter === 'http') {
-      logger.info(`[Adapter] 使用环境变量配置: ${envAdapter}`);
-      setAdapter(envAdapter);
-      return;
-    }
-
-    // 未设置环境变量时，自动检测
-    // Tauri v2 使用 __TAURI_INTERNALS__ 作为运行环境标记，兼容 v1 的 __TAURI__
-    const isTauri = typeof window !== 'undefined' && (
-      (window as Window).__TAURI_INTERNALS__ !== undefined ||
-      (window as Window).__TAURI__ !== undefined
-    );
-    if (isTauri) {
-      logger.info('[Adapter] 检测到 Tauri 环境，使用 Tauri 适配器');
-      setAdapter('tauri');
-    } else {
-      logger.info('[Adapter] 未检测到 Tauri 环境，使用 HTTP 适配器');
-      setAdapter('http');
-    }
-  }, []);
-
-
-
   useEffect(() => {
     logger.info('应用启动', { page: pathname });
   }, [pathname]);
@@ -71,8 +47,8 @@ export default function RootLayout({
       return;
     }
 
-    // 如果未登录且不在登录/注册页面，重定向到登录页
-    if (!isLoggedIn && pathname !== '/login' && pathname !== '/register') {
+    // 如果未登录且不在公开页面，重定向到登录页
+    if (!isLoggedIn && !PUBLIC_PATHS.includes(pathname)) {
       logger.info('未登录，重定向到登录页');
       router.push('/login');
     }
@@ -88,7 +64,8 @@ export default function RootLayout({
       <body style={{ margin: 0, padding: 0 }}>
         <MantineProvider>
           <Notifications />
-          {children}
+          {/* 服务器不可达时先让用户填地址，避免首屏全是网络错误 */}
+          <ServerConfigGate>{children}</ServerConfigGate>
         </MantineProvider>
       </body>
     </html>

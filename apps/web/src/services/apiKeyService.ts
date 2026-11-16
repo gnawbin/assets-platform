@@ -8,8 +8,9 @@
  * - `DELETE /api/api-keys/{id}`         吊销（立即生效）
  *
  * @remarks
- * 这些接口只存在于 HTTP 通道（`crates/api`），Tauri 桌面通道没有对应命令，
- * 因此页面在 `getAdapterType() !== 'http'` 时会给出提示（见 settings/api-keys 页）。
+ * 这些接口只存在于 HTTP 通道（`crates/api`），Tauri 桌面通道没有对应命令。
+ * 前端现已为纯 HTTP 单通道，`getAdapterType()` 恒为 `'http'`，
+ * 页面上的 `isHttpMode` 判断恒成立（保留只为兼容旧代码）。
  * 请求体字段使用后端 serde 的 snake_case 命名。
  */
 

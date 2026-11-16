@@ -1,17 +1,17 @@
 /**
- * HTTP 适配器
+ * HTTP 适配器（**前端唯一适配器**）
  *
  * 通过 fetch() 调用 HTTP API 服务。
- * 维护命令名到 HTTP 路径的映射表，使 service 层无需改动即可切换适配器。
+ * 维护命令名到 HTTP 路径的映射表，使 service 层无需改动即可切换通道。
  *
  * @remarks
- * 切换方式：设置环境变量 NEXT_PUBLIC_API_ADAPTER=http
- * 或运行时调用 setAdapter('http')
+ * 前端已从「Tauri IPC + HTTP 双通道」切换为**纯 HTTP 单通道**：
+ * 桌面版与 Web 版共用本适配器，不再有 `invoke()` 调用点。
+ * 基址由 `utils/apiBase.ts` 统一解析（禁止在此硬编码 `localhost:3001`）。
  *
- * 映射表覆盖后端 lib.rs invoke_handler 中注册的全部 Tauri 命令：
- * - 后端 HTTP API（crates/api）已实现的路由 → 写入 COMMAND_ROUTE_MAP
- * - 后端尚未提供 HTTP 端点（LLM 厂商/知识资产 OKF/对话/编号规则/RAG 等）
- *   → 登记在 TAURI_ONLY_COMMANDS，HTTP 模式下会抛出明确错误
+ * 映射表覆盖后端 lib.rs invoke_handler 中注册的全部 Tauri 命令（154 条），
+ * 每条命令都必须有对应的 HTTP 路由；`tests/utils/adapters/httpAdapter.test.ts`
+ * 会在缺项时失败。新增后端命令时请同步补路由 + 本表 + `authz::ROUTE_PERMS`。
  *
  * 路径占位符 {xxx} 与前端 service 层实际传入的参数字段名保持一致
  * （如 {id} / {roleId} / {skillId} / {userId} / {uploadId}）。
@@ -21,6 +21,7 @@
 
 import { notifyError } from '../notify';
 import { logger } from '../logger';
+import { getApiOrigin } from '../apiBase';
 import type { IApiAdapter, ApiConfig } from './types';
 
 // ======================== 默认配置 ========================
@@ -31,9 +32,6 @@ const DEFAULT_CONFIG: Required<ApiConfig> = {
     retryDelay: 1000,
     errorMessage: '操作失败，请稍后重试',
 };
-
-/** API 基础 URL，从环境变量读取 */
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api';
 
 // ======================== 命令名 → HTTP 路径映射表 ========================
 
@@ -264,19 +262,21 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     upload_get_version_history: { method: 'GET', path: '/api/upload/versions/{fileGroupId}' },
 };
 
-// ======================== 仅 Tauri 模式支持的命令 ========================
+// ======================== 未暴露到 HTTP 的后端命令 ========================
 
 /**
- * 后端 HTTP API（crates/api）尚未提供 HTTP 端点的命令。
+ * 后端仍在 `invoke_handler` 注册、但**没有 HTTP 路由**的命令。
  *
- * 这些命令仅能通过 Tauri invoke() 调用。若在 HTTP 适配器下被调用，
- * httpCall() 会抛出明确错误，避免使用不存在的虚拟路由导致 404 混淆。
+ * 前端已切换为纯 HTTP 单通道，这些命令在桌面版/Web 版都**无法调用**；
+ * 之所以保留在此，是为了让映射表完整性测试能给出精确的「缺项」信号，
+ * 而不是把缺项混进真正的漏配里。
  *
- * 后续为以下模块补充 HTTP 路由后，应同步从本集合移除并加入 COMMAND_ROUTE_MAP：
- * - rag：RAG 检索
+ * 当前仅剩 RAG 两条：前端无任何调用点（知识库入库走 `uploadService` +
+ * 后端向量化任务），后端也尚未提供 `crates/api` 路由。
+ * 处理方式二选一：补 HTTP 路由（再登记进 `COMMAND_ROUTE_MAP`），
+ * 或删除这两个 Tauri 命令与本集合条目。
  */
-export const TAURI_ONLY_COMMANDS: ReadonlySet<string> = new Set<string>([
-    // ======================== RAG ========================
+export const UNEXPOSED_BACKEND_COMMANDS: ReadonlySet<string> = new Set<string>([
     'chunk_and_vectorize',
     'test_rag_retrieval',
 ]);
@@ -321,13 +321,93 @@ function extractParams(
 
 /**
  * 构建最终 URL，替换路径参数
+ *
+ * @returns 完整 URL；服务端地址未配置时返回 `null`（由调用方给出可操作错误）
+ *
+ * @remarks
+ * 这里拼接的是 `getApiOrigin()`（**不含** `/api`），
+ * 而映射表里的 path 自带 `/api/...`，因此不会出现 `/api/api/...`。
  */
-function buildUrl(path: string, pathArgs: Record<string, string>): string {
+function buildUrl(path: string, pathArgs: Record<string, string>): string | null {
+    const origin = getApiOrigin();
+    if (!origin) {
+        return null;
+    }
+
     let resolvedPath = path;
     for (const [key, value] of Object.entries(pathArgs)) {
         resolvedPath = resolvedPath.replace(`{${key}}`, value);
     }
-    return `${BASE_URL}${resolvedPath}`;
+    return `${origin}${resolvedPath}`;
+}
+
+/** 截断长文本（保留可读前缀，避免通知里塞整页 HTML） */
+function truncate(text: string, max: number): string {
+    return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+/**
+ * 从后端错误响应体中提取可读消息
+ *
+ * 后端 `ApiError` 统一返回 `{ code, message }`（鉴权失败可能附带 `scope`），
+ * OAuth 端点返回 `{ error, error_description }`。把业务消息直接抛给调用方，
+ * 页面才能显示「权限不足：缺少 xxx」而不是裸的 `HTTP 403 Forbidden`。
+ *
+ * 非 JSON（如 nginx 的 502 HTML 页）返回 `null`，由调用方回落到状态行。
+ */
+export function extractServerMessage(rawBody: string): string | null {
+    const body = (rawBody || '').trim();
+    if (!body) {
+        return null;
+    }
+
+    try {
+        const parsed: unknown = JSON.parse(body);
+        if (parsed && typeof parsed === 'object') {
+            const record = parsed as Record<string, unknown>;
+            for (const key of ['message', 'error_description', 'error', 'msg', 'detail']) {
+                const value = record[key];
+                if (typeof value === 'string' && value.trim()) {
+                    return value.trim();
+                }
+            }
+        }
+    } catch {
+        // 非 JSON：按纯文本处理（限长且排除 HTML）
+        if (body.length <= 300 && !body.startsWith('<')) {
+            return body;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * 构造带业务消息的错误对象
+ *
+ * 除 `message` 外，403 响应通常还带 `scope`（缺少的权限点），
+ * 挂到 `error.scope` 上，方便页面提示「缺少权限点：asset:category:create」。
+ */
+export interface ApiErrorWithScope extends Error {
+    /** 缺少的权限点 / 授权范围（后端 `ApiError.scope`） */
+    scope?: string;
+}
+
+/** 由错误响应体构造错误对象（非 JSON 时只带 message） */
+function buildServerError(message: string, rawBody: string): ApiErrorWithScope {
+    const error: ApiErrorWithScope = new Error(message);
+    try {
+        const parsed: unknown = JSON.parse(rawBody);
+        if (parsed && typeof parsed === 'object') {
+            const scope = (parsed as Record<string, unknown>).scope;
+            if (typeof scope === 'string' && scope.trim()) {
+                error.scope = scope.trim();
+            }
+        }
+    } catch {
+        // 非 JSON：没有附加字段
+    }
+    return error;
 }
 
 /**
@@ -389,7 +469,12 @@ async function doRefreshAccessToken(): Promise<string | null> {
     }
 
     try {
-        const response = await fetch(buildUrl('/api/auth/refresh', {}), {
+        const refreshUrl = buildUrl('/api/auth/refresh', {});
+        if (!refreshUrl) {
+            logger.warn('[HTTP] 服务端地址未配置，跳过令牌续期');
+            return null;
+        }
+        const response = await fetch(refreshUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refresh_token: refreshToken }),
@@ -455,7 +540,11 @@ export function clearAuthSession(): void {
  */
 export async function revokeRefreshTokenOnServer(refreshToken: string): Promise<void> {
     try {
-        await fetch(buildUrl('/api/auth/logout', {}), {
+        const logoutUrl = buildUrl('/api/auth/logout', {});
+        if (!logoutUrl) {
+            return;
+        }
+        await fetch(logoutUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refresh_token: refreshToken }),
@@ -479,12 +568,8 @@ async function httpCall<T>(
     // 查找路由映射
     const route = findRoute(command);
     if (!route) {
-        const isTauriOnly = TAURI_ONLY_COMMANDS.has(command);
-        const errMsg = isTauriOnly
-            ? `命令 "${command}" 暂无 HTTP 映射（仅支持 Tauri 模式）。`
-            + `当前使用 HTTP 适配器，请通过 setAdapter('tauri') 切换到 Tauri 模式，`
-            + `或等待后端为该命令补充 HTTP 端点后在 httpAdapter.ts 中登记路由。`
-            : `未找到命令 "${command}" 的 HTTP 路由映射`;
+        const errMsg = `未找到命令 "${command}" 的 HTTP 路由映射`
+            + `（请在 httpAdapter.ts 的 COMMAND_ROUTE_MAP 中登记）`;
         logger.error(`[HTTP] ${errMsg}`);
         if (showError) {
             notifyError('操作失败', errMsg);
@@ -497,8 +582,17 @@ async function httpCall<T>(
     // 提取路径参数和请求体参数
     const { pathArgs, bodyArgs } = extractParams(args, pathTemplate);
 
-    // 构建最终 URL
+    // 构建最终 URL：服务端地址未配置时给出可操作提示，**不发请求**
     const url = buildUrl(pathTemplate, pathArgs);
+    if (!url) {
+        const errMsg = '未配置服务器地址：请到「系统配置 → 服务端连接」填写后端地址'
+            + '（或在构建时设置 NEXT_PUBLIC_API_BASE_URL）';
+        logger.error(`[HTTP] ${errMsg}`);
+        if (showError) {
+            notifyError('无法连接服务器', errMsg);
+        }
+        throw new Error(errMsg);
+    }
 
     for (let attempt = 0; attempt <= retryCount; attempt++) {
         try {
@@ -546,6 +640,7 @@ async function httpCall<T>(
             });
 
             let response = await fetch(finalUrl, fetchOptions);
+            let sessionCleared = false;
 
             // 401 → 用 refresh token 静默续期并重放一次（认证端点本身不自救，避免刷新递归）
             if (
@@ -563,17 +658,35 @@ async function httpCall<T>(
                         Authorization: `Bearer ${renewedToken}`,
                     };
                     response = await fetch(finalUrl, fetchOptions);
+
+                    // 续期成功但仍是 401：令牌/账号确实无效（账号被禁用、令牌被撤销），
+                    // 不能停在「有 token 但一直失败」的状态，必须清会话回登录页。
+                    if (response.status === 401) {
+                        logger.warn(
+                            `[HTTP] 续期后仍返回 401，清除登录态: ${method} ${finalUrl}`,
+                        );
+                        clearAuthSession();
+                        sessionCleared = true;
+                    }
                 } else {
                     logger.warn('[HTTP] 刷新令牌失败，清除登录态并跳转登录页');
                     clearAuthSession();
+                    sessionCleared = true;
                 }
             }
 
             if (!response.ok) {
-                const errorBody = await response.text().catch(() => '');
-                throw new Error(
-                    `HTTP ${response.status}: ${response.statusText}${errorBody ? ` - ${errorBody}` : ''}`,
-                );
+                const rawBody = await response.text().catch(() => '');
+                const serverMessage = extractServerMessage(rawBody);
+                const statusLine = `HTTP ${response.status} ${response.statusText}`.trim();
+
+                // 401 且已清会话：给出可操作提示，避免只显示裸状态码
+                const message = serverMessage
+                    || (response.status === 401 && sessionCleared
+                        ? `${statusLine} - 登录状态已失效，请重新登录`
+                        : `${statusLine}${rawBody ? ` - ${truncate(rawBody, 300)}` : ''}`);
+
+                throw buildServerError(message, rawBody);
             }
 
             const result = await response.json();

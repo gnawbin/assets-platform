@@ -24,9 +24,17 @@ import {
   IconHash,
   IconKey,
   IconApps,
+  IconServer,
 } from '@tabler/icons-react';
 
 const settingsItems = [
+  {
+    title: '服务端连接',
+    description: '查看当前后端地址与来源，测试连通性、诊断延迟与版本',
+    icon: IconServer,
+    color: 'blue',
+    href: '/settings/server',
+  },
   {
     title: '用户管理',
     description: '管理系统用户账号、角色分配和权限控制',
