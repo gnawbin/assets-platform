@@ -49,12 +49,17 @@ export function listSkills() {
     return api.get<SkillMeta[]>('list_skills');
 }
 
-/** 根据 ID 获取 Skill 详情 */
+/** 根据 ID 获取 Skill 详情（路径占位符为 {skillId}） */
 export function getSkill(skillId: string) {
     return api.get<SkillMeta>('get_skill', { skillId });
 }
 
-/** 执行 Skill */
+/**
+ * 执行 Skill
+ *
+ * 后端 `ExecuteSkillRequest` 为扁平 snake_case；`user_id` / `tenant_id`
+ * 是雪花 ID，按字符串传输（后端 i64_from_string 兼容）。
+ */
 export function executeSkill(params: {
     skill_id: string;
     input_text: string;
@@ -63,20 +68,20 @@ export function executeSkill(params: {
     tenant_id: string;
 }) {
     return api.post<SkillResult>('execute_skill', {
-        skillId: params.skill_id,
-        inputText: params.input_text,
+        skill_id: params.skill_id,
+        input_text: params.input_text,
         config: params.config ?? {},
-        userId: params.user_id,
-        tenantId: params.tenant_id,
+        user_id: params.user_id,
+        tenant_id: params.tenant_id,
     });
 }
 
-/** 注册自定义 Skill */
+/** 注册自定义 Skill（后端直接反序列化 SkillMeta，不再包一层 skillMeta） */
 export function registerCustomSkill(skillMeta: SkillMeta) {
-    return api.post<null>('register_custom_skill', { skillMeta });
+    return api.post<null>('register_custom_skill', { ...skillMeta });
 }
 
-/** 移除 Skill */
+/** 移除 Skill（路径占位符为 {skillId}） */
 export function unregisterSkill(skillId: string) {
     return api.delete<boolean>('unregister_skill', { skillId });
 }

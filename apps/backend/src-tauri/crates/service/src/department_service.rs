@@ -60,7 +60,7 @@ pub async fn insert_department(
     .bind(next_id() as i64)
     .bind(tenant_id)
     .bind(department_name)
-    .bind(parent_id)
+    .bind(parent_id.unwrap_or(0))
     .bind(description)
     .bind(created_by)
     .fetch_one(&pool)

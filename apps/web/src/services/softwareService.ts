@@ -17,8 +17,10 @@ export interface IntangibleAssetView {
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: string | null;
-    user_id: string | null;
+    /** 使用部门 ID 集合（后端 BIGINT[]，按字符串数组传输以免雪花 ID 精度丢失） */
+    department_ids: string[] | null;
+    /** 使用人 ID 集合 */
+    user_ids: string[] | null;
     status: number;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -43,7 +45,6 @@ export interface IntangibleAssetView {
     license_key: string | null;
     license_type: string | null;
     authorized_scope: string | null;
-    assigned_user_ids: string | null;
     bind_type: string | null;
     bind_info: string | null;
     version: string | null;
@@ -59,8 +60,10 @@ export interface IntangibleAssetInput {
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: string | null;
-    user_id: string | null;
+    /** 使用部门 ID 集合 */
+    department_ids: string[] | null;
+    /** 使用人 ID 集合 */
+    user_ids: string[] | null;
     status: number | null;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -78,7 +81,6 @@ export interface IntangibleAssetInput {
     license_key: string | null;
     license_type: string | null;
     authorized_scope: string | null;
-    assigned_user_ids: string | null;
     bind_type: string | null;
     bind_info: string | null;
     version: string | null;
@@ -107,14 +109,19 @@ export function getIntangibleAssets() {
     return api.get<IntangibleAssetView[]>('get_intangible_assets');
 }
 
-/** 新增无形资产 */
+/**
+ * 新增无形资产
+ *
+ * 后端 `POST /api/assets/intangible` 直接反序列化 `IntangibleAssetInput`（扁平结构），
+ * 不再包一层 `input`；`department_ids` / `user_ids` 为字符串数组。
+ */
 export function insertIntangibleAsset(params: InsertIntangibleAssetParams) {
-    return api.post<string>('insert_intangible_asset', { input: params.input });
+    return api.post<IntangibleAssetView>('insert_intangible_asset', { ...params.input });
 }
 
-/** 更新无形资产 */
+/** 更新无形资产（id 进路径，其余字段进 body） */
 export function updateIntangibleAsset(params: UpdateIntangibleAssetParams) {
-    return api.put<string>('update_intangible_asset', { id: params.id, input: params.input });
+    return api.put<IntangibleAssetView>('update_intangible_asset', { id: params.id, ...params.input });
 }
 
 /** 删除无形资产（软删除） */

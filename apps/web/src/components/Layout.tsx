@@ -40,10 +40,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     if (value) {
       try {
         // 调用后端 API 切换租户（更新服务端 USER_TENANT_CACHE）
-        // Tauri 命令需要 userId + tenantId
+        // HTTP 形态：用户身份取自登录 token，body 只需 tenant_id
         await api.post('switch_tenant', {
-          userId: String(user?.id ?? ''),
-          tenantId: value,
+          tenant_id: value,
         });
         // 更新前端本地状态（直接传 string，不做 Number() 转换避免精度丢失）
         switchTenant(value);

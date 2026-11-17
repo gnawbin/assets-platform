@@ -24,38 +24,41 @@ export interface Department {
 
 // ======================== 服务方法 ========================
 
-/** 获取所有部门（可按租户过滤） */
+/** 获取所有部门（可按租户过滤，后端 query 参数为 tenant_id） */
 export function getDepartments(tenantId?: string | null) {
-    const args: Record<string, unknown> = {};
-    if (tenantId) {
-        args.tenantId = tenantId;
-    }
-    return api.get<Department[]>('get_departments', args);
+    return api.get<Department[]>('get_departments', {
+        tenant_id: tenantId ?? undefined,
+    });
 }
 
-/** 新增部门 */
+/** 新增部门（后端 DTO：department_name / tenant_id 必填，snake_case） */
 export function insertDepartment(params: {
     departmentName: string;
     parentId: string | null;
     description: string | null;
     tenantId: string | null;
 }) {
-    return api.post<string>('insert_department', {
-        departmentName: params.departmentName,
-        parentId: params.parentId,
+    return api.post<Department>('insert_department', {
+        department_name: params.departmentName,
+        parent_id: params.parentId,
         description: params.description,
-        tenantId: params.tenantId,
+        tenant_id: params.tenantId,
     });
 }
 
-/** 更新部门 */
+/** 更新部门（id 进路径，其余字段 snake_case） */
 export function updateDepartment(params: {
     id: string;
     departmentName: string;
     parentId: string | null;
     description: string | null;
 }) {
-    return api.put<string>('update_department', params);
+    return api.put<Department>('update_department', {
+        id: params.id,
+        department_name: params.departmentName,
+        parent_id: params.parentId,
+        description: params.description,
+    });
 }
 
 /** 删除部门（软删除） */

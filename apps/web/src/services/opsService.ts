@@ -155,14 +155,14 @@ export function getOpsConnection(id: string): Promise<OpsConnectionView> {
     return api.get<OpsConnectionView>('get_ops_connection', { id });
 }
 
-/** 新建连接 */
-export function createOpsConnection(input: OpsConnectionInput, currentUserId?: string) {
-    return api.post<OpsConnectionView>('create_ops_connection', { input, currentUserId });
+/** 新建连接（后端 DTO 为扁平 snake_case，创建人取自登录态 token） */
+export function createOpsConnection(input: OpsConnectionInput) {
+    return api.post<OpsConnectionView>('create_ops_connection', { ...input });
 }
 
-/** 更新连接（不传 auth 表示沿用已存凭证） */
-export function updateOpsConnection(id: string, input: OpsConnectionInput, currentUserId?: string) {
-    return api.put<OpsConnectionView>('update_ops_connection', { id, input, currentUserId });
+/** 更新连接（id 进路径；不传 auth 表示沿用已存凭证） */
+export function updateOpsConnection(id: string, input: OpsConnectionInput) {
+    return api.put<OpsConnectionView>('update_ops_connection', { ...input, id });
 }
 
 /** 删除连接（软删） */
@@ -170,9 +170,9 @@ export function deleteOpsConnection(id: string): Promise<void> {
     return api.delete<void>('delete_ops_connection', { id });
 }
 
-/** 草稿探测（不落库） */
+/** 草稿探测（不落库；请求体即扁平输入） */
 export function testOpsConnectionDraft(input: OpsConnectionInput): Promise<OpsHealthView> {
-    return api.post<OpsHealthView>('test_ops_connection_draft', { input });
+    return api.post<OpsHealthView>('test_ops_connection_draft', { ...input });
 }
 
 /** 已存连接探测 */
@@ -192,7 +192,7 @@ export function getOpsLinks(connectionId?: string | null): Promise<OpsResourceLi
         : api.get<OpsResourceLinkView[]>('get_ops_links');
 }
 
-/** 把观测资源归档到已有资产 */
-export function bindOpsLink(linkId: string, assetId: string, currentUserId?: string) {
-    return api.post<OpsResourceLinkView>('bind_ops_link', { linkId, assetId, currentUserId });
+/** 把观测资源归档到已有资产（linkId 走路径，请求体仅 `asset_id`；操作人取自登录态 token） */
+export function bindOpsLink(linkId: string, assetId: string) {
+    return api.post<OpsResourceLinkView>('bind_ops_link', { linkId, asset_id: assetId });
 }

@@ -24,8 +24,11 @@ pub struct CreateUserRequest {
     pub password: String,
     /// 真实姓名
     pub real_name: String,
+    /// 状态（1=启用 0=禁用），缺省启用
+    pub status: Option<i16>,
     pub email: Option<String>,
     pub phone: Option<String>,
+    /// 所属部门 ID（字符串或数字均可）
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub department_id: Option<i64>,
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
@@ -42,10 +45,15 @@ pub struct CreateUserRequest {
 /// 更新用户请求
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateUserRequest {
+    /// 登录名（缺省沿用 real_name，兼容旧前端）
+    pub username: Option<String>,
     /// 真实姓名
     pub real_name: String,
+    /// 状态（1=启用 0=禁用），缺省启用
+    pub status: Option<i16>,
     pub email: Option<String>,
     pub phone: Option<String>,
+    /// 所属部门 ID（字符串或数字均可）
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub department_id: Option<i64>,
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
@@ -284,7 +292,7 @@ pub async fn insert_user(
         req.email.as_deref(),
         req.phone.as_deref(),
         req.department_id,
-        1, // status: 启用
+        req.status.unwrap_or(1), // status: 缺省启用
         req.nickname.as_deref(),
         req.person_id.as_deref(),
         req.person_code.as_deref(),
@@ -324,12 +332,12 @@ pub async fn update_user(
 
     match service::user_service::update_user(
         id,
-        &req.real_name, // username 复用 real_name
+        req.username.as_deref().unwrap_or(&req.real_name),
         &req.real_name,
         req.email.as_deref(),
         req.phone.as_deref(),
         req.department_id,
-        1, // status
+        req.status.unwrap_or(1), // status: 缺省启用
         req.nickname.as_deref(),
         req.person_id.as_deref(),
         req.person_code.as_deref(),

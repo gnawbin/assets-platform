@@ -26,7 +26,7 @@ export function getTenants() {
     return api.get<Tenant[]>('get_tenants');
 }
 
-/** 新增租户 */
+/** 新增租户（后端 DTO：tenant_name / is_leaf / enable 必填，snake_case） */
 export function insertTenant(params: {
     tenantName: string;
     parentId: string | null;
@@ -34,16 +34,26 @@ export function insertTenant(params: {
     schemaName: string | null;
     enable: boolean;
 }) {
-    return api.post<Tenant>('insert_tenant', params);
+    return api.post<Tenant>('insert_tenant', {
+        tenant_name: params.tenantName,
+        parent_id: params.parentId,
+        is_leaf: params.isLeaf,
+        schema_name: params.schemaName,
+        enable: params.enable,
+    });
 }
 
-/** 更新租户 */
+/** 更新租户（id 进路径，其余字段 snake_case） */
 export function updateTenant(params: {
     id: string;
     tenantName: string;
     enable: boolean;
 }) {
-    return api.put<Tenant>('update_tenant', params);
+    return api.put<Tenant>('update_tenant', {
+        id: params.id,
+        tenant_name: params.tenantName,
+        enable: params.enable,
+    });
 }
 
 /** 删除租户（禁用租户） */
@@ -51,16 +61,15 @@ export function deleteTenant(id: string) {
     return api.delete<Tenant>('delete_tenant', { id });
 }
 
-/** 获取用户可访问的租户列表 */
+/** 获取用户可访问的租户列表（路径占位符为 {id}） */
 export function getUserTenants(userId: number | string) {
-    return api.get<Tenant[]>('get_user_tenants', { userId: String(userId) });
+    return api.get<Tenant[]>('get_user_tenants', { id: String(userId) });
 }
 
-/** 为用户分配租户（覆盖式） */
-export function assignUserTenants(userId: number | string, tenantIds: string[], currentUserId: number | string) {
+/** 为用户分配租户（覆盖式；操作人取自登录态 token） */
+export function assignUserTenants(userId: number | string, tenantIds: string[]) {
     return api.post<void>('assign_user_tenants', {
-        userId: String(userId),
-        tenantIds: tenantIds.map(String),
-        currentUserId: String(currentUserId),
+        user_id: String(userId),
+        tenant_ids: tenantIds.map(String),
     });
 }

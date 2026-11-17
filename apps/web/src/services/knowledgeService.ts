@@ -65,7 +65,7 @@ export function getKnowledgeTree() {
     return api.get<KnowledgeTreeNode[]>('get_knowledge_tree');
 }
 
-/** 新增知识树节点 */
+/** 新增知识树节点（后端 DTO：node_type / title 必填，其余可选，snake_case） */
 export function insertKnowledgeNode(params: {
     knowledgeId?: string;
     parentId?: string;
@@ -75,16 +75,16 @@ export function insertKnowledgeNode(params: {
     sortOrder?: number;
 }) {
     return api.post<KnowledgeTree>('insert_knowledge_node', {
-        knowledgeId: params.knowledgeId,
-        parentId: params.parentId,
-        nodeType: params.nodeType,
+        knowledge_id: params.knowledgeId,
+        parent_id: params.parentId,
+        node_type: params.nodeType,
         title: params.title,
         icon: params.icon,
-        sortOrder: params.sortOrder,
+        sort_order: params.sortOrder,
     });
 }
 
-/** 更新知识树节点 */
+/** 更新知识树节点（id 进路径，其余字段 snake_case） */
 export function updateKnowledgeNode(params: {
     id: string;
     title?: string;
@@ -92,7 +92,13 @@ export function updateKnowledgeNode(params: {
     sortOrder?: number;
     isExpanded?: boolean;
 }) {
-    return api.put<KnowledgeTree>('update_knowledge_node', params);
+    return api.put<KnowledgeTree>('update_knowledge_node', {
+        id: params.id,
+        title: params.title,
+        icon: params.icon,
+        sort_order: params.sortOrder,
+        is_expanded: params.isExpanded,
+    });
 }
 
 /** 删除知识树节点 */
@@ -100,22 +106,28 @@ export function deleteKnowledgeNode(id: string) {
     return api.delete<null>('delete_knowledge_node', { id });
 }
 
-/** 移动知识树节点 */
+/** 移动知识树节点（后端字段为 new_parent_id） */
 export function moveKnowledgeNode(params: {
     id: string;
     newParentId?: string;
 }) {
-    return api.put<KnowledgeTree>('move_knowledge_node', params);
+    return api.put<KnowledgeTree>('move_knowledge_node', {
+        id: params.id,
+        new_parent_id: params.newParentId,
+    });
 }
 
 // ======================== 知识条目 API ========================
 
-/** 获取知识条目列表 */
+/** 获取知识条目列表（后端 query 参数为 knowledge_id / keyword） */
 export function getKnowledgeList(params?: {
     knowledgeId?: string;
     keyword?: string;
 }) {
-    return api.get<AssetKnowledge[]>('get_knowledge_list', params ?? {});
+    return api.get<AssetKnowledge[]>('get_knowledge_list', {
+        knowledge_id: params?.knowledgeId,
+        keyword: params?.keyword,
+    });
 }
 
 /** 获取单条知识条目 */
@@ -123,9 +135,8 @@ export function getKnowledgeById(id: string) {
     return api.get<AssetKnowledge>('get_knowledge_by_id', { id });
 }
 
-/** 新增知识条目 */
+/** 新增知识条目（后端 DTO 无 knowledge_id，树节点关联在节点侧维护） */
 export function insertKnowledge(params: {
-    knowledgeId?: string;
     assetId?: string;
     docSource?: string;
     knowledgeType?: string;
@@ -133,10 +144,17 @@ export function insertKnowledge(params: {
     content: string;
     permissionLevel?: string;
 }) {
-    return api.post<AssetKnowledge>('insert_knowledge', params);
+    return api.post<AssetKnowledge>('insert_knowledge', {
+        asset_id: params.assetId,
+        doc_source: params.docSource,
+        knowledge_type: params.knowledgeType,
+        title: params.title,
+        content: params.content,
+        permission_level: params.permissionLevel,
+    });
 }
 
-/** 更新知识条目 */
+/** 更新知识条目（id 进路径，其余字段 snake_case） */
 export function updateKnowledge(params: {
     id: string;
     title?: string;
@@ -144,7 +162,13 @@ export function updateKnowledge(params: {
     knowledgeType?: string;
     permissionLevel?: string;
 }) {
-    return api.put<AssetKnowledge>('update_knowledge', params);
+    return api.put<AssetKnowledge>('update_knowledge', {
+        id: params.id,
+        title: params.title,
+        content: params.content,
+        knowledge_type: params.knowledgeType,
+        permission_level: params.permissionLevel,
+    });
 }
 
 /** 删除知识条目 */

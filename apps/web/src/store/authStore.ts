@@ -197,8 +197,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         if (storedSelectedTenant) {
           try {
             await api.post('switch_tenant', {
-              userId: String(freshUser.id ?? ''),
-              tenantId: storedSelectedTenant,
+              tenant_id: storedSelectedTenant,
             });
           } catch {
             // 切换租户失败不影响登录状态，静默处理

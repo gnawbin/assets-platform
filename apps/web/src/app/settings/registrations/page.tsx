@@ -79,7 +79,6 @@ const RegistrationsPage: React.FC = () => {
         try {
             await approveRegistration(
                 selected.id,
-                String(user?.id ?? ''),
                 selectedTenantId,
                 approveRemark || undefined
             );
@@ -99,7 +98,7 @@ const RegistrationsPage: React.FC = () => {
         if (!selected) return;
         setSubmitting(true);
         try {
-            await rejectRegistration(selected.id, String(user?.id ?? ''), rejectRemark || undefined);
+            await rejectRegistration(selected.id, rejectRemark || undefined);
             notifications.show({ title: '已驳回', message: '注册申请已驳回', color: 'orange' });
             closeReject();
             setRejectRemark('');

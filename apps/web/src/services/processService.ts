@@ -216,7 +216,7 @@ export function insertReceive(params: AssetReceiveInput) {
 
 /** 更新领用记录 */
 export function updateReceive(id: string, params: AssetReceiveInput) {
-    return api.put<AssetReceive>('update_receive', { id, input: params });
+    return api.put<AssetReceive>('update_receive', { ...params, id });
 }
 
 /** 删除领用记录 */
@@ -238,7 +238,7 @@ export function insertReturn(params: AssetReturnInput) {
 
 /** 更新归还记录 */
 export function updateReturn(id: string, params: AssetReturnInput) {
-    return api.put<AssetReturn>('update_return', { id, input: params });
+    return api.put<AssetReturn>('update_return', { ...params, id });
 }
 
 /** 删除归还记录 */
@@ -260,7 +260,7 @@ export function insertTransfer(params: AssetTransferInput) {
 
 /** 更新调拨记录 */
 export function updateTransfer(id: string, params: AssetTransferInput) {
-    return api.put<AssetTransfer>('update_transfer', { id, input: params });
+    return api.put<AssetTransfer>('update_transfer', { ...params, id });
 }
 
 /** 删除调拨记录 */
@@ -282,7 +282,7 @@ export function insertRepair(params: AssetRepairInput) {
 
 /** 更新维修记录 */
 export function updateRepair(id: string, params: AssetRepairInput) {
-    return api.put<AssetRepair>('update_repair', { id, input: params });
+    return api.put<AssetRepair>('update_repair', { ...params, id });
 }
 
 /** 删除维修记录 */
@@ -304,7 +304,7 @@ export function insertScrap(params: AssetScrapInput) {
 
 /** 更新报废记录 */
 export function updateScrap(id: string, params: AssetScrapInput) {
-    return api.put<AssetScrap>('update_scrap', { id, input: params });
+    return api.put<AssetScrap>('update_scrap', { ...params, id });
 }
 
 /** 删除报废记录 */
@@ -326,7 +326,7 @@ export function insertPurchase(params: AssetPurchaseInput) {
 
 /** 更新采购记录 */
 export function updatePurchase(id: string, params: AssetPurchaseInput) {
-    return api.put<AssetPurchase>('update_purchase', { id, input: params });
+    return api.put<AssetPurchase>('update_purchase', { ...params, id });
 }
 
 /** 删除采购记录 */

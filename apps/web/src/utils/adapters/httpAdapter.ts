@@ -111,9 +111,9 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     // ======================== 角色权限 ========================
     get_roles: { method: 'GET', path: '/api/roles' },
     insert_role: { method: 'POST', path: '/api/roles' },
-    delete_role: { method: 'DELETE', path: '/api/roles/{roleId}' },
-    get_role_menu_ids: { method: 'GET', path: '/api/roles/{roleId}/menus' },
-    assign_role_menus: { method: 'POST', path: '/api/roles/{roleId}/menus' },
+    delete_role: { method: 'DELETE', path: '/api/roles/{id}' },
+    get_role_menu_ids: { method: 'GET', path: '/api/roles/{id}/menus' },
+    assign_role_menus: { method: 'POST', path: '/api/roles/{id}/menus' },
     get_all_menus_tree: { method: 'GET', path: '/api/menus/tree' },
     get_user_menus: { method: 'GET', path: '/api/menus/user' },
 
@@ -124,7 +124,7 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     delete_tenant: { method: 'DELETE', path: '/api/tenants/{id}' },
     switch_tenant: { method: 'POST', path: '/api/tenants/switch' },
     assign_user_tenants: { method: 'POST', path: '/api/tenants/assign' },
-    get_user_tenants: { method: 'GET', path: '/api/users/{userId}/tenants' },
+    get_user_tenants: { method: 'GET', path: '/api/users/{id}/tenants' },
 
     // ======================== 注册申请 ========================
     get_registrations: { method: 'GET', path: '/api/auth/registrations' },

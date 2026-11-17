@@ -94,6 +94,65 @@ where
     deserializer.deserialize_any(VecI64Visitor)
 }
 
+// 把 Vec<i64> 序列化为字符串数组（防止前端 JS 精度丢失，与 i64_to_string 配套）
+pub fn vec_i64_to_string<S>(value: &[i64], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    use serde::ser::SerializeSeq;
+
+    let mut seq = serializer.serialize_seq(Some(value.len()))?;
+    for item in value {
+        seq.serialize_element(&item.to_string())?;
+    }
+    seq.end()
+}
+
+// 处理 Option<Vec<i64>> 的序列化（None → null，Some → 字符串数组）
+pub fn opt_vec_i64_to_string<S>(value: &Option<Vec<i64>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match value {
+        Some(items) => vec_i64_to_string(items, serializer),
+        None => serializer.serialize_none(),
+    }
+}
+
+// 把 null / 字符串数组 / 数字数组反序列化为 Option<Vec<i64>>
+// （HTTP 前端一律传字符串数组，桌面端可能传数字数组，两者都接受）
+pub fn opt_vec_i64_from_string<'de, D>(deserializer: D) -> Result<Option<Vec<i64>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct OptVecI64Visitor;
+
+    impl<'de> Visitor<'de> for OptVecI64Visitor {
+        type Value = Option<Vec<i64>>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("null or an array of strings or numbers")
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Option<Vec<i64>>, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Option<Vec<i64>>, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D2>(self, deserializer: D2) -> Result<Option<Vec<i64>>, D2::Error>
+        where
+            D2: Deserializer<'de>,
+        {
+            vec_i64_from_string(deserializer).map(Some)
+        }
+    }
+
+    deserializer.deserialize_option(OptVecI64Visitor)
+}
+
 // 把 Option<string> 反序列化为 Option<i64> 的辅助函数
 pub fn opt_i64_from_string<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
 where
@@ -170,7 +229,23 @@ pub struct AssetCategory {
     #[serde(default)]
     pub deleted: Option<i16>,
 }
-
+impl Default for AssetCategory {
+    fn default() -> Self {
+        AssetCategory {
+            id: 0,                        // i64 的默认值通常是 0
+            category_name: String::new(), // String 的默认值是空字符串
+            asset_type: String::new(),
+            parent_id: Some(0), // 你的自定义默认值
+            sort: 0,            // i16 的默认值是 0
+            description: None,  // Option 的默认值是 None
+            created_by: None,
+            created_at: Some(Utc::now()),
+            updated_by: None,
+            updated_at: Some(Utc::now()),
+            deleted: Some(0),
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct HardAssets {
     #[serde(serialize_with = "i64_to_string")]
@@ -739,11 +814,11 @@ pub struct AssetApproval {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MantineTree {
-    pub value: String,                      // 必须：id 转字符串
-    pub label: String,                      // 必须：显示名称
+    pub value: String, // 必须：id 转字符串
+    pub label: String, // 必须：显示名称
     #[schema(no_recursion)]
     pub children: Option<Vec<MantineTree>>, // 子节点
-    pub checked: Option<bool>,              // 可选：是否选中（权限分配时使用）
+    pub checked: Option<bool>, // 可选：是否选中（权限分配时使用）
 }
 
 /// 用户注册申请实体
@@ -1047,14 +1122,8 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContentPart {
-    Text {
-        r#type: String,
-        text: String,
-    },
-    Image {
-        r#type: String,
-        image_url: ImageUrl,
-    },
+    Text { r#type: String, text: String },
+    Image { r#type: String, image_url: ImageUrl },
 }
 
 /// 图片 URL（OpenAI 兼容 image_url 格式，支持 data URL base64）
@@ -1196,25 +1265,31 @@ pub struct OpsConnection {
     #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
     pub id: i64, //主键
     pub connection_name: String, //连接名称（同租户内唯一）
-    pub provider: String, //采集来源：docker / swarm / k8s
-    pub endpoint: String, //端点（带 scheme）
-    pub auth_type: String, //认证方式稳定编码
+    pub provider: String,        //采集来源：docker / swarm / k8s
+    pub endpoint: String,        //端点（带 scheme）
+    pub auth_type: String,       //认证方式稳定编码
     /// 凭证密文：只进不出，禁止序列化下发
     #[serde(skip)]
     pub auth_config_enc: Option<String>,
     pub credential_hint: Option<String>, //凭证提示（绝不含明文）
-    pub namespace: Option<String>, //K8s 命名空间过滤
-    pub timeout_secs: i32, //连接超时（秒）
+    pub namespace: Option<String>,       //K8s 命名空间过滤
+    pub timeout_secs: i32,               //连接超时（秒）
     pub docker_api_version: Option<String>, //Docker API 版本，留空用默认
-    pub max_items: i32, //单类资源采集上限
-    pub poll_interval_secs: i32, //轮询间隔（秒），供调度器后续使用
-    pub enabled: i16, //启用标记：1=启用 0=停用
+    pub max_items: i32,                  //单类资源采集上限
+    pub poll_interval_secs: i32,         //轮询间隔（秒），供调度器后续使用
+    pub enabled: i16,                    //启用标记：1=启用 0=停用
     pub last_collect_at: Option<DateTime<Utc>>, //最近一次采集时间
-    pub last_error: Option<String>, //最近一次失败原因
-    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    pub last_error: Option<String>,      //最近一次失败原因
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
     pub created_by: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
-    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
     pub updated_by: Option<i64>,
     pub updated_at: Option<DateTime<Utc>>,
     pub deleted: Option<i16>, //软删除标记：0=未删除 1=已删除
@@ -1228,19 +1303,25 @@ pub struct AssetOpsLink {
     pub id: i64,
     #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
     pub connection_id: i64, //所属采集连接
-    pub provider: String, //采集来源
-    pub resource_uid: String, //资源唯一标识（ResourceRecord::uid()）
-    pub resource_kind: String, //归一化资源类型
+    pub provider: String,             //采集来源
+    pub resource_uid: String,         //资源唯一标识（ResourceRecord::uid()）
+    pub resource_kind: String,        //归一化资源类型
     pub display_name: Option<String>, //资源展示名
-    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
     pub asset_id: Option<i64>, //关联的资产台账主键，未归档为 NULL
     pub status_snapshot: Option<String>, //最近一次采集的归一化状态
-    pub raw_state: Option<String>, //原始状态（Docker state / K8s phase）
-    pub parent_uid: Option<String>, //父资源 uid
+    pub raw_state: Option<String>,    //原始状态（Docker state / K8s phase）
+    pub parent_uid: Option<String>,   //父资源 uid
     pub attributes: Option<serde_json::Value>, //关键属性（端口/镜像摘要/副本数等）
     pub first_seen_at: Option<DateTime<Utc>>, //首次发现时间
     pub last_seen_at: Option<DateTime<Utc>>, //最近发现时间
-    #[serde(serialize_with = "opt_i64_to_string", deserialize_with = "opt_i64_from_string")]
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
     pub created_by: Option<i64>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,

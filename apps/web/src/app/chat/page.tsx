@@ -179,13 +179,13 @@ export default function ChatPage() {
                     userId: user.id.toString(),
                     question,
                     ...extraParams,
-                } as any);
+                });
             } else {
                 resp = await createConversation({
                     userId: user.id.toString(),
                     question,
                     ...extraParams,
-                } as any);
+                });
                 setCurrentConvId(resp.convId);
                 setIsNewConversation(false);
                 await loadConvList();

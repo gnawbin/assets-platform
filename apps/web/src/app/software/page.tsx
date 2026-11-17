@@ -200,6 +200,16 @@ const SoftwarePage: React.FC = () => {
     return user ? user.real_name || user.username : `用户#${id}`;
   };
 
+  // 使用部门 / 使用人支持多值（后端 department_ids / user_ids 为数组）
+  const getDepartmentNames = (ids: string[] | null | undefined): string => {
+    if (!ids || ids.length === 0) return '-';
+    return ids.map((id) => getDepartmentName(id)).join('、');
+  };
+  const getUserNames = (ids: string[] | null | undefined): string => {
+    if (!ids || ids.length === 0) return '-';
+    return ids.map((id) => getUserName(id)).join('、');
+  };
+
   // 过滤后的资产列表
   const filteredAssets = assets.filter((a) => {
     if (!searchText) return true;
@@ -236,8 +246,8 @@ const SoftwarePage: React.FC = () => {
     setFormUsedQuantity(asset.used_quantity || 0);
     setFormExpireDate(asset.expire_date || '');
     setFormDescription(asset.description || '');
-    setFormDepartmentId(asset.department_id ? [asset.department_id] : []);
-    setFormUserId(asset.user_id ? [asset.user_id] : []);
+    setFormDepartmentId(asset.department_ids ?? []);
+    setFormUserId(asset.user_ids ?? []);
     setFormIntangibleType(asset.intangible_type || '');
     setFormRegisterNo(asset.register_no || '');
     setFormRegisterOwner(asset.register_owner || '');
@@ -296,8 +306,8 @@ const SoftwarePage: React.FC = () => {
     asset_name: formAssetName.trim(),
     manufacturer: formManufacturer.trim() || null,
     model: formModel.trim() || null,
-    department_id: formDepartmentId[0] || null,
-    user_id: formUserId[0] || null,
+    department_ids: formDepartmentId,
+    user_ids: formUserId,
     status: parseInt(formStatus),
     purchase_date: formPurchaseDate || null,
     purchase_price: formPurchasePrice || null,
@@ -315,7 +325,6 @@ const SoftwarePage: React.FC = () => {
     license_key: formLicenseKey.trim() || null,
     license_type: formLicenseType.trim() || null,
     authorized_scope: formAuthorizedScope.trim() || null,
-    assigned_user_ids: null,
     bind_type: null,
     bind_info: null,
     version: formVersion.trim() || null,
@@ -480,10 +489,10 @@ const SoftwarePage: React.FC = () => {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{getDepartmentName(asset.department_id)}</Text>
+                        <Text size="sm">{getDepartmentNames(asset.department_ids)}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{getUserName(asset.user_id)}</Text>
+                        <Text size="sm">{getUserNames(asset.user_ids)}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Badge variant="light" color="violet" size="sm">
@@ -937,13 +946,13 @@ const SoftwarePage: React.FC = () => {
                   <Text size="sm" c="dimmed" w={100}>
                     使用部门
                   </Text>
-                  <Text size="sm">{getDepartmentName(detailAsset.department_id)}</Text>
+                  <Text size="sm">{getDepartmentNames(detailAsset.department_ids)}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
                     使用人
                   </Text>
-                  <Text size="sm">{getUserName(detailAsset.user_id)}</Text>
+                  <Text size="sm">{getUserNames(detailAsset.user_ids)}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>

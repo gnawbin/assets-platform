@@ -215,8 +215,8 @@ const HardwarePage: React.FC = () => {
     setFormUsedQuantity(asset.used_quantity || 0);
     setFormExpireDate(asset.expire_date || '');
     setFormDescription(asset.description || '');
-    setFormDepartmentId(asset.department_id ? [asset.department_id] : []);
-    setFormUserId(asset.user_id ? [asset.user_id] : []);
+    setFormDepartmentId(asset.department_ids ?? []);
+    setFormUserId(asset.user_ids ?? []);
     setFormSn(asset.sn || '');
     setFormMacAddress(asset.mac_address || '');
     setFormLocation(asset.location || '');
@@ -261,8 +261,8 @@ const HardwarePage: React.FC = () => {
     asset_name: formAssetName.trim(),
     manufacturer: formManufacturer.trim() || null,
     model: formModel.trim() || null,
-    department_id: formDepartmentId[0] || null,
-    user_id: formUserId[0] || null,
+    department_ids: formDepartmentId,
+    user_ids: formUserId,
     status: parseInt(formStatus),
     purchase_date: formPurchaseDate || null,
     purchase_price: formPurchasePrice || null,
@@ -274,7 +274,6 @@ const HardwarePage: React.FC = () => {
     mac_address: formMacAddress.trim() || null,
     location: formLocation.trim() || null,
     hardware_config: formHardwareConfig.trim() || null,
-    use_user_id: null,
     use_start_date: formUseStartDate || null,
     maintenance_vendor: formMaintenanceVendor.trim() || null,
     maintenance_type: formMaintenanceType.trim() || null,
@@ -351,6 +350,16 @@ const HardwarePage: React.FC = () => {
     if (!id) return '-';
     const user = users.find((u) => String(u.id) === id);
     return user ? user.real_name || user.username : `用户#${id}`;
+  };
+
+  // 使用部门 / 使用人支持多值（后端 department_ids / user_ids 为数组）
+  const getDepartmentNames = (ids: string[] | null | undefined): string => {
+    if (!ids || ids.length === 0) return '-';
+    return ids.map((id) => getDepartmentName(id)).join('、');
+  };
+  const getUserNames = (ids: string[] | null | undefined): string => {
+    if (!ids || ids.length === 0) return '-';
+    return ids.map((id) => getUserName(id)).join('、');
   };
 
   return (
@@ -450,10 +459,10 @@ const HardwarePage: React.FC = () => {
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{getDepartmentName(asset.department_id)}</Text>
+                        <Text size="sm">{getDepartmentNames(asset.department_ids)}</Text>
                       </Table.Td>
                       <Table.Td>
-                        <Text size="sm">{getUserName(asset.user_id)}</Text>
+                        <Text size="sm">{getUserNames(asset.user_ids)}</Text>
                       </Table.Td>
                       <Table.Td>
                         <Text size="sm">
@@ -834,13 +843,13 @@ const HardwarePage: React.FC = () => {
                   <Text size="sm" c="dimmed" w={100}>
                     使用部门
                   </Text>
-                  <Text size="sm">{getDepartmentName(detailAsset.department_id)}</Text>
+                  <Text size="sm">{getDepartmentNames(detailAsset.department_ids)}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>
                     使用人
                   </Text>
-                  <Text size="sm">{getUserName(detailAsset.user_id)}</Text>
+                  <Text size="sm">{getUserNames(detailAsset.user_ids)}</Text>
                 </Group>
                 <Group>
                   <Text size="sm" c="dimmed" w={100}>

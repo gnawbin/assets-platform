@@ -74,8 +74,10 @@ pub struct ExecuteSkillRequest {
     /// Skill 配置（自由结构）
     pub config: HashMap<String, serde_json::Value>,
     /// 用户 ID（雪花 ID）
+    #[serde(deserialize_with = "database::models::i64_from_string")]
     pub user_id: i64,
     /// 租户 ID（雪花 ID）
+    #[serde(deserialize_with = "database::models::i64_from_string")]
     pub tenant_id: i64,
 }
 
