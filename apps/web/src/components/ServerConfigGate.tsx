@@ -11,47 +11,23 @@
  * 用户手动保存过地址（`storage`）或地址由部署注入（`env` / `injected` / 同源）时**一律放行**，
  * 因此 nginx 同源部署与本地开发完全不受影响。
  *
- * 探活结果按 origin 缓存在 `sessionStorage`（5 分钟），避免每次刷新都打一次 `/healthz`。
+ * 探活结果按 origin 缓存在 `sessionStorage`（5 分钟），避免每次刷新都打一次 `/healthz`；
+ * 业务请求发生传输层失败（后端已挂）时 `httpAdapter` 会调用 `clearProbeCache()`
+ * 让下一次整页加载重新探活，避免用「上次成功」的缓存把用户直接放进去。
  */
 
 import React, { useEffect, useState } from 'react';
 import { Center, Container, Loader, Paper, Stack, Text, Title } from '@mantine/core';
-import { describeApiBase, isFallbackBase, probeServer } from '@/utils/apiBase';
+import {
+    describeApiBase,
+    isFallbackBase,
+    probeServer,
+    readProbeCache,
+    writeProbeCache,
+} from '@/utils/apiBase';
 import { ServerConnectionForm } from './ServerConnectionForm';
 
-/** 探活成功缓存（sessionStorage） */
-const PROBE_CACHE_KEY = 'api_base_probe_ok';
-/** 缓存有效期：5 分钟（跨页面刷新复用，换服务器地址后 origin 不匹配即失效） */
-const PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
-
 type GateState = 'probing' | 'ready' | 'need-config';
-
-function readProbeCache(origin: string): boolean {
-    try {
-        const raw = window.sessionStorage.getItem(PROBE_CACHE_KEY);
-        if (!raw) {
-            return false;
-        }
-        const parsed = JSON.parse(raw) as { origin?: string; at?: number };
-        if (parsed?.origin !== origin || typeof parsed.at !== 'number') {
-            return false;
-        }
-        return Date.now() - parsed.at < PROBE_CACHE_TTL_MS;
-    } catch {
-        return false;
-    }
-}
-
-function writeProbeCache(origin: string): void {
-    try {
-        window.sessionStorage.setItem(
-            PROBE_CACHE_KEY,
-            JSON.stringify({ origin, at: Date.now() }),
-        );
-    } catch {
-        // 忽略：缓存失败只影响下次是否重复探活
-    }
-}
 
 export interface ServerConfigGateProps {
     children: React.ReactNode;

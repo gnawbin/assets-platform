@@ -8,12 +8,15 @@
  * - `getApiOrigin()` 去 `/api` 后缀（保证 `httpAdapter` 不拼出 `/api/api`）
  * - `isInsecureRemote()` / `setApiBase` 的明文 http 校验与会话清理
  * - `probeServer()` 对 `/healthz` 的探活分类
+ * - 探活成功缓存（`readProbeCache` / `writeProbeCache` / `clearProbeCache`）
  */
 
 import {
     API_BASE_STORAGE_KEY,
+    API_PROBE_CACHE_KEY,
     InsecureTransportError,
     clearApiBase,
+    clearProbeCache,
     describeApiBase,
     getApiBase,
     getApiBaseSource,
@@ -23,7 +26,9 @@ import {
     isInsecureRemote,
     normalizeApiBase,
     probeServer,
+    readProbeCache,
     setApiBase,
+    writeProbeCache,
 } from '@/utils/apiBase';
 
 type WindowWithApiBase = Window & { __API_BASE__?: unknown };
@@ -323,6 +328,58 @@ describe('probeServer', () => {
 
         expect(result.ok).toBe(false);
         expect(result.errorKind).toBe('timeout');
+    });
+});
+
+// ======================== 探活缓存 ========================
+
+describe('探活成功缓存', () => {
+    const origin = 'http://127.0.0.1:3001';
+
+    beforeEach(() => {
+        window.sessionStorage.clear();
+    });
+
+    afterEach(() => {
+        window.sessionStorage.clear();
+    });
+
+    it('写入后可命中同 origin 的缓存', () => {
+        writeProbeCache(origin);
+
+        expect(readProbeCache(origin)).toBe(true);
+        expect(window.sessionStorage.getItem(API_PROBE_CACHE_KEY)).toContain(origin);
+    });
+
+    it('origin 变化（用户改了服务器地址）后不命中', () => {
+        writeProbeCache(origin);
+
+        expect(readProbeCache('https://demo.example.com')).toBe(false);
+    });
+
+    it('超过 5 分钟的缓存不命中', () => {
+        window.sessionStorage.setItem(
+            API_PROBE_CACHE_KEY,
+            JSON.stringify({ origin, at: Date.now() - 6 * 60 * 1000 }),
+        );
+
+        expect(readProbeCache(origin)).toBe(false);
+    });
+
+    it('缓存内容损坏时按未命中处理（不让脏数据阻断启动）', () => {
+        window.sessionStorage.setItem(API_PROBE_CACHE_KEY, '{not-json');
+
+        expect(readProbeCache(origin)).toBe(false);
+    });
+
+    it('clearProbeCache 清除缓存（httpAdapter 传输层失败时调用）', () => {
+        writeProbeCache(origin);
+        expect(readProbeCache(origin)).toBe(true);
+
+        clearProbeCache();
+
+        expect(window.sessionStorage.getItem(API_PROBE_CACHE_KEY)).toBeNull();
+        expect(readProbeCache(origin)).toBe(false);
     });
 });
 

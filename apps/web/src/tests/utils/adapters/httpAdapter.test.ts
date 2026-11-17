@@ -16,7 +16,9 @@ import {
     UNEXPOSED_BACKEND_COMMANDS,
     extractServerMessage,
     httpAdapter,
+    isTransportFailure,
 } from '@/utils/adapters/httpAdapter';
+import { API_PROBE_CACHE_KEY } from '@/utils/apiBase';
 
 /**
  * 后端 lib.rs invoke_handler 注册的 Tauri 命令全集（共 123 个）
@@ -456,5 +458,91 @@ describe('extractServerMessage', () => {
 
     it('空响应体返回 null', () => {
         expect(extractServerMessage('')).toBeNull();
+    });
+});
+
+// ======================== 传输层失败（后端未启动 / 端口不通） ========================
+
+describe('httpAdapter 传输层失败', () => {
+    const originalFetch = global.fetch;
+    const origin = 'http://127.0.0.1:3001';
+
+    beforeEach(() => {
+        (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = origin;
+        window.sessionStorage.clear();
+        localStorage.clear();
+    });
+
+    afterEach(() => {
+        global.fetch = originalFetch;
+        delete (window as Window & { __API_BASE__?: unknown }).__API_BASE__;
+        window.sessionStorage.clear();
+        localStorage.clear();
+    });
+
+    it('Failed to fetch → 抛出带地址与建议的错误，并标记 transport', async () => {
+        global.fetch = jest
+            .fn()
+            .mockRejectedValue(new TypeError('Failed to fetch')) as unknown as typeof fetch;
+
+        const error = await httpAdapter
+            .get('get_categories', {}, { showError: false })
+            .catch((err: unknown) => err);
+
+        expect(isTransportFailure(error)).toBe(true);
+        expect((error as { transport?: boolean }).transport).toBe(true);
+        expect((error as Error).message).toContain(`无法连接服务器 ${origin}`);
+        expect((error as Error).message).toContain('请确认后端已启动');
+        // 原始文案不再直接暴露给用户
+        expect((error as Error).message).not.toBe('Failed to fetch');
+    });
+
+    it('传输层失败时清掉探活成功缓存（避免下次整页加载被旧缓存放行）', async () => {
+        window.sessionStorage.setItem(
+            API_PROBE_CACHE_KEY,
+            JSON.stringify({ origin, at: Date.now() }),
+        );
+        global.fetch = jest
+            .fn()
+            .mockRejectedValue(new TypeError('Failed to fetch')) as unknown as typeof fetch;
+
+        await httpAdapter.get('get_categories', {}, { showError: false }).catch(() => undefined);
+
+        expect(window.sessionStorage.getItem(API_PROBE_CACHE_KEY)).toBeNull();
+    });
+
+    it('后端业务错误（403）不会被误判为传输层失败，也不清探活缓存', async () => {
+        const cacheValue = JSON.stringify({ origin, at: Date.now() });
+        window.sessionStorage.setItem(API_PROBE_CACHE_KEY, cacheValue);
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: jest.fn().mockResolvedValue({}),
+            text: jest
+                .fn()
+                .mockResolvedValue(JSON.stringify({ code: 'FORBIDDEN', message: '权限不足' })),
+        }) as unknown as typeof fetch;
+
+        const error = await httpAdapter
+            .post('insert_category', { category: {} }, { showError: false })
+            .catch((err: unknown) => err);
+
+        expect((error as Error).message).toBe('权限不足');
+        expect(isTransportFailure(error)).toBe(false);
+        expect(window.sessionStorage.getItem(API_PROBE_CACHE_KEY)).toBe(cacheValue);
+    });
+
+    it('isTransportFailure 覆盖各浏览器的网络错误文案', () => {
+        expect(isTransportFailure(new TypeError('Failed to fetch'))).toBe(true);
+        expect(isTransportFailure(new TypeError('Load failed'))).toBe(true);
+        expect(
+            isTransportFailure(new TypeError('NetworkError when attempting to fetch resource.')),
+        ).toBe(true);
+        expect(isTransportFailure(new TypeError('fetch failed'))).toBe(true);
+        // 业务 / 解析错误不算传输层失败
+        expect(isTransportFailure(new Error('用户名或密码错误'))).toBe(false);
+        expect(isTransportFailure(new SyntaxError('Unexpected token < in JSON'))).toBe(false);
+        expect(isTransportFailure('Failed to fetch')).toBe(false);
     });
 });

@@ -60,6 +60,11 @@ pnpm build:web
 
 前置：PostgreSQL（5432）与 S3/MinIO（9000）已运行，`apps/backend/.env.toml` 已存在。
 
+> 一键启动：`pnpm dev`（= `turbo run dev:web dev:server`）会同时启动后端 HTTP（3001）与前端 Web（1480），
+> 等价于下面步骤 1)+2)。它**不启动** Tauri 桌面壳；桌面请用 `pnpm tauri-dev`。
+> ⚠️ `pnpm dev` / `pnpm dev:web` 与 `pnpm tauri-dev` 不可同时运行：三者都依赖 1480
+> （Tauri 的 `beforeDevCommand` 会自动再起一份 Next.js，导致 `EADDRINUSE`）。
+
 ```bash
 # 0) 一次性：创建 .env.toml 里 [postgres] database 指定的库（本例 ceshi8）
 #    库不存在时 init_database 直接报错退出；库内表结构与种子数据由后端自动创建
@@ -77,6 +82,7 @@ pnpm dev:web                                  # http://localhost:1480
 #    也可以先启动再改：浏览器打开 http://localhost:1480/settings/server 填地址并保存（免重启）
 
 # 3) 桌面壳（可选，终端 C）—— 同一份前端，走 HTTP 到内置的 127.0.0.1:3001
+#    会通过 beforeDevCommand 自动启动 1480 的前端；不要同时运行 pnpm dev / pnpm dev:web
 pnpm tauri-dev
 ```
 

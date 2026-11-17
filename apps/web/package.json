@@ -5,6 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "next dev --webpack -p 1480",
+        "dev:web": "next dev --webpack -p 1480",
         "build": "next build --webpack",
         "preview": "next start",
         "test": "jest",

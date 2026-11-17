@@ -20,6 +20,8 @@ import Link from 'next/link';
 import { IconAlertCircle, IconLogin, IconUserPlus } from '@tabler/icons-react';
 import { useAuthStore } from '@/store/authStore';
 import { login as loginApi } from '@/services/authService';
+import { describeApiBase } from '@/utils/apiBase';
+import { isTransportFailure } from '@/utils/adapters/httpAdapter';
 
 const LoginPage: React.FC = () => {
   const router = useRouter();
@@ -49,6 +51,16 @@ const LoginPage: React.FC = () => {
       router.push('/');
     } catch (err) {
       console.error('登录失败:', err);
+      // 后端没启动 / 端口不通时 fetch 抛 `TypeError: Failed to fetch`（没有 HTTP 响应），
+      // 必须提示「连不上服务器」并给出处理方向，否则会被误报成用户名密码错误。
+      if (isTransportFailure(err)) {
+        const target = describeApiBase().origin;
+        setError(
+          `无法连接服务器${target ? ` ${target}` : ''}：请确认后端服务已启动，`
+            + '或点击下方「服务端连接设置」修改地址。',
+        );
+        return;
+      }
       setError(typeof err === 'string' ? err : '登录失败，请检查用户名和密码');
     } finally {
       setLoading(false);

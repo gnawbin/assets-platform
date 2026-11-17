@@ -21,7 +21,7 @@
 
 import { notifyError } from '../notify';
 import { logger } from '../logger';
-import { getApiOrigin } from '../apiBase';
+import { clearProbeCache, getApiOrigin } from '../apiBase';
 import type { IApiAdapter, ApiConfig } from './types';
 
 // ======================== 默认配置 ========================
@@ -411,6 +411,63 @@ function buildServerError(message: string, rawBody: string): ApiErrorWithScope {
 }
 
 /**
+ * 传输层失败（请求没拿到任何 HTTP 响应）的错误对象
+ *
+ * 与后端业务错误（[`ApiErrorWithScope`]，一定带 HTTP 状态码）区分开：
+ * 页面据此提示「后端没启动 / 地址不对」，而不是「用户名或密码错误」。
+ */
+export interface TransportError extends Error {
+    /** 固定为 `true`，供调用方判定（无需再靠 message 文本匹配） */
+    readonly transport: true;
+    /** 实际请求的地址（含路径，便于用户核对端口） */
+    readonly url: string;
+}
+
+/**
+ * 浏览器 fetch 传输层失败的 message 特征
+ *
+ * 同一种失败在不同内核下文案不同：
+ * - Chrome / Edge：`Failed to fetch`
+ * - Safari：`Load failed`
+ * - Firefox：`NetworkError when attempting to fetch resource.`
+ * - Node / undici：`fetch failed`
+ */
+const TRANSPORT_FAILURE_PATTERN =
+    /failed to fetch|load failed|networkerror|network request failed|fetch failed/i;
+
+/**
+ * 判定异常是否属于「请求没送达」（DNS 失败 / 端口未监听 / 证书无效 / CORS 被拒）
+ *
+ * 只认 message 特征，**不**用 `instanceof TypeError` 兜底：
+ * 业务代码里的 `JSON.stringify` 循环引用等同样会抛 `TypeError`，
+ * 误判成网络故障反而会掩盖真实 bug。
+ */
+export function isTransportFailure(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    if ((error as Partial<TransportError>).transport === true) {
+        return true;
+    }
+    return TRANSPORT_FAILURE_PATTERN.test(error.message);
+}
+
+/**
+ * 构造可操作的「连不上服务器」错误
+ *
+ * 裸的 `TypeError: Failed to fetch` 既不含地址也不给下一步动作，
+ * 这里补上当前生效的源地址与两种最常见的处理方式（启动后端 / 改地址）。
+ */
+function buildTransportError(url: string): TransportError {
+    const target = getApiOrigin() || url;
+    const error = new Error(
+        `无法连接服务器 ${target}：请求未送达（后端未启动、端口不通，或证书 / 跨域被拒）。`
+            + '请确认后端已启动，或到「系统配置 → 服务端连接」修改地址。',
+    ) as TransportError;
+    return Object.assign(error, { transport: true as const, url });
+}
+
+/**
  * 从 localStorage 获取认证 token
  */
 function getAuthToken(): string | null {
@@ -708,12 +765,22 @@ async function httpCall<T>(
                         ? error.message
                         : String(error);
 
+            // 传输层失败（后端没启动 / 端口不通 / 证书或跨域被拒）：没有 HTTP 响应，
+            // 与后端返回的业务错误不是一回事，必须给出可操作提示。
+            const transportFailure = isTransportFailure(error);
+            if (transportFailure) {
+                // 「上次探活成功」的缓存会掩盖后端已挂的事实（ServerConfigGate 直接放行），
+                // 清掉它，下一次整页加载会重新探活、及时拦住用户去配置地址。
+                clearProbeCache();
+            }
+
             logger.error(
                 `[HTTP] 失败: ${method} ${url}`,
                 error instanceof Error ? error : new Error(errorStr),
                 {
                     args,
                     attempt: attempt + 1,
+                    transportFailure,
                 },
             );
 
@@ -726,6 +793,15 @@ async function httpCall<T>(
                 });
                 await new Promise((resolve) => setTimeout(resolve, retryDelay));
                 continue;
+            }
+
+            // 最后一次失败：传输层失败替换成带地址与建议的错误，其余原样抛出
+            if (transportFailure) {
+                const failure = buildTransportError(url);
+                if (showError) {
+                    notifyError('无法连接服务器', failure.message);
+                }
+                throw failure;
             }
 
             // 最后一次失败，显示错误通知

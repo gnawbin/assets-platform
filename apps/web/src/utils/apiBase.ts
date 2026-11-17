@@ -404,6 +404,77 @@ export async function probeServer(
     }
 }
 
+// ======================== 探活缓存 ========================
+
+/**
+ * 探活成功缓存（sessionStorage）的键名
+ *
+ * 只缓存**成功**结果：失败必须每次都重新探，否则用户改好服务器也进不去。
+ */
+export const API_PROBE_CACHE_KEY = 'api_base_probe_ok';
+
+/** 缓存有效期：5 分钟（跨页面刷新复用，换服务器地址后 origin 不匹配即失效） */
+const PROBE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * 读取探活成功缓存
+ *
+ * @param origin 当前生效的源地址（不含 `/api`）；与缓存里的 origin 不一致时视为未命中
+ * @returns 5 分钟内的同 origin 成功缓存是否存在
+ */
+export function readProbeCache(origin: string): boolean {
+    try {
+        if (typeof window === 'undefined') {
+            return false;
+        }
+        const raw = window.sessionStorage.getItem(API_PROBE_CACHE_KEY);
+        if (!raw) {
+            return false;
+        }
+        const parsed = JSON.parse(raw) as { origin?: string; at?: number };
+        if (parsed?.origin !== origin || typeof parsed.at !== 'number') {
+            return false;
+        }
+        return Date.now() - parsed.at < PROBE_CACHE_TTL_MS;
+    } catch {
+        return false;
+    }
+}
+
+/** 写入探活成功缓存（失败只影响下次是否重复探活，静默忽略） */
+export function writeProbeCache(origin: string): void {
+    try {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        window.sessionStorage.setItem(
+            API_PROBE_CACHE_KEY,
+            JSON.stringify({ origin, at: Date.now() }),
+        );
+    } catch {
+        // 忽略：缓存失败只影响下次是否重复探活
+    }
+}
+
+/**
+ * 清除探活成功缓存
+ *
+ * `httpAdapter` 在**传输层失败**（请求没拿到任何 HTTP 响应）时调用：
+ * 缓存的「上次探活成功」会掩盖「后端已经挂了」的事实，导致整页加载时
+ * `ServerConfigGate` 直接放行、用户直到点击操作才看到网络错误。
+ * 清掉后下一次整页加载会重新探活，及时拦住并提示配置服务器地址。
+ */
+export function clearProbeCache(): void {
+    try {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        window.sessionStorage.removeItem(API_PROBE_CACHE_KEY);
+    } catch {
+        // 忽略
+    }
+}
+
 /** [`setApiBase`] 的选项 */
 export interface SetApiBaseOptions {
     /** 允许保存非回环 `http://`（用户已在二次确认里点「仍要保存」） */
