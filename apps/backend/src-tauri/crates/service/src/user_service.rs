@@ -111,8 +111,12 @@ pub fn check_token_scope(issuer: Option<&str>, audience: Option<&str>) -> Result
     )
 }
 
-/// 登录响应（包含 JWT Token）
-#[derive(Debug, Serialize)]
+/// 登录响应（包含 JWT Token + 完整用户信息）
+///
+/// HTTP 侧 `/api/auth/login` 与桌面命令 `login` 共用同一结构，
+/// 因此除令牌外还返回 `id`（雪花字符串）/ `tenant_id` / `available_tenants`，
+/// 前端可据此直接建立登录态并渲染租户切换器（不要另建精简 DTO，否则两套契约会漂移）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct LoginResponse {
     #[serde(serialize_with = "database::models::i64_to_string")]
     pub id: i64,

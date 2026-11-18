@@ -81,23 +81,6 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-/// 登录响应
-#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct LoginResponse {
-    /// JWT，后续请求放入 `Authorization: Bearer <token>`
-    pub token: String,
-    /// 刷新令牌，仅用于 `POST /api/auth/refresh`（每次刷新都会轮换，旧令牌立即失效）
-    pub refresh_token: String,
-    /// 访问令牌有效期（秒）
-    pub expires_in: i64,
-    /// 用户 ID（雪花 ID 字符串）
-    pub user_id: String,
-    pub username: String,
-    pub real_name: String,
-    /// 是否超级管理员
-    pub is_super_admin: bool,
-}
-
 /// 用户登录
 #[utoipa::path(
     post,
@@ -105,7 +88,8 @@ pub struct LoginResponse {
     tag = "认证",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "登录成功", body = ApiResponse<LoginResponse>),
+        // 直接复用 service 层结构：与桌面命令返回同形（含 id / tenant_id / available_tenants）
+        (status = 200, description = "登录成功", body = ApiResponse<service::user_service::LoginResponse>),
         (status = 401, description = "用户名或密码错误", body = ApiError),
     )
 )]
@@ -128,16 +112,7 @@ pub async fn login(
                 super::oauth_browser::issue_session_cookies(&headers, resp.id, resp.tenant_id)
                     .await;
 
-            let login_resp = LoginResponse {
-                token: resp.token.clone(),
-                refresh_token: resp.refresh_token.clone(),
-                expires_in: resp.expires_in,
-                user_id: resp.id.to_string(),
-                username: resp.username.clone(),
-                real_name: resp.real_name.clone(),
-                is_super_admin: resp.is_super_admin,
-            };
-            let mut response = Json(ApiResponse::success(login_resp)).into_response();
+            let mut response = Json(ApiResponse::success(resp)).into_response();
             let response_headers = response.headers_mut();
             for cookie in cookies {
                 if let Ok(value) = HeaderValue::from_str(&cookie) {

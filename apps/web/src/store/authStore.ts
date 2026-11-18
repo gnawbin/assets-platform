@@ -31,6 +31,8 @@ export interface LoginResult extends UserInfo {
   token: string;
   /** 刷新令牌：访问令牌过期后由 httpAdapter 自动使用（默认有效期 30 天，每次刷新轮换） */
   refresh_token?: string;
+  /** 访问令牌有效期（秒）——仅用于展示/调试，不写入 `auth_user` 缓存 */
+  expires_in?: number;
   available_tenants: TenantInfo[];
 }
 
@@ -74,7 +76,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   selectedTenantId: null,
 
   login: (result: LoginResult) => {
-    const { token, refresh_token, available_tenants, ...user } = result;
+    // 兼容旧版后端：旧的 `/api/auth/login` 只返回 `user_id`，没有 `id`。
+    // 统一归一化出 `id`，否则 `ChatPage` 等处 `user.id.toString()` 会直接抛错。
+    // `expires_in` 与令牌同生命周期，不属于用户档案，不写入 `auth_user`。
+    const {
+      token,
+      refresh_token,
+      expires_in: _expiresIn,
+      available_tenants,
+      user_id: legacyUserId,
+      ...profile
+    } = result as LoginResult & { user_id?: string | number };
+    const user: UserInfo = {
+      ...profile,
+      id: profile.id || (legacyUserId !== undefined ? String(legacyUserId) : ''),
+    };
+
     localStorage.setItem('auth_token', token);
     if (refresh_token) {
       localStorage.setItem('refresh_token', refresh_token);
@@ -173,8 +190,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       try {
-        // 优先从后端获取最新用户信息
-        const freshUser = await api.get<UserInfo>('get_current_user', { token: storedToken });
+        // 优先从后端获取最新用户信息。
+        // 令牌只走 httpAdapter 注入的 `Authorization: Bearer` 头；
+        // 严禁作为查询参数下发（后端 auth_middleware 的 reject_token_in_query 会直接 400）。
+        const freshUser = await api.get<UserInfo>('get_current_user');
         // 更新 localStorage 中的缓存
         localStorage.setItem('auth_user', JSON.stringify(freshUser));
 
