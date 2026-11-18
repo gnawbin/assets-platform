@@ -187,3 +187,19 @@
 ### Phase C：桌面端与前端入口（2 天）
 - [ ] **47.** Tauri loopback 回调（RFC 8252 §7.3，匹配时忽略端口，单独函数 + 注释）、`apps/web` 登录页「企业账号登录」入口、`app/auth/oidc/callback/page.tsx`、`httpAdapter.ts` 登记公开路由、`/healthz` 增加 `oidc` 状态
 
+## 🧵 trustgraph 集群消息总线（Pulsar）客户端基建（设计见 `docs/知识库模块/trustgraph集群消息总线（Pulsar）客户端基建设计方案.md`）
+
+> 定位：只做客户端基建，**不接任何业务、不碰 gateway**；`trustgraph-lite` 保持零 IO（一行不改）。
+
+### P0：契约层（0.5 天）
+- [ ] **48.** 新增 `crates/mq`（`default = ["memory"]`，`pulsar = ["dep:pulsar"]`）：`Envelope` / `TopicName` / `MqError` / `MqConfig::from_env()` / `memory` 实现 / `retry` 退避 + 根 `Cargo.toml` 登记
+  - 验收：`cargo test -p mq` 通过；`cargo tree -p mq` 不含 `pulsar` / `prost v0.13`
+
+### P1：Pulsar 驱动（1 天）
+- [ ] **49.** `crates/mq/src/pulsar.rs`：`PulsarBus`（token 认证 / KeyShared / DLQ / `initial_position` / `read_compacted` / `block_queue_if_full` / 优雅退出）+ `examples/{publish,subscribe}` + `tests/pulsar_e2e`（`PULSAR_TEST_URL` 门控）+ `docker-compose.yml` 增 `pulsar`（profile `mq`）
+  - 依赖形态：`pulsar = {version = "6.9.1", default-features = false, features = ["tokio-rustls-runtime-ring", "compression", "telemetry"]}`（禁 `native-tls` / `async-std` / `auth-oauth2` / `admin-api`）
+
+### P2：文档与索引（0.5 天）
+- [ ] **50.** 设计文档 + `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + 本条目
+  - 待内核 Phase 2–5 完成后，另立《trustgraph 图集群设计方案》再接线集群节点
+

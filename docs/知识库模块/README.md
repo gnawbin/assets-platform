@@ -41,6 +41,7 @@ graph TB
 | 多LLM厂商兼容设计 | [多LLM厂商兼容设计方案.md](./多LLM厂商兼容设计方案.md) | 适配器模式、密钥安全、负载均衡、用量统计 |
 | LLM协议适配crate设计 | [LLM协议适配crate设计方案.md](./LLM协议适配crate设计方案.md) | 双协议拆分：llm 契约 + llm-openai + llm-anthropic、真流式、工具调用 |
 | trustgraph-lite 信任图谱内核 | [trustgraph-lite轻量级信任图谱内核设计方案.md](./trustgraph-lite轻量级信任图谱内核设计方案.md) | 纯内存图内核、信任传播、快照导出，与 knowledge_relation 的边界 |
+| trustgraph 集群消息总线（Pulsar）客户端基建 | [trustgraph集群消息总线（Pulsar）客户端基建设计方案.md](./trustgraph集群消息总线（Pulsar）客户端基建设计方案.md) | `mq` crate 契约、`pulsar 6.9.1`（rustls-ring）选型、单 crate 双 feature（memory 默认 / pulsar 可选）、信封与配置，本轮零接线 |
 | CubeSandbox 沙箱 crate 整合 | [CubeSandbox沙箱crate整合设计方案.md](./CubeSandbox沙箱crate整合设计方案.md) | 控制面 CubeAPI / 数据面 CubeProxy 拆解、沙箱生命周期与执行链路、会话亲和与降级策略 |
 | OpenShell 沙箱整合可行性 | [OpenShell沙箱整合可行性分析（嵌入vs独立部署）.md](./OpenShell沙箱整合可行性分析（嵌入vs独立部署）.md) | 嵌入式 vs 独立部署辨析、集成模式 M1~M8、外部材料核验、Agent 默认沙箱内（M1b）与 OCSF 审计双通道、契约映射与部署拓扑 |
 | RAG多轮问答设计 | [智能问答系统（RAG多轮对话）设计方案.md](./智能问答系统（RAG多轮对话）设计方案.md) | RAG检索、会话管理、溯源引用、前端交互 |
