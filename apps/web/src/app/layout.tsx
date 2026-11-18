@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
+import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import '@mantine/notifications/styles.css';
 import { useAuthStore } from '@/store/authStore';
@@ -63,9 +64,11 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body style={{ margin: 0, padding: 0 }}>
         <MantineProvider>
-          <Notifications />
-          {/* 服务器不可达时先让用户填地址，避免首屏全是网络错误 */}
-          <ServerConfigGate>{children}</ServerConfigGate>
+          <ModalsProvider>
+            <Notifications />
+            {/* 服务器不可达时先让用户填地址，避免首屏全是网络错误 */}
+            <ServerConfigGate>{children}</ServerConfigGate>
+          </ModalsProvider>
         </MantineProvider>
       </body>
     </html>

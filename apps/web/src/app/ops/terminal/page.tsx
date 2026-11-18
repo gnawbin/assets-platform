@@ -173,7 +173,8 @@ export default function OpsTerminalPage() {
                     await deleteSshTarget(view.id);
                     notifications.show({ color: 'teal', title: '已删除', message: view.name });
                     if (selected?.id === view.id) setSelected(null);
-                    await loadTargets();
+                    // 删除成功后同步刷新主机与会话列表（会话列表失败不阻断）
+                    await Promise.all([loadTargets(), loadSessions()]);
                 } catch (err) {
                     notifications.show({ color: 'red', title: '删除失败', message: describeError(err) });
                 }
