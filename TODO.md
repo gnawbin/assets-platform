@@ -169,3 +169,21 @@
 - [ ] **37.** 不设置任何新环境变量（`AUTHZ_MODE` / `API_KEY_*` / `OAUTH_*`）→ 桌面端全功能可用
 - [ ] **38.** 新增权限点未污染 `sys_menu.command_name`；Tauri `invoke` 错误提示与改造前一致
 
+## 🔑 OIDC 单点登录（SSO）接入（设计见 `docs/OIDC单点登录（SSO）接入设计方案.md`）
+
+> 定位：本系统作为 **RP** 接入企业 IdP（Keycloak / Entra ID / Okta），**不做** OP 侧签发 `id_token`；与 `OAUTH_ENABLED` 完全独立。
+
+### Phase A：核心链路（3–5 天）
+- [ ] **42.** DDL：`public.sys_user_identity`（`issuer` + `subject` 唯一）+ `public.sys_oidc_login_state`（state 只存 SHA-256、TTL 10 分钟、一次性），追加到 `public_migration.sql`（幂等，不改既有表）
+- [ ] **43.** `service/src/oidc_service.rs`：discovery + JWKS 缓存（`DashMap` + TTL + 未知 `kid` 限频刷新）、`token_endpoint` 换码（`reqwest` 0.13.5 + rustls，工作区已有）、`validate_id_token`（纯函数：`alg`/签名/`iss`/`aud`/`azp`/`exp`/`iat`/`nbf`/`nonce`，时钟偏移默认 60s）、`cleanup_login_states`
+- [ ] **44.** `api/src/oidc_routes.rs`：`GET /api/auth/oidc/login`（生成 state/nonce/PKCE S256 → 302）、`GET /api/auth/oidc/callback`（换码 → 验 `id_token` → 查绑定 → `ensure_user_active` → 签发 JWT 对 + 复用 `issue_session_cookies`）、`GET /api/auth/oidc/providers`
+  - `create_router` 按 `OIDC_ENABLED` 条件挂载（缺省 404）；`authz.rs::PUBLIC_ROUTES_DECL` 同步 3 条，否则 `cargo test -p api authz` 拦截
+  - 错误体沿用 `ApiResponse {code,message}`（自有登录接口，**不套** `oauth_error` 的 `{error,error_description}`）
+- [ ] **45.** 身份绑定闭环：未绑定 → 403 `oidc_not_linked`（fail-closed）；`OIDC_AUTO_LINK_BY_EMAIL` / `OIDC_JIT_ENABLED` 默认均关；解绑 / 禁用 → `revoke_all_user_sessions` + 撤销刷新令牌族
+
+### Phase B：管理界面与登出（2–3 天）
+- [ ] **46.** 用户详情页「外部身份」绑定 / 解绑（复用 `system:user:edit`，不新增权限点）+ `POST /api/auth/oidc/logout`（RP-Initiated Logout，可选 `OIDC_END_SESSION_ENDPOINT`）
+
+### Phase C：桌面端与前端入口（2 天）
+- [ ] **47.** Tauri loopback 回调（RFC 8252 §7.3，匹配时忽略端口，单独函数 + 注释）、`apps/web` 登录页「企业账号登录」入口、`app/auth/oidc/callback/page.tsx`、`httpAdapter.ts` 登记公开路由、`/healthz` 增加 `oidc` 状态
+
