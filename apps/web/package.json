@@ -60,6 +60,8 @@
         "@tiptap/pm": "^3.26.0",
         "@tiptap/react": "^3.26.0",
         "@tiptap/starter-kit": "^3.11.0",
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^6.0.0",
         "bpmn-js": "18.31.1",
         "bpmn-moddle": "10.3.1",
         "cytoscape": "^3.34.0",

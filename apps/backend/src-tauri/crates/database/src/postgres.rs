@@ -778,7 +778,9 @@ pub async fn init_tenant_tables(pool: &PgPool, schema: &str) -> Result<()> {
     // 工作流引擎（bpmninja + adk-graph）相关表随租户表一起初始化，保证新租户开箱可用
     migrate_tenant_workflow_tables(pool, schema).await?;
     // 运维采集（Docker / Swarm / K8s）连接配置与资源桥表随租户表一起初始化
-    migrate_tenant_ops_tables(pool, schema).await
+    migrate_tenant_ops_tables(pool, schema).await?;
+    // 运维终端（SSH 主机配置 + 会话审计）随租户表一起初始化
+    migrate_tenant_terminal_tables(pool, schema).await
 }
 
 /// 迁移单个租户的工作流引擎表（幂等，可重复执行）
@@ -832,6 +834,34 @@ pub async fn migrate_all_tenant_ops_tables(pool: &PgPool) -> Result<()> {
             tracing::warn!("租户 '{}' 运维采集表迁移失败: {}", schema, e);
         } else {
             tracing::info!("租户 '{}' 运维采集表迁移完成", schema);
+        }
+    }
+    Ok(())
+}
+
+/// 迁移单个租户的运维终端表（幂等，可重复执行）
+#[allow(dead_code)]
+pub async fn migrate_tenant_terminal_tables(pool: &PgPool, schema: &str) -> Result<()> {
+    let sql = include_str!("sql/terminal_module_migration.sql");
+    execute_sql_content_with_schema(pool, sql, schema, "terminal_module_migration").await
+}
+
+/// 迁移所有已启用租户的运维终端表（应用启动时调用）
+#[allow(dead_code)]
+pub async fn migrate_all_tenant_terminal_tables(pool: &PgPool) -> Result<()> {
+    let schemas: Vec<String> = sqlx::query_scalar::<_, String>(
+        "SELECT schema_name FROM public.sys_tenant WHERE enable = true AND schema_name IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| anyhow!("读取租户 schema 列表失败: {}", e))?;
+
+    for schema in schemas {
+        if let Err(e) = migrate_tenant_terminal_tables(pool, &schema).await {
+            // 单个租户迁移失败不阻断启动流程，只记录告警
+            tracing::warn!("租户 '{}' 运维终端表迁移失败: {}", schema, e);
+        } else {
+            tracing::info!("租户 '{}' 运维终端表迁移完成", schema);
         }
     }
     Ok(())
@@ -1139,6 +1169,15 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
         &mut failures,
         "其余租户运维采集表迁移",
         migrate_all_tenant_ops_tables(&pool),
+    )
+    .await;
+
+    // 11.3 迁移其余租户的运维终端表（默认租户已在 init_tenant_tables 中完成）
+    tracing::info!("正在迁移租户运维终端表...");
+    run_init_step(
+        &mut failures,
+        "其余租户运维终端表迁移",
+        migrate_all_tenant_terminal_tables(&pool),
     )
     .await;
 

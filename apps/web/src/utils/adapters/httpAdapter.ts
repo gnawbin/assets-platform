@@ -92,6 +92,19 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     get_ops_links: { method: 'GET', path: '/api/ops/links' },
     bind_ops_link: { method: 'POST', path: '/api/ops/links/{linkId}/bind' },
 
+    // ======================== 运维终端（SSH） ========================
+    // 注意：WS 通道（/sessions/{sessionId}/ws）走 buildSshWsUrl，不经过本映射表
+    get_ssh_targets: { method: 'GET', path: '/api/ops/ssh/targets' },
+    get_ssh_target: { method: 'GET', path: '/api/ops/ssh/targets/{id}' },
+    create_ssh_target: { method: 'POST', path: '/api/ops/ssh/targets' },
+    update_ssh_target: { method: 'PUT', path: '/api/ops/ssh/targets/{id}' },
+    delete_ssh_target: { method: 'DELETE', path: '/api/ops/ssh/targets/{id}' },
+    probe_ssh_target: { method: 'POST', path: '/api/ops/ssh/targets/{id}/probe' },
+    probe_draft_ssh_target: { method: 'POST', path: '/api/ops/ssh/targets/test' },
+    get_ssh_sessions: { method: 'GET', path: '/api/ops/ssh/sessions' },
+    open_ssh_session: { method: 'POST', path: '/api/ops/ssh/sessions' },
+    close_ssh_session: { method: 'DELETE', path: '/api/ops/ssh/sessions/{sessionId}' },
+
     // ======================== 部门 ========================
     get_departments: { method: 'GET', path: '/api/departments' },
     insert_department: { method: 'POST', path: '/api/departments' },

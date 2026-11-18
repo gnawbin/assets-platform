@@ -121,6 +121,13 @@ pub const SERVICE_FORBIDDEN_ROUTES: &[(&str, &str)] = &[
     ("POST", "/api/conversations/{convId}/messages"),
     ("PUT", "/api/conversations/{convId}/title"),
     ("DELETE", "/api/conversations/{convId}"),
+    // 运维终端：全部 handler 取 `Extension<UserContext>`（凭证归属 + 审计 user_id）
+    ("POST", "/api/ops/ssh/targets"),
+    ("PUT", "/api/ops/ssh/targets/{id}"),
+    ("DELETE", "/api/ops/ssh/targets/{id}"),
+    ("POST", "/api/ops/ssh/sessions"),
+    ("DELETE", "/api/ops/ssh/sessions/{sessionId}"),
+    ("GET", "/api/ops/ssh/sessions/{sessionId}/ws"),
 ];
 
 
@@ -330,6 +337,23 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ),
     ("GET", "/api/ops/links", "ops:resource:list"),
     ("POST", "/api/ops/links/{linkId}/bind", "ops:link:bind"),
+    // ===== 运维终端（SSH）=====
+    // 权限点遵守「模块:资源[:动作]」，SSH 单独作为模块：ssh:target:* / ssh:session:*
+    ("GET", "/api/ops/ssh/targets", "ssh:target:list"),
+    ("GET", "/api/ops/ssh/targets/{id}", "ssh:target:list"),
+    ("POST", "/api/ops/ssh/targets", "ssh:target:create"),
+    ("POST", "/api/ops/ssh/targets/test", "ssh:target:test"),
+    ("PUT", "/api/ops/ssh/targets/{id}", "ssh:target:update"),
+    ("DELETE", "/api/ops/ssh/targets/{id}", "ssh:target:delete"),
+    ("POST", "/api/ops/ssh/targets/{id}/probe", "ssh:target:test"),
+    ("GET", "/api/ops/ssh/sessions", "ssh:session:list"),
+    ("POST", "/api/ops/ssh/sessions", "ssh:session:open"),
+    ("DELETE", "/api/ops/ssh/sessions/{sessionId}", "ssh:session:close"),
+    (
+        "GET",
+        "/api/ops/ssh/sessions/{sessionId}/ws",
+        "ssh:session:attach",
+    ),
     // ===== 大文件上传 =====
     ("POST", "/api/upload/init", "upload:file:add"),
     ("POST", "/api/upload/{id}/start", "upload:file:add"),

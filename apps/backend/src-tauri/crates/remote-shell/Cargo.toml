@@ -1,0 +1,26 @@
+[package]
+edition = "2024"
+name = "remote-shell"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+[features]
+# 默认全关：不让 russh / RustCrypto 依赖树拖慢 Tauri 主构建，按需在调用方开启。
+default = []
+# SSH 传输实现（russh 客户端）。关闭时仍可编译，`probe` / `open` 返回
+# `SshError::Disabled`，方便无网络环境先跑通其余层。
+ssh = ["dep:russh"]
+
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义
+[dependencies]
+russh = {workspace = true, optional = true}
+serde.workspace = true
+thiserror.workspace = true
+tokio = {workspace = true, features = ["io-util", "macros", "net", "rt"]}
+tracing.workspace = true
+
+[dev-dependencies]
+# 仅用于 tests 里的日志观察（可选）
+tokio = {workspace = true, features = ["macros", "rt-multi-thread", "time"]}

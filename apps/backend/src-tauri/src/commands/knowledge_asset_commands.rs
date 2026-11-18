@@ -2,8 +2,8 @@
 //!
 //! 全新 knowledge_asset 表命令，与现有 knowledge_commands.rs 完全独立。
 
+use database::models::KnowledgeAsset;
 use service;
-
 /// 根据 tree_node_id 获取关联的知识资产（未关联时返回 null）
 #[tauri::command]
 pub async fn get_knowledge_asset_by_tree_node(

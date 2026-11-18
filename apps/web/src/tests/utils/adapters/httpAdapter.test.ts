@@ -181,6 +181,18 @@ const REGISTERED_COMMANDS: string[] = [
     'upload_get_progress',
     'upload_commit',
     'upload_get_version_history',
+
+    // 运维终端（SSH）：HTTP-only 命令（后端无同名 Tauri 命令，仅登记 HTTP 路由）
+    'get_ssh_targets',
+    'get_ssh_target',
+    'create_ssh_target',
+    'update_ssh_target',
+    'delete_ssh_target',
+    'probe_ssh_target',
+    'probe_draft_ssh_target',
+    'get_ssh_sessions',
+    'open_ssh_session',
+    'close_ssh_session',
 ];
 
 describe('httpAdapter 命令路由映射表', () => {

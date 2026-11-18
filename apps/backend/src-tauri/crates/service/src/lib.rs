@@ -18,5 +18,7 @@ pub mod register_service;
 pub mod role_service;
 pub mod sandbox_service;
 pub mod session_service;
+// SSH 终端：主机配置 CRUD + 指纹探测 + 会话 hub + 空闲回收
+pub mod ssh_service;
 pub mod tenant_service;
 pub mod user_service;

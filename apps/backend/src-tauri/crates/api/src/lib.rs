@@ -28,6 +28,9 @@ pub mod role_routes;
 pub mod sandbox_routes;
 pub mod security;
 pub mod skill_routes;
+// 运维终端（SSH）：REST + WebSocket，票据单独一个模块
+pub mod ssh_routes;
+pub mod ssh_ticket;
 pub mod tenant_routes;
 pub mod upload_routes;
 pub mod user_routes;
@@ -158,6 +161,9 @@ pub async fn start_http_server_with(
 
     // ===== 沙箱空闲回收（设计文档 §6.2）：未启用时内部直接返回 =====
     service::sandbox_service::spawn_idle_reaper();
+
+    // ===== SSH 会话空闲回收（方案 §4.3）：进程内只启动一次 =====
+    service::ssh_service::spawn_idle_reaper();
 
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
@@ -317,12 +323,32 @@ pub async fn build_router(
         (chat_router, conversation_router)
     };
 
+    // 运维终端（SSH）：开会话（REST）与终端通道（WS）共用票据状态。
+    // WS 由一次性票据鉴权，**不能**复用 auth_middleware（浏览器 WS 带不了 Authorization 头），
+    // 因此两者分成两个子 router：只有 REST 那一个叠 auth / authz 中间件。
+    let ssh_state = std::sync::Arc::new(ssh_routes::SshRouterState {
+        tickets: ssh_ticket::store(),
+    });
+    let ssh_open_router = Router::new()
+        .route("/api/ops/ssh/sessions", post(ssh_routes::open_session))
+        .with_state(ssh_state.clone())
+        .layer(middleware::from_fn(authz::authz_middleware))
+        .layer(middleware::from_fn(auth_middleware));
+    let ssh_ws_router = Router::new()
+        .route(
+            "/api/ops/ssh/sessions/{sessionId}/ws",
+            get(ssh_routes::session_ws),
+        )
+        .with_state(ssh_state);
+
     // 合并所有路由（外部注入的路由在顶层合并，不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
     let has_extra_routes = extra_routes.is_some();
     let mut app = create_router(pool)
         .merge(upload_router)
         .merge(chat_router)
-        .merge(conversation_router);
+        .merge(conversation_router)
+        .merge(ssh_open_router)
+        .merge(ssh_ws_router);
 
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
@@ -657,6 +683,31 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/ops/connections/{id}/collect", post(ops_routes::collect_now))
         .route("/api/ops/links", get(ops_routes::list_links))
         .route("/api/ops/links/{linkId}/bind", post(ops_routes::bind_link))
+        // 运维终端（SSH）：除「开会话」与 WS 之外的 6 条 REST
+        // 注：「开会话」与 WS 需要票据状态，在 build_router 里单独装配
+        .route(
+            "/api/ops/ssh/targets",
+            get(ssh_routes::list_targets).post(ssh_routes::create_target),
+        )
+        .route(
+            "/api/ops/ssh/targets/test",
+            post(ssh_routes::probe_draft),
+        )
+        .route(
+            "/api/ops/ssh/targets/{id}",
+            get(ssh_routes::get_target)
+                .put(ssh_routes::update_target)
+                .delete(ssh_routes::delete_target),
+        )
+        .route(
+            "/api/ops/ssh/targets/{id}/probe",
+            post(ssh_routes::probe_target),
+        )
+        .route("/api/ops/ssh/sessions", get(ssh_routes::list_sessions))
+        .route(
+            "/api/ops/ssh/sessions/{sessionId}",
+            delete(ssh_routes::close_session),
+        )
         // API Key 管理（Phase 1：只允许 JWT 管理员，API Key 自身禁止管理 API Key）
         .route(
             "/api/api-keys",

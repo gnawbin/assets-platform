@@ -1328,6 +1328,68 @@ pub struct AssetOpsLink {
     pub deleted: Option<i16>, //软删除标记
 }
 
+/// SSH 主机配置实体
+/// 对应表：{schema}.ops_ssh_target
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct OpsSshTarget {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64, //主键
+    pub target_name: String, //主机别名（同租户内唯一）
+    pub host: String,        //主机名或 IP（不含 scheme / 端口）
+    pub port: i32,           //SSH 端口
+    pub username: String,    //登录账号
+    pub auth_type: String,   //认证方式稳定编码：password / private_key
+    /// 凭证密文：只进不出，禁止序列化下发
+    #[serde(skip)]
+    pub auth_config_enc: Option<String>,
+    pub credential_hint: Option<String>, //凭证提示（绝不含明文）
+    pub host_key_fingerprint: Option<String>, //TOFU 固定的指纹（SHA256:...）
+    pub strict_host_key_check: i16,      //1=严格比对 0=允许首连记录
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub asset_id: Option<i64>, //软引用资产台账
+    pub description: Option<String>,
+    pub connect_timeout_secs: i32, //连接超时（秒）
+    pub enabled: i16,              //启用标记：1=启用 0=停用
+    pub last_connected_at: Option<DateTime<Utc>>, //最近一次成功连接时间
+    pub last_error: Option<String>, //最近一次失败原因
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub created_by: Option<i64>,
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(
+        serialize_with = "opt_i64_to_string",
+        deserialize_with = "opt_i64_from_string"
+    )]
+    pub updated_by: Option<i64>,
+    pub updated_at: Option<DateTime<Utc>>,
+    pub deleted: Option<i16>, //软删除标记：0=未删除 1=已删除
+}
+
+/// SSH 会话审计实体
+/// 对应表：{schema}.ops_ssh_session
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct OpsSshSession {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub target_id: i64, //软引用 ops_ssh_target.id
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub user_id: i64, //发起会话的用户
+    pub state: String,           //opening / active / closed / failed
+    pub client_ip: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub bytes_in: i64,  //客户端 → 目标主机
+    pub bytes_out: i64, //目标主机 → 客户端
+    pub exit_code: Option<i32>,
+    pub error: Option<String>, //失败原因（不含凭证）
+}
+
 /// 外部系统 API Key 实体
 /// 对应表：public.sys_api_key（设计文档 §9.1）
 ///

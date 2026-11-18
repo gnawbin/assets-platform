@@ -13,7 +13,7 @@
 1. **新增交互式运维通道**：把 `/ops` 前端与后端能力打通，网页里直接开 SSH 会话（PTY + 交互输入 + 窗口 resize），输出与输入走全双工 WebSocket。
 2. **主机配置中心**：新增 `ops_ssh_target`（主机 / 端口 / 账号 / 认证方式 / 主机指纹 / 可选资产绑定），密码与私钥只以 AES-256-GCM 密文落库。
 3. **会话审计**：新增 `ops_ssh_session`，记录谁、何时、连了哪台、传输字节数、退出码、失败原因。
-4. **权限与菜单**：新增 `ops:ssh:*` 权限点、`sys_menu` 菜单 62（`/ops/terminal`）与 6 个按钮行；权限映射写入 `authz::ROUTE_PERMS`。
+4. **权限与菜单**：新增 `ssh:*` 权限点、`sys_menu` 菜单 62（`/ops/terminal`）与 6 个按钮行；权限映射写入 `authz::ROUTE_PERMS`。
 5. **前端页面**：`/ops/terminal`（左侧主机列表 + 右侧 xterm.js 终端），支持 `?target=<id>` 直接进终端。
 
 ### 0.2 本期不做什么
@@ -30,7 +30,8 @@
 
 ### 0.3 验收口径（DoD）
 
-- 后端：**7 条 REST + 1 条 WebSocket** 路由全部落地，命名与 `authz::ROUTE_PERMS`、`sys_menu`、`httpAdapter` 三处逐字对齐。
+- 后端：**10 条 REST + 1 条 WebSocket** 路由全部落地，命名与 `authz::ROUTE_PERMS`、`sys_menu`、`httpAdapter` 三处逐字对齐。
+- 权限：权限点为 3 段式 `ssh:target:*` / `ssh:session:*`（符合「模块:资源[:动作]」约定）；存量库里历史 4 段 `ops:ssh:*` 由 `public_initial_data.sql` 末尾的幂等 `UPDATE` 就地改写。
 - 数据：`ops_ssh_target` / `ops_ssh_session` 随 `init_tenant_tables`（新租户）与 `init_postgres_database`（存量租户）自动创建。
 - 安全：凭证明文 / 密文**永不出现在任何响应、日志、`Debug` 输出**；主机指纹不匹配时**连接直接失败**（不允许静默接受）。
 - 前端：`/ops/terminal` 可用，支持新建 / 编辑 / 删除 / 扫描指纹 / 连接 / 关闭会话 / 窗口 resize；`tsc --noEmit` 0 错误。
@@ -192,11 +193,11 @@ CREATE INDEX IF NOT EXISTS idx_ops_ssh_session_target
 | 服务 | `crates/service/src/ssh_service.rs` | 新建（CRUD + 探测 + 会话 hub + 回收） |
 | 服务 | `crates/service/src/lib.rs`、`crates/service/Cargo.toml` | `pub mod ssh_service;`、`remote-shell = { workspace = true, features = ["ssh"] }` |
 | API | `crates/api/src/ssh_ticket.rs` | 新建（一次性票据） |
-| API | `crates/api/src/ssh_routes.rs` | 新建（7 REST + 1 WS） |
+| API | `crates/api/src/ssh_routes.rs` | 新建（10 REST + 1 WS） |
 | API | `crates/api/src/lib.rs` | 挂 REST 路由 + `merge` WS 子 router + `spawn_idle_reaper()` |
 | API | `crates/api/src/authz.rs` | `ROUTE_PERMS` 11 条 + `SERVICE_FORBIDDEN_ROUTES` 6 条 |
 | API | `crates/api/Cargo.toml` | `uuid.workspace = true`（票据） |
-| 文档 | `crates/apidoc/src/openapi.rs` | 登记 7 条 REST + DTO schema（WS 不登记） |
+| 文档 | `crates/apidoc/src/openapi.rs` | 登记 10 条 REST + DTO schema（WS 不登记） |
 
 ### 4.2 `crates/remote-shell` 对外契约
 
@@ -303,17 +304,20 @@ Ok(ws.on_upgrade(move |socket| pump(socket, sid, user_id, rx)))
 
 | method | path | perm |
 |---|---|---|
-| GET | `/api/ops/ssh/targets` | `ops:ssh:target:list` |
-| GET | `/api/ops/ssh/targets/{id}` | `ops:ssh:target:list` |
-| POST | `/api/ops/ssh/targets` | `ops:ssh:target:create` |
-| POST | `/api/ops/ssh/targets/test` | `ops:ssh:target:test` |
-| PUT | `/api/ops/ssh/targets/{id}` | `ops:ssh:target:update` |
-| DELETE | `/api/ops/ssh/targets/{id}` | `ops:ssh:target:delete` |
-| POST | `/api/ops/ssh/targets/{id}/probe` | `ops:ssh:target:test` |
-| GET | `/api/ops/ssh/sessions` | `ops:ssh:session:list` |
-| POST | `/api/ops/ssh/sessions` | `ops:ssh:session:open` |
-| DELETE | `/api/ops/ssh/sessions/{sessionId}` | `ops:ssh:session:close` |
-| GET | `/api/ops/ssh/sessions/{sessionId}/ws` | `ops:ssh:session:attach` |
+| GET | `/api/ops/ssh/targets` | `ssh:target:list` |
+| GET | `/api/ops/ssh/targets/{id}` | `ssh:target:list` |
+| POST | `/api/ops/ssh/targets` | `ssh:target:create` |
+| POST | `/api/ops/ssh/targets/test` | `ssh:target:test` |
+| PUT | `/api/ops/ssh/targets/{id}` | `ssh:target:update` |
+| DELETE | `/api/ops/ssh/targets/{id}` | `ssh:target:delete` |
+| POST | `/api/ops/ssh/targets/{id}/probe` | `ssh:target:test` |
+| GET | `/api/ops/ssh/sessions` | `ssh:session:list` |
+| POST | `/api/ops/ssh/sessions` | `ssh:session:open` |
+| DELETE | `/api/ops/ssh/sessions/{sessionId}` | `ssh:session:close` |
+| GET | `/api/ops/ssh/sessions/{sessionId}/ws` | `ssh:session:attach` |
+
+> 权限点命名遵守既有约定「模块:资源[:动作]」（`authz::tests::route_perms_entries_are_well_formed` 强校验 2–3 段、仅小写字母/数字/冒号），
+> 因此 SSH 作为独立模块 `ssh`，而不是 `ops:ssh:*`（4 段会被该用例判为非法）。
 
 **`SERVICE_FORBIDDEN_ROUTES`**（服务身份一律 403，OAuth / API Key 没有 `UserContext`）：
 `POST /api/ops/ssh/targets`、`PUT /api/ops/ssh/targets/{id}`、`DELETE /api/ops/ssh/targets/{id}`、`POST /api/ops/ssh/sessions`、`DELETE /api/ops/ssh/sessions/{sessionId}`、`GET /api/ops/ssh/sessions/{sessionId}/ws`。
@@ -328,17 +332,17 @@ Ok(ws.on_upgrade(move |socket| pump(socket, sid, user_id, rx)))
 
 | 方法 | 路径 | 权限点 | 说明 |
 |---|---|---|---|
-| GET | `/api/ops/ssh/targets` | `ops:ssh:target:list` | 主机列表（无密文） |
-| POST | `/api/ops/ssh/targets` | `ops:ssh:target:create` | 新建主机 |
-| POST | `/api/ops/ssh/targets/test` | `ops:ssh:target:test` | 表单未保存时扫描指纹 |
-| GET | `/api/ops/ssh/targets/{id}` | `ops:ssh:target:list` | 主机详情 |
-| PUT | `/api/ops/ssh/targets/{id}` | `ops:ssh:target:update` | 编辑（认证字段缺省 = 保留原凭证） |
-| DELETE | `/api/ops/ssh/targets/{id}` | `ops:ssh:target:delete` | 软删（有活动会话 → 400） |
-| POST | `/api/ops/ssh/targets/{id}/probe` | `ops:ssh:target:test` | 用已保存凭证扫描指纹 + 认证预检 |
-| GET | `/api/ops/ssh/sessions` | `ops:ssh:session:list` | 活动会话（管理员/审计用） |
-| POST | `/api/ops/ssh/sessions` | `ops:ssh:session:open` | 开会话，返回 `sessionId + ticket` |
-| DELETE | `/api/ops/ssh/sessions/{sessionId}` | `ops:ssh:session:close` | 主动关闭（幂等） |
-| GET(WS) | `/api/ops/ssh/sessions/{sessionId}/ws?ticket=...` | `ops:ssh:session:attach` | 全双工终端通道 |
+| GET | `/api/ops/ssh/targets` | `ssh:target:list` | 主机列表（无密文） |
+| POST | `/api/ops/ssh/targets` | `ssh:target:create` | 新建主机 |
+| POST | `/api/ops/ssh/targets/test` | `ssh:target:test` | 表单未保存时扫描指纹 |
+| GET | `/api/ops/ssh/targets/{id}` | `ssh:target:list` | 主机详情 |
+| PUT | `/api/ops/ssh/targets/{id}` | `ssh:target:update` | 编辑（认证字段缺省 = 保留原凭证） |
+| DELETE | `/api/ops/ssh/targets/{id}` | `ssh:target:delete` | 软删（有活动会话 → 400） |
+| POST | `/api/ops/ssh/targets/{id}/probe` | `ssh:target:test` | 用已保存凭证扫描指纹 + 认证预检 |
+| GET | `/api/ops/ssh/sessions` | `ssh:session:list` | 活动会话（管理员/审计用） |
+| POST | `/api/ops/ssh/sessions` | `ssh:session:open` | 开会话，返回 `sessionId + ticket` |
+| DELETE | `/api/ops/ssh/sessions/{sessionId}` | `ssh:session:close` | 主动关闭（幂等） |
+| GET(WS) | `/api/ops/ssh/sessions/{sessionId}/ws?ticket=...` | `ssh:session:attach` | 全双工终端通道 |
 
 `POST /api/ops/ssh/sessions` 请求 / 响应：
 
@@ -382,19 +386,26 @@ Ok(ws.on_upgrade(move |socket| pump(socket, sid, user_id, rx)))
 `apps/web/src/services/sshService.ts`：
 
 ```ts
-export interface OpsSshTargetView {
+export interface SshTargetView {
     id: string; name: string; host: string; port: number; username: string;
-    authType: 'password' | 'private_key'; hasCredential: boolean;
-    credentialHint?: string | null; hostKeyFingerprint?: string | null;
-    strictHostKeyCheck: boolean; assetId?: string | null; description?: string | null;
-    lastConnectedAt?: string | null; lastError?: string | null; enabled: boolean;
+    auth_type: 'password' | 'private_key'; has_credential: boolean;
+    credential_hint: string | null; host_key_fingerprint: string | null;
+    strict_host_key_check: boolean; asset_id: string | null; description: string | null;
+    connect_timeout_secs: number; last_connected_at: string | null; last_error: string | null;
+    enabled: boolean; created_at: string | null; updated_at: string | null;
 }
-export const getSshTargets = () => api.get<OpsSshTargetView[]>('get_ssh_targets');
+export const getSshTargets = () => api.get<SshTargetView[]>('get_ssh_targets');
 export const openSshSession = (targetId: string, cols: number, rows: number) =>
-    api.post<{ sessionId: string; ticket: string; expiresIn: number }>('open_ssh_session', { targetId, cols, rows });
+    api.post<{ session_id: string; ticket: string; expires_in: number }>(
+        'open_ssh_session', { target_id: targetId, cols, rows });
 ```
 
-`apps/web/src/utils/adapters/httpAdapter.ts` 的 `COMMAND_ROUTE_MAP` 追加 9 条（`get_ssh_targets` / `create_ssh_target` / `update_ssh_target` / `delete_ssh_target` / `probe_ssh_target` / `probe_draft_ssh_target` / `get_ssh_sessions` / `open_ssh_session` / `close_ssh_session`）；`tests/utils/adapters/httpAdapter.test.ts` 的手工命令清单**只增不改**地补上同名 9 条。
+> 字段名与后端 serde 逐字一致（snake_case），**不做 camelCase 转换**：`httpAdapter` 直接把命令参数当 body 发，
+> 前端擅自改名会直接 400（`sshService.test.ts` 有断言守着）。
+
+`apps/web/src/utils/adapters/httpAdapter.ts` 的 `COMMAND_ROUTE_MAP` 追加 10 条（`get_ssh_targets` / `get_ssh_target` / `create_ssh_target` / `update_ssh_target` / `delete_ssh_target` / `probe_ssh_target` / `probe_draft_ssh_target` / `get_ssh_sessions` / `open_ssh_session` / `close_ssh_session`）；`tests/utils/adapters/httpAdapter.test.ts` 的手工命令清单**只增不改**地补上同名 10 条。
+
+契约护栏：`apps/web/src/tests/services/sshService.test.ts`（13 用例）断言「10 个命令 → §5.1 的 method/path」、请求体键名保持 snake_case、`buildSshWsUrl` 的 ws/wss 与票据编码（JWT 绝不进 URL）。
 
 ### 6.2 `useSshTerminal` 状态机
 
@@ -429,15 +440,22 @@ export const openSshSession = (targetId: string, cols: number, rows: number) =>
 
 写入 `crates/database/src/sql/public_initial_data.sql` §11（**必须在 §12「默认角色菜单关联」之前**，且沿用 `INSERT ... SELECT ... WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = N)` 幂等写法）：
 
-| id | 名称 | parent | path | component | icon | perms | menu_type |
-|---|---|---|---|---|---|---|---|
-| 62 | SSH 终端 | 7 | `/ops/terminal` | `/ops/terminal/page` | `IconTerminal2` | `ops:ssh:session:open` | 2 菜单 |
-| 166 | 新增主机 | 62 | — | — | — | `ops:ssh:target:create` | 3 按钮 |
-| 167 | 编辑主机 | 62 | — | — | — | `ops:ssh:target:update` | 3 按钮 |
-| 168 | 删除主机 | 62 | — | — | — | `ops:ssh:target:delete` | 3 按钮 |
-| 169 | 测试主机 | 62 | — | — | — | `ops:ssh:target:test` | 3 按钮 |
-| 170 | 关闭会话 | 62 | — | — | — | `ops:ssh:session:close` | 3 按钮 |
-| 171 | 会话接入(WS) | 62 | — | — | — | `ops:ssh:session:attach` | 3 按钮 |
+| id | 名称 | parent | path | component | icon | perms | menu_type | 绑定路由 |
+|---|---|---|---|---|---|---|---|---|
+| 62 | SSH 终端 | 7 | `/ops/terminal` | `/ops/terminal/page` | `IconTerminal2` | `ssh:target:list` | 2 菜单 | `GET /api/ops/ssh/targets` |
+| 166 | 新增主机 | 62 | — | — | — | `ssh:target:create` | 3 按钮 | `POST /api/ops/ssh/targets` |
+| 167 | 编辑主机 | 62 | — | — | — | `ssh:target:update` | 3 按钮 | `PUT /api/ops/ssh/targets/{id}` |
+| 168 | 删除主机 | 62 | — | — | — | `ssh:target:delete` | 3 按钮 | `DELETE /api/ops/ssh/targets/{id}` |
+| 169 | 测试主机 | 62 | — | — | — | `ssh:target:test` | 3 按钮 | `POST /api/ops/ssh/targets/{id}/probe` |
+| 170 | 关闭会话 | 62 | — | — | — | `ssh:session:close` | 3 按钮 | `DELETE /api/ops/ssh/sessions/{sessionId}` |
+| 171 | 会话接入(WS) | 62 | — | — | — | `ssh:session:attach` | 3 按钮 | `GET /api/ops/ssh/sessions/{sessionId}/ws` |
+| 172 | 查看会话 | 62 | — | — | — | `ssh:session:list` | 3 按钮 | `GET /api/ops/ssh/sessions` |
+| 173 | 打开会话 | 62 | — | — | — | `ssh:session:open` | 3 按钮 | `POST /api/ops/ssh/sessions` |
+
+> **每个 `ROUTE_PERMS` 权限点都必须有对应的 `sys_menu` 行**：用户权限 = 其角色被授予菜单的 `perms` 去重，
+> 没有菜单行承载的权限点对非超管角色**永远无法授予**（`ssh:target:list` / `ssh:session:list` 就是为此补的 62 与 172）。
+> 菜单 62 的 `perms` 取「列表」口径（与菜单 60/61 的 `ops:connection:list` / `ops:resource:list` 一致），
+> 会话相关权限由 170–173 承载。
 
 按钮行的 `command_name` / `http_method` / `http_path` 必须与 §5.1 逐字一致（`get_ssh_targets` / `POST /api/ops/ssh/sessions` 等），否则 `authz` 启动自检会把它们算成“code-only 路由”告警。
 
@@ -455,7 +473,7 @@ export const openSshSession = (targetId: string, cols: number, rows: number) =>
 | T6 | 会话 hub | 同上 | 单测（归属校验、幂等关闭、计数）；手工开/关一次会话 |
 | T7 | 空闲回收 + 环境变量 | 同上、`api/src/lib.rs` | 回收阈值纯函数单测；日志可见回收记录 |
 | T8 | 一次性票据 | `api/src/ssh_ticket.rs` | 单测：TTL、单次消费、session 不匹配 |
-| T9 | REST handlers（7 条） | `api/src/ssh_routes.rs` | `cargo test -p api ssh`；400/401/404 口径 |
+| T9 | REST handlers（10 条） | `api/src/ssh_routes.rs` | `cargo test -p api ssh`；400/401/404 口径 |
 | T10 | WS handler + 装配 | `ssh_routes.rs`、`api/src/lib.rs` | `cargo check -p api`；WS 升级本地冒烟 |
 | T11 | 权限表 + OpenAPI | `authz.rs`、`apidoc/src/openapi.rs` | `cargo test -p api authz`、`cargo test -p apidoc` |
 | T12 | 前端服务与映射 | `sshService.ts`、`httpAdapter.ts`（+ 测试清单） | `tsc --noEmit`、`pnpm --filter web test -- httpAdapter` |
@@ -468,16 +486,20 @@ export const openSshSession = (targetId: string, cols: number, rows: number) =>
 
 ### 9.1 自动化
 
-| 层 | 命令 | 期望 |
-|---|---|---|
-| 传输 crate | `cargo test -p remote-shell` | 全绿（含 `--no-default-features` 可编译） |
-| 服务 | `cargo test -p service ssh` | 全绿 |
-| API | `cargo test -p api ssh` | 全绿（票据 / 归属 / 错误码） |
-| 权限 | `cargo test -p api authz` | 全绿（`ROUTE_PERMS × SERVICE_FORBIDDEN_ROUTES` 自洽老用例不破） |
-| 文档 | `cargo test -p apidoc` | 全绿（Swagger 路径数增加） |
-| 编译 | `cargo check -p api -p server -p bootstrap` | 无错误 |
-| 前端 | `pnpm --filter web exec tsc --noEmit` | 0 错误 |
-| 前端 | `pnpm --filter web test -- sshService httpAdapter` | 全绿 |
+| 层 | 命令 | 期望 | 2026-11-18 实测 |
+|---|---|---|---|
+| 传输 crate | `cargo test -p remote-shell` | 全绿（含 `--no-default-features` 可编译） | 11 passed（exit 0） |
+| 服务 | `cargo test -p service ssh` | 全绿 | 9 passed（全量 `-p service` 76 passed） |
+| API | `cargo test -p api ssh` | 全绿（票据 / 归属 / 错误码） | 10 passed（全量 `-p api` 116 passed） |
+| 权限 | `cargo test -p api authz` | 全绿（`ROUTE_PERMS × SERVICE_FORBIDDEN_ROUTES` 自洽老用例不破） | 16 passed（含 `route_perms_entries_are_well_formed`） |
+| 文档 | `cargo test -p apidoc` | 全绿（Swagger 路径数增加） | 8 passed |
+| 编译 | `cargo check -p api -p server -p bootstrap` | 无错误 | exit 0 |
+| 前端 | `pnpm --filter web exec tsc --noEmit` | 0 错误 | exit 0 |
+| 前端 | `pnpm --filter web test -- sshService httpAdapter` | 全绿（`sshService.test.ts` 13 + `httpAdapter.test.ts` 21） | 2 suites / 34 passed |
+
+> 未执行项：Docker WS 终端端到端冒烟（本机无 docker，见 §9.2 手工步骤）。种子 SQL 的正确性依赖启动
+> 时执行 `public_initial_data.sql`（`init_postgres_database` 第 5 步，`run_init_step` 容错）——重启后
+> 看日志有无「public 默认数据」失败项即可确认；本次改动未在实库上跑过，属已知缺口。
 
 ### 9.2 手工冒烟（实施的最后一关）
 
@@ -498,7 +520,7 @@ export const openSshSession = (targetId: string, cols: number, rows: number) =>
 
 ### 10.2 终端 = 任意命令执行（合规风险）
 
-- 兜底手段只有：`ops:ssh:session:open` 权限点 + `ops_ssh_session` 审计（谁 / 何时 / 哪台 / 字节数 / 退出码）。
+- 兜底手段只有：`ssh:session:open` 权限点 + `ops_ssh_session` 审计（谁 / 何时 / 哪台 / 字节数 / 退出码）。
 - 本期**不做**命令级录制；若合规要求“可回放”，按 P2 立项（asciinema 格式落对象存储 + 会话详情页回放）。
 - 建议运营侧只给最小必要账号（非 root / 只读账号），并在目标主机侧配 `AllowUsers` / `ForceCommand`。
 
@@ -532,3 +554,6 @@ export const openSshSession = (targetId: string, cols: number, rows: number) =>
 | 日期 | 阶段 | 内容 | 验证 |
 |---|---|---|---|
 | 2026-11-17 | 方案 | 定稿：传输（WS + 一次性票据）、数据模型（两表）、SSH 实现（`russh` + `ring`）、权限与菜单、任务 T1–T14 | 本文件评审通过；依赖与现状核查见 §1.2 |
+| 2026-11-18 | 实施 | 后端：`crates/remote-shell`（`probe` / `open` / `SshSession`，`ring` 后端）、`terminal_module_migration.sql`（`ops_ssh_target` / `ops_ssh_session`，已挂 `init_tenant_tables`）、`ssh_service` / `ssh_ticket` / `ssh_routes`（10 REST + 1 WS）、`ROUTE_PERMS` 与菜单种子 | `cargo check -p service -p api` 仅告警无错误 |
+| 2026-11-18 | 收尾 | 权限点按「模块:资源[:动作]」收正为 3 段 `ssh:target:*` / `ssh:session:*`（替换 4 段 `ops:ssh:*`），同步菜单/按钮种子与本文档；新增 `apps/web/src/tests/services/sshService.test.ts`（13 用例：命令→路由契约、snake_case 请求体、`buildSshWsUrl` 的 ws/wss + 票据编码）；修正 `ssh_service` 空闲回收单测的边界断言 | `cargo test -p api authz`（16）、`-p service ssh`（9）、`-p api ssh`（10）、`-p remote-shell`（11）、`-p apidoc`（8）全绿；`cargo check -p api -p server -p bootstrap` 0 错误；`tsc --noEmit` 0 错误；`jest sshService`（13）+ `jest httpAdapter`（21）全绿 |
+| 2026-11-18 | 收尾 | 菜单种子补齐权限点承载：菜单 62 由 `ssh:session:open` 改为 `ssh:target:list`（`get_ssh_targets` / `GET /api/ops/ssh/targets`，与菜单 60/61 的 list 口径一致），新增按钮 172「查看会话」`ssh:session:list`、按钮 173「打开会话」`ssh:session:open`；`public_initial_data.sql` 末尾追加两条幂等 `UPDATE`（4 段→3 段改名；菜单 62 仅命中旧值行才改写）| §9.1 全量实测同批全绿；`git grep 'ops:ssh'` 仅剩该迁移语句与本文档说明；种子在启动时随 `init_public_default_data` 执行，实库效果待重启确认 |

@@ -48,6 +48,9 @@ llm-anthropic = {path = "crates/llm-anthropic"}
 llm-openai = {path = "crates/llm-openai"}
 ops = {path = "crates/ops"}
 parser = {path = "crates/parser"}
+# 远程终端传输：只放 SSH 协议与字节流（零 HTTP / 零数据库），
+# 会话编排、审计与 WebSocket 桥接在 service / api 层
+remote-shell = {path = "crates/remote-shell"}
 service = {path = "crates/service"}
 # 轻量级信任/知识图谱内核：纯内存、零 IO；service 负责从 knowledge_relation 构建图后传入
 trustgraph-lite = {path = "crates/trustgraph-lite"}
@@ -73,7 +76,7 @@ toml = "1.2.1+spec-1.1.0"
 
 # ---- 异步运行时 / 数据库 ----
 async-trait = "0.1.92"
-axum = {version = "0.8.9", features = ["macros"]}
+axum = {version = "0.8.9", features = ["macros", "ws"]}
 dashmap = "6.1.0"
 futures = "0.3.34"
 once_cell = "1.21.4"
@@ -166,6 +169,17 @@ jsonwebtoken = {version = "11.1.0", default-features = false, features = ["aws_l
 rand = {version = "0.10.3", features = ["std_rng"]}
 sha2 = "0.10.9"
 uuid = {version = "1.29.0", features = ["v4"]}
+
+# ---- SSH 终端 ----
+# ring：与全仓共源的 CryptoProvider（避免 aws-lc-rs 引入 cmake / nasm 构建）；
+# default-features = false 会同时关掉 rsa 与 flate2，因此必须显式补回：
+#   flate2 → 服务端开压缩时协商 zlib，否则部分 OpenSSH 会因 MAC 协商失败断开；
+#   rsa    → RSA 主机密钥与 RSA 私钥登录（pkcs1 / ssh-key 两个后端都要）。
+russh = {version = "0.61", default-features = false, features = [
+  "ring",
+  "flate2",
+  "rsa",
+]}
 
 # ---- 日志 / 追踪 ----
 opentelemetry = {version = "0.33.1", features = ["trace", "metrics", "logs"]}

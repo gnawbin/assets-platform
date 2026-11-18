@@ -3537,6 +3537,61 @@ SELECT 165, '绑定资产', 60, NULL, NULL, NULL, 6, true, 'ops:link:bind', 3, t
 WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 165);
 
 -- ==============================
+-- 11.1 运维终端（SSH）菜单（菜单 + 按钮）
+-- 说明：与运维采集共用目录 7；按钮行的 command_name / http_method / http_path
+--       必须与 §5.1 逐字一致，否则 authz 启动自检会把它们算成「code-only 路由」。
+-- ==============================
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 62, 'SSH 终端', 7, '/ops/terminal', '/ops/terminal/page', 'IconTerminal2', 3, true, 'ssh:target:list', 2, false, 'get_ssh_targets', 'GET', '/api/ops/ssh/targets', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 62);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 166, '新增主机', 62, NULL, NULL, NULL, 1, true, 'ssh:target:create', 3, true, 'create_ssh_target', 'POST', '/api/ops/ssh/targets', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 166);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 167, '编辑主机', 62, NULL, NULL, NULL, 2, true, 'ssh:target:update', 3, true, 'update_ssh_target', 'PUT', '/api/ops/ssh/targets/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 167);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 168, '删除主机', 62, NULL, NULL, NULL, 3, true, 'ssh:target:delete', 3, true, 'delete_ssh_target', 'DELETE', '/api/ops/ssh/targets/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 168);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 169, '测试主机', 62, NULL, NULL, NULL, 4, true, 'ssh:target:test', 3, true, 'probe_ssh_target', 'POST', '/api/ops/ssh/targets/{id}/probe', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 169);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 170, '关闭会话', 62, NULL, NULL, NULL, 5, true, 'ssh:session:close', 3, true, 'close_ssh_session', 'DELETE', '/api/ops/ssh/sessions/{sessionId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 170);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 171, '会话接入(WS)', 62, NULL, NULL, NULL, 6, true, 'ssh:session:attach', 3, true, 'attach_ssh_session', 'GET', '/api/ops/ssh/sessions/{sessionId}/ws', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 171);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 172, '查看会话', 62, NULL, NULL, NULL, 7, true, 'ssh:session:list', 3, true, 'get_ssh_sessions', 'GET', '/api/ops/ssh/sessions', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 172);
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 173, '打开会话', 62, NULL, NULL, NULL, 8, true, 'ssh:session:open', 3, true, 'open_ssh_session', 'POST', '/api/ops/ssh/sessions', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 173);
+
+-- 权限点改名（一次性修正）：SSH 权限点曾是 4 段 `ops:ssh:*`，不符合
+-- 「模块:资源[:动作]」的 2–3 段约定（authz 自检用例会判非法），现统一为 `ssh:*`。
+-- 存量库的菜单/按钮行已存在、上面的 INSERT 不会覆盖，所以这里就地改写；
+-- 全部迁完后本语句可删除（第二次执行起是无害的空更新）。
+UPDATE public.sys_menu
+   SET perms = replace(perms, 'ops:ssh:', 'ssh:'),
+       updated_at = NOW()
+ WHERE perms LIKE 'ops:ssh:%';
+
+-- 菜单 62 的权限点语义调整：从「打开会话」改为「主机列表」（对齐菜单 60/61 的
+-- list 口径），会话相关权限由按钮 172（会话列表）/ 173（打开会话）承载。
+-- 仅修正仍是旧值 'ssh:session:open' 的存量行，已被运维调整过的不动。
+UPDATE public.sys_menu
+   SET perms = 'ssh:target:list',
+       command_name = 'get_ssh_targets',
+       http_method = 'GET',
+       http_path = '/api/ops/ssh/targets',
+       updated_at = NOW()
+ WHERE id = 62
+   AND perms = 'ssh:session:open';
+
+-- ==============================
 -- 12. 默认角色菜单关联（super_admin 角色 → 所有菜单）
 -- ==============================
 -- 必须放在**所有** sys_menu INSERT 之后执行，否则后续追加的菜单
