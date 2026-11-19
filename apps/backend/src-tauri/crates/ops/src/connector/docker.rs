@@ -21,17 +21,22 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bollard::Docker;
+use bollard::container::LogOutput;
 use bollard::errors::Error as BollardError;
 use bollard::models::{ContainerSummary, ImageSummary, Network, Node, Service, Task, Volume};
 use bollard::query_parameters::{
     ListContainersOptionsBuilder, ListImagesOptionsBuilder, ListNetworksOptionsBuilder,
     ListNodesOptionsBuilder, ListServicesOptionsBuilder, ListTasksOptionsBuilder,
-    ListVolumesOptionsBuilder,
+    ListVolumesOptionsBuilder, LogsOptionsBuilder, StatsOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, ClientVersion};
+use futures::StreamExt;
 
 use super::{AuthKind, ConnectionConfig, ConnectionHealth, Connector};
 use crate::error::{FailureClass, OpsError, OpsResult};
+use crate::probe::{
+    ContainerLogLine, ContainerLogs, ContainerLogsRequest, ContainerStats, LogStream,
+};
 use crate::model::{
     Provider, ResourceKey, ResourceKind, ResourceRecord, ResourceSnapshot, ResourceStatus,
 };
@@ -397,8 +402,8 @@ fn to_sorted_map_opt(
     labels.as_ref().map(to_sorted_map).unwrap_or_default()
 }
 
-/// bollard 的时间戳（`time` 特性下是 `OffsetDateTime`）→ epoch 毫秒
-fn date_millis(value: &time::OffsetDateTime) -> i64 {
+/// 采样时间 → epoch 毫秒（供 `probe` 模块换算 `read` / `preread`）
+pub(crate) const fn date_millis(value: &time::OffsetDateTime) -> i64 {
     value.unix_timestamp().saturating_mul(1000)
 }
 
@@ -987,6 +992,143 @@ fn task_record(endpoint: &str, task: Task) -> Option<ResourceRecord> {
     Some(record)
 }
 
+impl DockerConnector {
+    /// 拉取容器日志（最近 `lines` 行；累计超过 `max_bytes` 立即停止并置 `truncated`）
+    ///
+    /// 只读：对应 `GET /containers/{id}/logs`。`tty=true` 的容器日志帧是
+    /// [`LogStream::Console`]（stdout/stderr 已被 daemon 合并，无法再区分）。
+    ///
+    /// # Errors
+    ///
+    /// 容器名为空返回 [`OpsError::Config`]；请求失败 / 超时按 [`OpsError`] 分类返回。
+    pub async fn container_logs(
+        &self,
+        container: &str,
+        request: &ContainerLogsRequest,
+    ) -> OpsResult<ContainerLogs> {
+        const ACTION: &str = "GET /containers/{id}/logs";
+        let container = container.trim();
+        if container.is_empty() {
+            return Err(OpsError::Config("容器 ID / 名称不能为空".to_string()));
+        }
+        let options = LogsOptionsBuilder::new()
+            .stdout(true) // 默认 false：不显式打开就是一个空流
+            .stderr(true)
+            .timestamps(request.timestamps)
+            .tail(&request.tail())
+            .build();
+        let limit = request.byte_limit();
+        let mut stream = self.docker.logs(container, Some(options));
+        let mut lines: Vec<ContainerLogLine> = Vec::new();
+        let mut bytes = 0_usize;
+        let mut truncated = false;
+        // 帧内可能有多行、也可能只有半行：拼起来按 `\n` 切，剩余留给下一帧
+        let mut pending = String::new();
+        let mut pending_kind = LogStream::Stdout;
+        while !truncated {
+            let Some(item) = stream.next().await else {
+                break;
+            };
+            let output = item.map_err(|err| map_request_error(ACTION, err))?;
+            let (kind, chunk) = match output {
+                LogOutput::StdOut { message } => (LogStream::Stdout, message),
+                LogOutput::StdErr { message } => (LogStream::Stderr, message),
+                LogOutput::StdIn { message } => (LogStream::Stdin, message),
+                LogOutput::Console { message } => (LogStream::Console, message),
+            };
+            pending_kind = kind;
+            pending.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(index) = pending.find('\n') {
+                // 计字节时把换行算进去，保证 `bytes <= max_bytes`
+                let line_bytes = index + 1;
+                if bytes + line_bytes > limit {
+                    truncated = true;
+                    break;
+                }
+                let line = pending[..index].trim_end_matches('\r').to_string();
+                pending.drain(..=index);
+                bytes += line_bytes;
+                lines.push(ContainerLogLine {
+                    stream: kind,
+                    message: line,
+                });
+            }
+            if !truncated && bytes + pending.len() > limit {
+                truncated = true;
+            }
+        }
+        // 末尾没有换行的最后一行（daemon 不保证以 \n 结尾）
+        if !truncated && !pending.is_empty() {
+            let line = pending.trim_end_matches('\r').to_string();
+            bytes += pending.len();
+            lines.push(ContainerLogLine {
+                stream: pending_kind,
+                message: line,
+            });
+        }
+        Ok(ContainerLogs {
+            container: container.to_string(),
+            lines,
+            bytes,
+            truncated,
+        })
+    }
+
+    /// 采集容器性能快照（只读 `GET /containers/{id}/stats`）
+    ///
+    /// - `two_samples=false`：`stream=false` + `one_shot=true`，daemon 自己算 delta，
+    ///   但 `precpu_stats` 常为空，`cpu_percent` 为 `None` 属预期（内存/网络/pids 仍可用）；
+    /// - `two_samples=true`：保持流，取前两条样本（约 1s）自己算 delta，取完立即 drop 流；
+    ///   第二条样本等不到时退回第一条，不无限挂连接。
+    ///
+    /// # Errors
+    ///
+    /// 容器名为空返回 [`OpsError::Config`]；请求失败 / 超时按 [`OpsError`] 分类返回，
+    /// daemon 未给出任何样本时返回 [`OpsError::Api`]（容器已停止或刚创建）。
+    pub async fn container_stats(
+        &self,
+        container: &str,
+        two_samples: bool,
+    ) -> OpsResult<ContainerStats> {
+        const ACTION: &str = "GET /containers/{id}/stats";
+        let container = container.trim();
+        if container.is_empty() {
+            return Err(OpsError::Config("容器 ID / 名称不能为空".to_string()));
+        }
+        let options = StatsOptionsBuilder::new()
+            .stream(two_samples) // 默认 true：不关掉流就永不结束
+            .one_shot(!two_samples)
+            .build();
+        let mut stream = self.docker.stats(container, Some(options));
+        let timeout = self.config.timeout;
+
+        let first = match tokio::time::timeout(timeout, stream.next()).await {
+            Ok(Some(item)) => item.map_err(|err| map_request_error(ACTION, err))?,
+            Ok(None) => {
+                return Err(OpsError::Api(
+                    "stats 未返回任何样本（容器可能已停止或刚创建）".to_string(),
+                ));
+            }
+            Err(_) => return Err(OpsError::Timeout(timeout)),
+        };
+        if !two_samples {
+            return Ok(ContainerStats::from_samples(container, &first, None));
+        }
+
+        let second = match tokio::time::timeout(timeout, stream.next()).await {
+            Ok(Some(Ok(sample))) => Some(sample),
+            Ok(Some(Err(err))) => return Err(map_request_error(ACTION, err)),
+            Ok(None) | Err(_) => None,
+        };
+        // drop 流：常驻连接会一直占着 daemon 的 stats 采样
+        drop(stream);
+        Ok(second.map_or_else(
+            || ContainerStats::from_samples(container, &first, None),
+            |second| ContainerStats::from_samples(container, &second, Some(&first)),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -994,11 +1136,14 @@ mod tests {
     use tokio::net::TcpListener;
 
     /// 假 daemon 的单条响应
+    ///
+    /// `body` 必须是字节：`/containers/{id}/logs` 的响应体是多路复用帧
+    /// （`[stream:1B][padding:3B][len:4B 大端][payload]`），无法用 `String` 表达。
     #[derive(Clone)]
     struct FakeResponse {
         status: u16,
         content_type: &'static str,
-        body: String,
+        body: Vec<u8>,
     }
 
     impl FakeResponse {
@@ -1006,7 +1151,21 @@ mod tests {
             Self {
                 status: 200,
                 content_type: "application/json",
-                body: body.into(),
+                body: body.into().into_bytes(),
+            }
+        }
+
+        /// 逐行 JSON 流：`JsonLineDecoder` 以 `\n` 切帧，且**一帧必须是一整行**
+        /// （一次 `read` 只触发一次 `decode`，多行 JSON 会在 EOF 报 `bytes remaining on stream`）
+        fn json_line(body: impl Into<String>) -> Self {
+            let mut body = body.into().into_bytes();
+            if !body.ends_with(b"\n") {
+                body.push(b'\n');
+            }
+            Self {
+                status: 200,
+                content_type: "application/json",
+                body,
             }
         }
 
@@ -1014,6 +1173,14 @@ mod tests {
             Self {
                 status: 200,
                 content_type: "text/plain",
+                body: body.into().into_bytes(),
+            }
+        }
+
+        fn bytes(body: impl Into<Vec<u8>>) -> Self {
+            Self {
+                status: 200,
+                content_type: "application/vnd.docker.raw-stream",
                 body: body.into(),
             }
         }
@@ -1022,9 +1189,22 @@ mod tests {
             Self {
                 status,
                 content_type: "application/json",
-                body: body.into(),
+                body: body.into().into_bytes(),
             }
         }
+    }
+
+    /// 拼一条 Docker 多路复用帧（非 TTY 容器的 `stdout` / `stderr`）
+    ///
+    /// `stream_type`：0 = stdin，1 = stdout，2 = stderr
+    fn log_frame(stream_type: u8, payload: &str) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(8 + payload.len());
+        frame.push(stream_type);
+        frame.extend_from_slice(&[0, 0, 0]);
+        let len = u32::try_from(payload.len()).expect("单帧日志不能超过 4 GiB");
+        frame.extend_from_slice(&len.to_be_bytes());
+        frame.extend_from_slice(payload.as_bytes());
+        frame
     }
 
     fn reason(status: u16) -> &'static str {
@@ -1076,9 +1256,11 @@ mod tests {
                     let response = routes
                         .iter()
                         .find(|(suffix, _)| path.ends_with(*suffix))
-                        .map(|(_, response)| response.clone())
-                        .unwrap_or_else(|| FakeResponse::error(404, r#"{"message":"no route"}"#));
-                    let payload = response.body.as_bytes();
+                        .map_or_else(
+                            || FakeResponse::error(404, r#"{"message":"no route"}"#),
+                            |(_, response)| response.clone(),
+                        );
+                    let payload = response.body.as_slice();
                     let head = format!(
                         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                         response.status,
@@ -1406,6 +1588,103 @@ mod tests {
             connector.config().endpoint_key()
         );
         assert_eq!(task.parent_uid.as_deref(), Some(expected_parent.as_str()));
+    }
+
+    #[tokio::test]
+    async fn container_logs_returns_lines_and_marks_truncation() {
+        let endpoint = spawn_fake_docker(vec![(
+            "/logs",
+            FakeResponse::text("line-1\nline-2\npartial"),
+        )])
+        .await;
+        let connector =
+            DockerConnector::connect(ConnectionConfig::docker_tcp("测试 Docker", &endpoint))
+                .expect("连接器初始化失败");
+
+        let logs = connector
+            .container_logs("web-1", &ContainerLogsRequest::default())
+            .await
+            .expect("读取日志失败");
+        assert_eq!(logs.container, "web-1");
+        let messages: Vec<&str> = logs
+            .lines
+            .iter()
+            .map(|line| line.message.as_str())
+            .collect();
+        assert_eq!(messages, ["line-1", "line-2", "partial"]);
+        assert!(!logs.truncated);
+        assert_eq!(logs.bytes, "line-1\nline-2\npartial".len());
+
+        let truncated = connector
+            .container_logs(
+                "web-1",
+                &ContainerLogsRequest {
+                    max_bytes: Some(14),
+                    ..ContainerLogsRequest::default()
+                },
+            )
+            .await
+            .expect("读取日志失败");
+        assert!(truncated.truncated, "超过字节上限必须显式置 truncated");
+        assert_eq!(truncated.bytes, 14);
+        assert_eq!(truncated.lines.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn container_logs_splits_stdout_and_stderr() {
+        // 非 TTY 容器：daemon 用 8 字节帧头分流 stdout / stderr
+        let mut body = log_frame(1, "out-1\n");
+        body.extend_from_slice(&log_frame(2, "err-1\n"));
+        let endpoint = spawn_fake_docker(vec![("/logs", FakeResponse::bytes(body))]).await;
+        let connector =
+            DockerConnector::connect(ConnectionConfig::docker_tcp("测试 Docker", &endpoint))
+                .expect("连接器初始化失败");
+
+        let logs = connector
+            .container_logs("web-1", &ContainerLogsRequest::default())
+            .await
+            .expect("读取日志失败");
+        let pairs: Vec<(LogStream, &str)> = logs
+            .lines
+            .iter()
+            .map(|line| (line.stream, line.message.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                (LogStream::Stdout, "out-1"),
+                (LogStream::Stderr, "err-1")
+            ]
+        );
+        assert!(!logs.truncated);
+        assert_eq!(logs.bytes, "out-1\nerr-1\n".len());
+    }
+
+    #[tokio::test]
+    async fn container_stats_reads_single_sample() {
+        let endpoint = spawn_fake_docker(vec![(
+            "/stats",
+            FakeResponse::json_line(
+                // 必须单行：bollard 的 JsonLineDecoder 一次 read 只 decode 一次
+                r#"{"read":"2024-01-01T00:00:00Z","cpu_stats":{"cpu_usage":{"total_usage":3000000000},"system_cpu_usage":10000000000,"online_cpus":2},"precpu_stats":{"cpu_usage":{"total_usage":1000000000},"system_cpu_usage":6000000000},"memory_stats":{"usage":104857600,"limit":536870912,"stats":{}},"pids_stats":{"current":5}}"#,
+            ),
+        )])
+        .await;
+        let connector =
+            DockerConnector::connect(ConnectionConfig::docker_tcp("测试 Docker", &endpoint))
+                .expect("连接器初始化失败");
+
+        let stats = connector
+            .container_stats("web-1", false)
+            .await
+            .expect("采集失败");
+        assert_eq!(stats.container, "web-1");
+        assert_eq!(stats.pids, Some(5));
+        assert_eq!(stats.mem_used_bytes, 104_857_600);
+        assert_eq!(stats.mem_limit_bytes, 536_870_912);
+        assert!(stats.blkio_read_bytes.is_none(), "无块设备统计时应为 None");
+        let percent = stats.cpu_percent.expect("precpu_stats 应能算出 CPU%");
+        assert!((percent - 100.0).abs() < 1e-6, "实际 {percent}");
     }
 }
 
