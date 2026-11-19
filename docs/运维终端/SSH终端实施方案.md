@@ -56,7 +56,7 @@
 
 | 依赖 | 结论 | 依据 |
 |---|---|---|
-| `russh` | **可用**，最新 `0.61.2` / `0.62.0` | crates.io sparse index `https://index.crates.io/ru/ss/russh` 成功拉取（约 85s，慢但可达） |
+| `russh` | **可用**，现已锁 `0.65.2`（`ring` 后端） | 索引命中，`cargo check -p remote-shell --features ssh` 通过；0.65 的 `Handler::check_server_key` 形参为 `&PublicKeyOrCertificate` |
 | `russh` 后端 | 选 `ring` | 索引中 `ring` 与 `aws-lc-rs` 均为**可选依赖**；`ring 0.17.14` / `aws-lc-rs 1.17.0` / `aws-lc-sys 0.41.0` / `cmake 0.1.58` 均已在 `~/.cargo/registry` 命中；选 `ring` 可避开 `aws-lc-sys` 的 C / cmake 构建 |
 | `axum` 的 `ws` feature | **可用** | 其依赖 `tokio-tungstenite 0.28.0`、`tungstenite 0.28.0` 已在本地 registry 缓存 |
 | `@xterm/xterm` | 需新增 | `package.json` 无；`registry.npmmirror.com` 可用，首次安装需网络 |
@@ -185,7 +185,7 @@ CREATE INDEX IF NOT EXISTS idx_ops_ssh_session_target
 
 | 层 | 文件 | 变更 |
 |---|---|---|
-| 依赖 | `apps/backend/src-tauri/Cargo.toml` | `axum` 加 `ws`；新增 `russh = { version = "0.61", default-features = false, features = ["ring"] }` 与 `remote-shell = { path = "crates/remote-shell" }` |
+| 依赖 | `apps/backend/src-tauri/Cargo.toml` | `axum` 加 `ws`；新增 `russh = { version = "0.65.2", default-features = false, features = ["ring", "flate2", "rsa"] }` 与 `remote-shell = { path = "crates/remote-shell" }` |
 | 传输 crate | `crates/remote-shell/{Cargo.toml, src/lib.rs}` | 新建（`default = []`，`ssh = ["dep:russh"]`） |
 | 数据 | `crates/database/src/sql/terminal_module_migration.sql` | 新建（§3） |
 | 数据 | `crates/database/src/models.rs` | `OpsSshTarget` / `OpsSshSession` |
@@ -232,7 +232,7 @@ impl SshSession {
 实现要点：
 
 - `russh::client::connect(config, (host.as_str(), port), Handler)`；`config.keepalive_interval = Some(30s)`。
-- `Handler::check_server_key`：算 `SHA256:<base64>` 指纹 → `expected_fingerprint == None` 记录并通过；`Some(exp)` 严格比对，不等返回 `Ok(false)`（握手失败，**不静默接受**）。
+- `Handler::check_server_key`（russh 0.65 形参为 `&PublicKeyOrCertificate`，证书场景用 `.public_key()` 取内层公钥）：算 `SHA256:<base64>` 指纹 → `expected_fingerprint == None` 记录并通过；`Some(exp)` 严格比对，不等返回 `Ok(false)`（握手失败，**不静默接受**）。
 - 会话建立：`channel_open_session()` → `request_pty("xterm-256color", cols, rows, 0, 0, &[])` → `request_shell(true)`；读循环把 `ChannelMsg::Data / ExtendedData` 转 `SshEvent::Data`，`ExitStatus` → `Exit`，`Close / Eof` → `Closed`。
 - 单测（无网络）：`SshAuth` 的 `Debug` 掩码、`SshTargetSpec::validate()`（空 host / `port == 0` / 超时下限夹取）、指纹串归一化（`sha256:` → `SHA256:`）。
 

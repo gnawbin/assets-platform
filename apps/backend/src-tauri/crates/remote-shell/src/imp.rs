@@ -1,4 +1,4 @@
-//! russh 0.61 客户端实现
+//! russh 0.65 客户端实现
 //!
 //! 设计要点：
 //! - 握手阶段由 [`CapturingHandler`] 记录主机密钥并按「已固定指纹」判定放行，
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use russh::client::{self, Handle};
-use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKey, decode_secret_key};
+use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate, decode_secret_key};
 use russh::{ChannelMsg, Disconnect};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -70,12 +70,21 @@ impl client::Handler for CapturingHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        // russh 0.65 起回调给的是「公钥或证书」：证书场景取证书内公钥做 TOFU 指纹
+        let key = server_public_key.public_key();
         let info = HostKeyInfo {
-            fingerprint: server_public_key.fingerprint(HashAlg::Sha256).to_string(),
-            key_type: server_public_key.algorithm().as_str().to_string(),
+            fingerprint: key.fingerprint(HashAlg::Sha256).to_string(),
+            key_type: key.algorithm().as_str().to_string(),
         };
+        if server_public_key.certificate().is_some() {
+            debug!(
+                fingerprint = %info.fingerprint,
+                key_type = %info.key_type,
+                "服务端主机密钥为证书，指纹按证书内公钥计算"
+            );
+        }
         let accepted = fingerprint_matches(self.expected.as_deref(), &info.fingerprint);
         if accepted {
             debug!(fingerprint = %info.fingerprint, key_type = %info.key_type, "已接受服务端主机密钥");

@@ -191,15 +191,16 @@
 
 > 定位：只做客户端基建，**不接任何业务、不碰 gateway**；`trustgraph-lite` 保持零 IO（一行不改）。
 
-### P0：契约层（0.5 天）
-- [ ] **48.** 新增 `crates/mq`（`default = ["memory"]`，`pulsar = ["dep:pulsar"]`）：`Envelope` / `TopicName` / `MqError` / `MqConfig::from_env()` / `memory` 实现 / `retry` 退避 + 根 `Cargo.toml` 登记
-  - 验收：`cargo test -p mq` 通过；`cargo tree -p mq` 不含 `pulsar` / `prost v0.13`
+### P0：契约层（0.75 天）
+- [x] **48.** 新增 `crates/mq`（`default = ["memory"]`；P0 先占位 `pulsar = []`，P1 改为 `["dep:pulsar"]`）：`Envelope`（含 `partition_key`）/ `TopicName` / `MqError`（含 `AlreadySubscribed` / `SubscriptionConflict` / `Closed`）/ `MqConfig::from_env()`（含 `SubscriptionScope` / `instance_id` / `subscription_name()`）/ `init()` / `try_bus()` / `from_config()` / `Bus::close` / `MqStats` / `memory` 实现 / `retry` 退避 + 根 `Cargo.toml` 登记
+  - 验收：`cargo test -p mq` 通过；`cargo tree -p mq` 不含 `pulsar` / `prost v0.13`；`subscription_name` 的 `instance` / `shared` 两分支单测通过
 
-### P1：Pulsar 驱动（1 天）
-- [ ] **49.** `crates/mq/src/pulsar.rs`：`PulsarBus`（token 认证 / KeyShared / DLQ / `initial_position` / `read_compacted` / `block_queue_if_full` / 优雅退出）+ `examples/{publish,subscribe}` + `tests/pulsar_e2e`（`PULSAR_TEST_URL` 门控）+ `docker-compose.yml` 增 `pulsar`（profile `mq`）
+### P1：Pulsar 驱动（1.25 天）
+- [ ] **49.** `crates/mq/src/pulsar.rs`：`PulsarBus`（token 认证 / producer 池 + single-flight / 订阅注册表 / KeyShared / DLQ / `initial_position` / `read_compacted` / `block_queue_if_full` / `Bus::close` 优雅退出）+ `examples/{publish,subscribe}` + `tests/pulsar_e2e`（`PULSAR_TEST_URL` 门控，含多客户端用例）+ `docker-compose.yml` 增 `pulsar`（profile `mq`）
   - 依赖形态：`pulsar = {version = "6.9.1", default-features = false, features = ["tokio-rustls-runtime-ring", "compression", "telemetry"]}`（禁 `native-tls` / `async-std` / `auth-oauth2` / `admin-api`）
+  - 验收：`shared` 两 Bus 处理计数之和 = N；`instance` 两 Bus 各收 N；两 Bus producer 名不冲突
 
 ### P2：文档与索引（0.5 天）
-- [ ] **50.** 设计文档 + `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + 本条目
+- [x] **50.** 设计文档 v0.2（§5.2 多客户端 / 多实例语义）+ `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + 本条目
   - 待内核 Phase 2–5 完成后，另立《trustgraph 图集群设计方案》再接线集群节点
 

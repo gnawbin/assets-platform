@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | v0.1（设计稿） |
-| 日期 | 2026-11-18 |
+| 文档版本 | v0.2（设计稿） |
+| 日期 | 2026-11-19 |
 | 适用范围 | `apps/backend/src-tauri/crates/mq`（新增）；不涉及 `api` / `service` / `gateway` / `apps/web` |
-| 状态 | 待评审；评审通过后进入 P0 实施 |
+| 状态 | 待评审；v0.2 补充「多客户端 / 多实例」语义（§5.2），评审通过后进入 P0 实施 |
 | 关联文档 | `docs/知识库模块/trustgraph-lite轻量级信任图谱内核设计方案.md`（内核定位与零 IO 约束）、`docs/知识库模块/README.md`（索引）、`docs/业务网关（axum）多实例部署设计方案.md`（附录 D：PostgreSQL 单一依赖模式，本方案**不与之耦合**）、`TODO.md` |
 
 > **结论先行**：本轮只交付「Pulsar **客户端基建**」——一套与业务无关的 `mq` crate（trait + 内存实现 + 可选 Pulsar 驱动 + 配置 + 测试）。
@@ -20,8 +20,9 @@
 2. **默认零影响**：`pulsar` 是 **optional 依赖**，由 feature `pulsar` 门控且默认关闭；`cargo build --workspace` 默认**不会**引入 `pulsar` 与 `prost 0.13`。
 3. **驱动版本锁定 `pulsar 6.9.1`**，`default-features = false` + `tokio-rustls-runtime-ring`：与本仓「rustls(ring) 单一 TLS 栈」一致，**排除** `async-std` 与 `native-tls`。
 4. **不接 gateway**：网关的多实例协调仍走 PostgreSQL（附录 D），本方案不替换、不叠加监听器。
-5. **至少一次 + 幂等**：`pulsar-rs` 无事务 / 无精确一次，信封携带 `id`（雪花）与 `seq`（分片内单调），消费端按幂等处理。
-6. **集群语义只做「预留」**：topic 命名、分区键、`KeyShared`、`InitialPosition::Earliest`、`read_compacted` 写进契约，但本轮不创建 topic、不实现图事件。
+5. **至少一次 + 幂等**：`pulsar-rs` 无事务 / 无精确一次，信封携带 `id`（雪花）与 `seq`（分片内单调），消费端按幂等处理。`id` 必须在发布前生成一次，重试 / 多客户端复用同一 `id`；多副本的 `SNOWFLAKE_WORKER_ID` 必须互异。
+6. **集群语义只做「预留」**：topic 命名、分区键、`KeyShared`、`MqInitialPosition::Earliest`、`read_compacted` 写进契约，但本轮不创建 topic、不实现图事件。
+7. **多客户端有明确语义**：进程内只装配一个 `Bus`（`init()` 幂等、`from_config()` 仅测试/示例）；同一 `Bus` 内按订阅名去重；跨副本用 `PULSAR_SUBSCRIPTION_SCOPE=instance|shared` 显式选择「各自全量」还是「分摊」，默认 `instance`。
 
 ---
 
@@ -35,6 +36,7 @@
 | M2 | 交付可选 Pulsar 驱动 | `cargo check -p mq --features pulsar` 通过 |
 | M3 | 交付可直接连 broker 自证的示例 | `docker compose --profile mq up -d` 后 `examples/publish` + `examples/subscribe` 对跑 100 条 |
 | M4 | 默认零行为变化 | 未设 `PULSAR_ENABLED` 时全仓不建立任何连接；Tauri 启动路径零改动 |
+| M5 | 多客户端语义可验证 | `cargo test -p mq` 覆盖 `subscription_name(instance/shared)`、重复订阅拒绝、producer 单例 |
 
 ### 1.2 非目标（本轮明确不做）
 
@@ -45,6 +47,7 @@
 | 定义图业务事件（`node.upsert` / `edge.delete` 等取值） | 内核 `model.rs` 仍是骨架（Phase 2 未开工），事件形状此时定死会返工 |
 | 创建 / 管理 topic（分区数、保留策略、ACL） | 属运维面；Pulsar Admin 是独立 REST 接口，不引入 `admin-api` 特性（会拉 `native-tls`） |
 | 集群选主、分片迁移、快照压缩作业 | 属未来「集群节点」层 |
+| 实现新节点 `bootstrap` 引导流程 | 属集群节点层；本轮只把「两段式」语义写进契约（§6） |
 | Exactly-once / 事务型 Producer | `pulsar-rs` 不支持 |
 | 与网关 `LISTEN/NOTIFY` 合并或替换 | 两者服务不同场景，不交叉 |
 
@@ -129,6 +132,9 @@ pulsar = {version = "6.9.1", default-features = false, features = [
 | 订阅类型 | `pulsar::proto::command_subscribe::SubType`（Exclusive / Shared / Failover / KeyShared） |
 | 起始位置 | `InitialPosition::Latest`（默认）/ `Earliest`，或 `start_message_id` 指定消息位点 |
 | 死信 | `DeadLetterPolicy { max_redeliver_count: usize, dead_letter_topic: String }` |
+| producer 命名 | 同一 topic 内**唯一**；同名 producer 二次连接会被 broker 拒绝（`ProducerBusy`） |
+| 订阅位点 | `initial_position` 仅在订阅**首次创建**时生效；已有订阅从 cursor 继续，不回放已 ack 历史 |
+| KeyShared 无 key | 未设置 message key 的消息按轮询分摊，**不保证**同 key 保序 |
 | **不支持** | 事务型 Producer、Exactly-once；`ConsumerOptions` **没有** `ack_timeout` / `unacked_message_redelivery_delay`（只能配在 broker 的 namespace policy） |
 
 ### 3.4 选型结论
@@ -178,7 +184,7 @@ pulsar = {version = "6.9.1", default-features = false, features = [
 
 ```text
 crates/mq/
-├── Cargo.toml          # features: default=["memory"], pulsar=["dep:pulsar"]
+├── Cargo.toml          # features: default=["memory"]；P0 pulsar=[]（P1 改 dep:pulsar）
 ├── src/
 │   ├── lib.rs          # 对外 API + crate 级文档（依赖方向 / 用法 / 风险）
 │   ├── envelope.rs     # Envelope / TopicName / Receipt / Inbound
@@ -186,13 +192,15 @@ crates/mq/
 │   ├── config.rs       # MqConfig::from_env()
 │   ├── memory.rs       # feature "memory"
 │   ├── retry.rs        # 指数退避纯函数
-│   └── pulsar.rs       # feature "pulsar"
+│   └── pulsar.rs       # feature "pulsar"（P1）
 ├── examples/
 │   ├── publish.rs      # required-features = ["pulsar"]
 │   └── subscribe.rs    # required-features = ["pulsar"]
 └── tests/
     ├── envelope.rs     # 无 broker
-    └── pulsar_e2e.rs   # PULSAR_TEST_URL 存在才跑
+    ├── config.rs       # subscription_name / producer_name 契约
+    ├── memory.rs       # 多客户端语义（重复订阅 / fan-out / close）
+    └── pulsar_e2e.rs   # PULSAR_TEST_URL 存在才跑（P1）
 ```
 
 ### 4.4 crate 清单（`crates/mq/Cargo.toml` 目标形态）
@@ -207,8 +215,8 @@ description = "消息总线客户端基建（trait + 内存实现 + 可选 Pulsa
 [features]
 default = ["memory"]
 memory = []
-# 只在显式开启时编译 pulsar 及其 prost 0.13 依赖树
-pulsar = ["dep:pulsar"]
+# P0 先占位（不引入依赖）；P1 接入驱动时改为 ["dep:pulsar"]
+pulsar = []
 
 [dependencies]
 async-trait.workspace = true
@@ -217,7 +225,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-pulsar = {workspace = true, optional = true}
+# P1 再登记 optional 依赖：
+# pulsar = {workspace = true, optional = true}
 
 [[example]]
 name = "publish"
@@ -242,6 +251,10 @@ pub struct Envelope {
     pub id: String,
     /// 逻辑 topic 名（不含 tenant / namespace，便于多环境复用）
     pub topic: String,
+    /// 分区键 / message key：同一 key 的事件在 KeyShared 订阅下保序。
+    /// 由发布方写入（未来集群复制传 `node_id`）；订阅侧不持有该字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition_key: Option<String>,
     /// 业务事件类型，如 "graph.node.upsert"（未来集群复制用；本轮不定义取值）
     pub kind: String,
     /// 多租户隔离（消费端据此选 schema）
@@ -293,9 +306,19 @@ pub struct Inbound {
     pub attributes: BTreeMap<String, String>,
 }
 
+#[async_trait]
 pub trait Subscription: Send + Sync {
-    /// 触发退出：停止拉取 → close consumer（幂等）
-    fn shutdown(&self);
+    /// 触发退出并等待 consumer 关闭（幂等）
+    async fn shutdown(&self) -> Result<(), MqError>;
+}
+
+/// 订阅作用域（来自 `PULSAR_SUBSCRIPTION_SCOPE`，见 §5.2）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscriptionScope {
+    /// 每实例独立订阅，各自全量（默认）
+    Instance,
+    /// 跨副本共享订阅，自动分摊
+    Shared,
 }
 
 #[derive(Debug, Clone)]
@@ -303,8 +326,24 @@ pub struct MqHealth {
     pub enabled: bool,
     pub connected: bool,
     pub brokers: usize,
+    /// 实例标识：多客户端 / 多副本排障定位
+    pub instance_id: String,
+    /// 当前订阅作用域（instance / shared，见 §5.2）
+    pub subscription_scope: SubscriptionScope,
 }
 
+/// 运行态快照：多客户端 / 多订阅排障用
+#[derive(Debug, Clone, Default)]
+pub struct MqStats {
+    /// 已建立的 producer 数（按 topic 去重）
+    pub producers: usize,
+    /// 活跃订阅数
+    pub subscriptions: usize,
+    /// 攒批中尚未收到 receipt 的消息数
+    pub pending_publishes: u64,
+}
+
+#[async_trait]
 pub trait Bus: Send + Sync {
     fn publisher(&self) -> Arc<dyn Publisher>;
     fn subscribe(
@@ -313,22 +352,51 @@ pub trait Bus: Send + Sync {
         handler: Arc<dyn MessageHandler>,
     ) -> Result<Arc<dyn Subscription>, MqError>;
     fn health(&self) -> MqHealth;
+    fn stats(&self) -> MqStats;
+    /// 优雅关闭：停所有订阅 → flush 生产者 → 关闭客户端；幂等
+    async fn close(&self) -> Result<(), MqError>;
+}
+
+/// 订阅类型（mq 自持枚举：默认 `memory` feature 下不引用 pulsar 类型）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MqSubType {
+    Exclusive,
+    Shared,
+    Failover,
+    KeyShared,
+}
+
+/// 订阅首次创建时的起始位置；已有订阅从 cursor 继续，不受它影响
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MqInitialPosition {
+    Latest,
+    Earliest,
 }
 
 /// 订阅规格
 #[derive(Debug, Clone)]
 pub struct SubscriptionSpec {
     pub topic: String,
-    /// 订阅名 = `{PULSAR_SUBSCRIPTION_PREFIX}-{purpose}`
+    /// 订阅名 = `MqConfig::subscription_name(purpose)`（见 §5.2）
     pub subscription: String,
-    pub sub_type: SubType,
-    pub initial_position: InitialPosition,
+    pub sub_type: MqSubType,
+    pub initial_position: MqInitialPosition,
     pub read_compacted: bool,
-    /// 有值则作为 partition_key（按节点保序时传 node_id）
-    pub partition_key: Option<String>,
 }
 
-/// 装配入口：`PULSAR_ENABLED` 为假 → 内存实现；为真且有 feature → 连 broker
+// ===== 装配入口（crates/mq/src/lib.rs）=====
+
+/// 进程级装配（幂等）：生产路径唯一入口。
+/// - `PULSAR_ENABLED` 为假 → 内存实现；
+/// - 为真且有 `pulsar` feature → 连接 broker；
+/// - 重复调用返回已有实例（不会新建连接）。
+pub async fn init(cfg: MqConfig) -> Result<Arc<dyn Bus>, MqError>;
+
+/// 只读获取：未初始化返回 `None`（供 `/healthz` 等无状态读取，不建连）。
+pub fn try_bus() -> Option<Arc<dyn Bus>>;
+
+/// 每次调用都新建客户端：仅供测试 / examples，**生产禁止**。
+/// 重复调用会带来多份连接与 producer 命名压力（见 §5.2）。
 pub async fn from_config(cfg: MqConfig) -> Result<Arc<dyn Bus>, MqError>;
 ```
 
@@ -380,12 +448,111 @@ loop {
 }
 ```
 
+```rust
+// producer 池：同 topic 只建一次；并发首发给 OnceCell 做 single-flight
+let cell = producers
+    .entry(topic.clone())
+    .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
+    .clone();
+let producer = cell
+    .get_or_try_init(|| async {
+        client
+            .producer()
+            .with_topic(&topic)
+            .with_name(producer_name(&cfg, &topic)) // instance / pid / bus_seq / topic_hash
+            .with_options(producer_options(&cfg))
+            .build()
+            .await
+    })
+    .await?;
+
+// 订阅注册表：同进程同订阅名二次 subscribe 直接拒绝，
+// 避免 broker 侧把消息静默分摊给两个 handler
+if subscriptions.contains_key(&spec.subscription) {
+    return Err(MqError::AlreadySubscribed {
+        subscription: spec.subscription,
+    });
+}
+```
+
 约定：
 
 1. **只用 `send`** 走关键路径（`send_non_blocking` 在攒批下返回早于落 broker，不作为「发布成功」依据）；
 2. `Envelope` 实现 `SerializeMessage`（`serde_json::to_vec`）与 `DeserializeMessage`（`serde_json::from_slice`）；
 3. 同时把 `trace_id` / `tenant_id` / `schema_version` 冗余写入 Pulsar `properties`，便于 broker 侧排查；
-4. 退出必须 `flush()` + `close()`，避免攒批丢失。
+   `Envelope.partition_key` 通过 message key 写入（`MessageBuilder::with_key`），**不是** property；
+4. 退出必须 `flush()` + `close()`，避免攒批丢失；
+5. **producer 命名必须唯一**：`{PULSAR_PRODUCER_NAME}-{instance_id}-{pid}-{bus_seq}-{topic_hash}`。
+   Pulsar 的 producer 名在 topic 内唯一，同名二次连接会被 broker 拒绝（§3.3）；
+6. **producer 复用 + single-flight**：`DashMap<完整 topic, Arc<OnceCell<Producer>>>`，禁止每条消息新建 producer；
+7. **订阅注册表**：同进程同订阅名二次 `subscribe` 返回 `AlreadySubscribed`；同名但类型 / 位点不同返回 `SubscriptionConflict`；
+8. **关闭顺序固定**：`Bus::close()` = 停订阅（`shutdown().await`）→ `flush()` → `client.close()`，幂等，并用 `PULSAR_OP_TIMEOUT_SECS` 做超时兜底；
+9. **类型映射只在驱动内**：`MqSubType` / `MqInitialPosition` 在 `pulsar.rs` 内映射为 `pulsar::proto::command_subscribe::SubType` 与 `InitialPosition`，`mq` 的公共 API 不出现 pulsar 类型。
+
+### 5.2 多客户端与多实例语义
+
+「多个客户端」在本方案里分四层，规则各不相同：
+
+| 层级 | 实体 | 创建点 | 多份时的后果 | 本方案处理 |
+|---|---|---|---|---|
+| L1 | Pulsar 连接客户端（`pulsar::Pulsar`） | `Pulsar::builder().build()` | 每个 broker 多一条连接 + 一次 TLS 握手 | 由 L2 单例收敛，不直接暴露 |
+| L2 | `Bus` 实例 | `mq::init(cfg)` / `from_config(cfg)` | 多连接、producer 命名压力、无法统一关闭 | **生产只调 `init()`**（幂等）；`from_config()` 仅供测试 / examples |
+| L3 | producer / consumer | `Bus::publisher()` / `Bus::subscribe()` | producer 按 topic 复用；consumer 按订阅名在 broker 侧聚合 | producer 池 + 订阅注册表 |
+| L4 | 跨进程副本 | 各进程独立 `init()` | 订阅名相同 = 分摊；不同 = 广播 | `PULSAR_SUBSCRIPTION_SCOPE` 显式选择 |
+
+#### 5.2.1 同一 `Bus` 上多次 `subscribe()`
+
+| 条件 | broker 行为 | 业务表现 |
+|---|---|---|
+| 不同 `purpose` → 不同订阅名 | 两个独立订阅 | 各自收到**全量**消息（fan-out），符合预期 |
+| 同 `purpose` + `Shared` / `KeyShared` | 同一订阅下两个 consumer | 消息被**分摊**，每个 handler 只看到一部分 |
+| 同 `purpose` + `Exclusive` | 第二个 consumer 被拒 | `ConsumerBusy`，`subscribe` 返回错误 |
+| 同订阅名但 `sub_type` / `initial_position` 不同 | broker 拒绝（订阅类型不可变） | 报错信息不直观 |
+| 同订阅名 + `earliest` | 仅订阅**首次创建**时生效 | 不回放已 ack 历史 |
+
+> 本方案的选择：**同 `Bus` 内由订阅注册表拒绝重复订阅**（启动期报错），而不是让 broker 静默分摊一半消息。
+
+#### 5.2.2 跨进程 / 多副本
+
+| `PULSAR_SUBSCRIPTION_SCOPE` | 订阅名 | 适用场景 | 行为 |
+|---|---|---|---|
+| `instance`（默认） | `{prefix}-{instance_id}-{purpose}` | 单机、桌面端、需要每实例全量（审计 / 本地缓存） | 每副本独立订阅，**各自全量消费** |
+| `shared` | `{prefix}-{purpose}` | K8s 多副本、trustgraph 集群节点 | 同名订阅自动分摊，**每条消息只被处理一次** |
+
+约束与注意事项：
+
+1. `shared` 只解决**跨进程分摊**，不解决「同进程多 Bus」；同进程由 `init()` 单例 + 订阅注册表保证。
+2. 同机多进程必须让 `instance_id` 互异：显式 `PULSAR_INSTANCE_ID`，或使用不同的 `SNOWFLAKE_WORKER_ID`（后者本身也是雪花唯一性的前置条件）。
+3. 切换 `scope` / `prefix` 会生成**新订阅名**，旧 cursor 留在 broker：新订阅按 `initial_position` 重新开始，需要引导时走 §6 的两段式流程。
+4. 启动时 `info!` 打印 `instance_id` / `subscription_scope` / 解析后的订阅名，便于确认「分摊还是广播」。
+5. `shared` + `KeyShared` 下新增 consumer 只接收其分到的 key 范围，**不会**补齐其他 consumer 已 ack 的历史。
+
+```rust
+// crates/mq/src/config.rs —— 订阅名唯一解析入口，调用方禁止手拼
+impl MqConfig {
+    pub fn subscription_name(&self, purpose: &str) -> Result<String, MqError> {
+        validate_purpose(purpose)?; // ^[a-z0-9][a-z0-9._-]{0,63}$
+        Ok(match self.subscription_scope {
+            SubscriptionScope::Instance =>
+                format!("{}-{}-{}", self.subscription_prefix, self.instance_id, purpose),
+            SubscriptionScope::Shared =>
+                format!("{}-{}", self.subscription_prefix, purpose),
+        })
+    }
+}
+
+// crates/mq/src/pulsar.rs —— 即使两个 Bus 配置完全相同也不会撞名（pid + 进程内自增）
+fn producer_name(cfg: &MqConfig, full_topic: &str) -> String {
+    format!(
+        "{}-{}-{}-{}-{:08x}",
+        cfg.producer_name,
+        cfg.instance_id,
+        std::process::id(),
+        next_bus_seq(),          // 进程内 AtomicU64
+        fnv1a(full_topic),       // 轻量 hash，不引新依赖
+    )
+}
+```
 
 ---
 
@@ -395,14 +562,18 @@ loop {
 |---|---|---|
 | topic 形态 | `persistent://{tenant}/{namespace}/{logical}` | 契约已定，不建 topic |
 | logical 命名 | `tg.{cluster_id}.graph.{shard}`（未来） | 仅文档预留 |
-| 分区键 | `node_id`（同一节点的事件保序） | 字段已预留 `partition_key` |
-| 订阅类型 | `KeyShared`（多节点分摊 + 按 key 保序） | 已支持配置 |
-| 新节点加入 | `initial_position = earliest` +（P2 评估）`read_compacted = true` | 已支持配置 |
-| 幂等 | `id` + `seq` + 消费端水位 | 字段已预留 |
+| 分区键 | `node_id`（同一节点的事件保序） | `Envelope.partition_key` → message key；订阅侧不再持有 |
+| 订阅类型 | `KeyShared`（多节点分摊 + 按 key 保序） | 已支持配置（`MqSubType::KeyShared`） |
+| 新节点加入 | 两段式：独立 `bootstrap` 订阅（`earliest` / `read_compacted`）拉全量 → 追平后切共享订阅收增量 | 机制已写进契约，本轮不实现节点 |
+| 幂等 | `id` + `seq` + 消费端水位；`id` 发布前生成一次，多副本 `worker_id` 互异 | 字段已预留 |
 | 死信 | `{topic}{dlq_suffix}`，默认后缀 `.dlq` | 已支持配置 |
 | 交付语义 | 至少一次（at-least-once） | 明确写入契约 |
 
 > 本轮**不定义** `kind` 的取值集合、不定义 `payload` 结构、不创建任何 topic —— 这些等内核 Phase 2–5 完成后由《trustgraph 图集群设计方案》定义。
+
+> ⚠️ **既有订阅不回放**：`initial_position` 只在订阅**首次创建**时生效。节点加入一条已经消费过的 `shared` 订阅，只能拿到加入之后的增量，无法补齐其他节点已 ack 的历史；历史必须走独立的 `bootstrap` 订阅（`earliest` 或压缩 topic 的 `read_compacted`）。
+>
+> ⚠️ **订阅名决定语义**：`instance` / `shared` 与 `{prefix}-{purpose}` 的解析规则见 §5.2；切换 scope / prefix 等于换订阅，旧 cursor 不会迁移。
 
 ---
 
@@ -417,18 +588,22 @@ loop {
 | `PULSAR_TOKEN` | — | token 认证串（**不落日志**，与 `JWT_SECRET` 同待遇） |
 | `PULSAR_TLS_CA_FILE` / `PULSAR_TLS_VERIFY_HOSTNAME` | 空 / `true` | 私有 CA 场景 |
 | `PULSAR_CONNECT_TIMEOUT_SECS` / `PULSAR_OP_TIMEOUT_SECS` | `10` / `30` | 建连 / 操作超时 |
-| `PULSAR_PRODUCER_NAME` | `assets-{hostname}` | broker 侧定位 |
+| `PULSAR_PRODUCER_NAME` | `assets` | 最终名 = `{name}-{instance_id}-{pid}-{bus_seq}-{topic_hash}`（broker 侧定位） |
+| `PULSAR_INSTANCE_ID` | `{hostname}-{worker_id}` | 实例标识；同机多进程 / 容器同名时必须显式覆盖 |
 | `PULSAR_BATCH_SIZE` / `PULSAR_BATCH_DELAY_MS` | `100` / `10` | 攒批 |
 | `PULSAR_COMPRESSION` | `lz4` | `none` / `lz4` / `zlib` / `zstd` / `snappy` |
-| `PULSAR_SUBSCRIPTION_PREFIX` | `{hostname}-{worker_id}` | 订阅名 = `{prefix}-{purpose}` |
-| `PULSAR_SUBSCRIPTION_TYPE` | `key_shared` | `exclusive` / `shared` / `failover` / `key_shared` |
+| `PULSAR_SUBSCRIPTION_PREFIX` | `assets` | 业务前缀（不含实例信息）；订阅名由 `MqConfig::subscription_name(purpose)` 生成 |
+| `PULSAR_SUBSCRIPTION_SCOPE` | `instance` | `instance`（每实例独立全量）/ `shared`（跨副本分摊）；见 §5.2 |
+| `PULSAR_SUBSCRIPTION_TYPE` | `key_shared` | `exclusive` / `shared` / `failover` / `key_shared`；仅默认值，`SubscriptionSpec` 可按 `purpose` 覆盖 |
 | `PULSAR_INITIAL_POSITION` | `latest` | `latest` / `earliest` |
 | `PULSAR_READ_COMPACTED` | `false` | 压缩 topic 直读「每 key 最新值」 |
 | `PULSAR_RECEIVER_QUEUE_SIZE` | `1000` | 消费端预取队列 |
 | `PULSAR_MAX_REDELIVER` / `PULSAR_DLQ_SUFFIX` | `5` / `.dlq` | 死信阈值与后缀 |
 | `PULSAR_PUBLISH_RETRY_MAX` | `3` | 发布重试次数（指数退避） |
-| `PULSAR_FAIL_MODE` | `fail_closed` | `fail_closed` 返回错误 / `fail_open` 仅 WARN |
+| `PULSAR_FAIL_MODE` | `fail_closed` | `fail_closed` 返回错误 / `fail_open` 装配 `DegradedBus` 并仅 WARN（`publish` 仍返回 `Err`，不伪造成功） |
 
+> 订阅名解析：`instance` → `{prefix}-{instance_id}-{purpose}`；`shared` → `{prefix}-{purpose}`。启动日志会打印解析结果；切换 scope / prefix 会生成新订阅（旧 cursor 不迁移）。
+>
 > ⚠️ `ack_timeout` 与「未 ack 重投间隔」**不在客户端配置**（pulsar-rs 6.9.1 的 `ConsumerOptions` 无对应字段），只能在 broker 的 namespace policy 上设置。运维改环境变量不会生效。
 
 读取方式对齐 `crates/gateway/src/config.rs`：`MqConfig::from_env()` 一次性读入，热路径不再 `std::env::var`。
@@ -439,14 +614,18 @@ loop {
 
 | 场景 | 行为 |
 |---|---|
-| 建连失败 | `from_config` 返回 `MqError::Connect`；**不 panic、不阻塞调用方**（由使用方决定降级） |
+| 建连失败 | `init()` / `from_config()` 返回 `MqError::Connect`；**不 panic、不阻塞调用方**（由使用方决定降级） |
 | 断连重连 | 依赖 pulsar-rs 内建指数退避重连；`health()` 反映 `connected` |
 | 发布失败 | 按 `publish_retry_max` 重试；仍失败则按 `fail_mode` 返回错误或 WARN |
 | 处理失败 | nack → 重投；超过 `max_redeliver_count` → 投递到 DLQ |
-| 攒批丢失风险 | 退出路径强制 `flush()` + `close()`；禁止直接 drop |
+| 攒批丢失风险 | 退出统一走 `Bus::close()`：停订阅 → `flush()` → `client.close()`；禁止直接 drop |
 | 反压 | `receiver_queue_size` 限制预取；`block_queue_if_full = true` 让生产端阻塞而非丢弃 |
-| 顺序性 | 仅 `KeyShared` + `partition_key` 保证「同 key 有序」；**不承诺全局有序** |
-| 多实例 | 同一订阅名 + `Shared`/`KeyShared` 自动分摊；不同订阅名 = 各自独立全量消费 |
+| 顺序性 | 仅 `KeyShared` + `Envelope.partition_key`（message key）保证「同 key 有序」；**不承诺全局有序** |
+| 多客户端（同进程） | 生产只调 `init()`：进程内一个 `Bus`；`from_config()` 仅测试 / examples，重复调用会产生多连接 |
+| 同 `Bus` 重复订阅 | 同订阅名二次 `subscribe` → `AlreadySubscribed`；同名不同类型 → `SubscriptionConflict` |
+| 多副本 `shared` | 相同订阅名 + `Shared`/`KeyShared` → 自动分摊，每条消息只处理一次 |
+| 多副本 `instance` | 订阅名含 `instance_id` → 各副本独立全量消费（审计 / 本地缓存） |
+| 新节点加入 | 既有订阅不回放已 ack 历史；必须走独立 `bootstrap` 订阅（earliest / read_compacted）再切共享订阅 |
 
 ---
 
@@ -463,18 +642,26 @@ pub enum MqError {
     Config(String),
     #[error("建连失败：{0}")]
     Connect(String),
-    #[error("发布失败（topic={topic}）：{source}")]
-    Publish { topic: String, source: String },
-    #[error("订阅失败（topic={topic}）：{source}")]
-    Subscribe { topic: String, source: String },
+    #[error("发布失败（topic={topic}）：{detail}")]
+    Publish { topic: String, detail: String },
+    #[error("订阅失败（topic={topic}）：{detail}")]
+    Subscribe { topic: String, detail: String },
     #[error("信封序列化 / 反序列化失败：{0}")]
     Codec(String),
     #[error("topic 非法：{0}")]
     InvalidTopic(String),
+    #[error("订阅已存在（同进程重复订阅）：{subscription}")]
+    AlreadySubscribed { subscription: String },
+    #[error("订阅配置冲突（同名但类型 / 位点不同）：{subscription}")]
+    SubscriptionConflict { subscription: String },
+    #[error("消息总线已关闭")]
+    Closed,
 }
 ```
 
 约定：`mq` 的 `MqError` **不实现** `Into<api::ApiError>`（避免 trait crate 反向依赖 `api`）；未来接线时由使用方在边界处转换。
+
+> `fail_open` 语义：建连失败不 panic，装配 `DegradedBus`（`health().connected = false`），`publish` 仍返回 `Err(MqError::Disabled)` 且只 WARN 一次；**不返回假的 `Ok`**，避免调用方误以为消息已发出。
 
 ---
 
@@ -482,10 +669,10 @@ pub enum MqError {
 
 | 项 | 方案 |
 |---|---|
-| 日志 / 追踪 | 启用 pulsar `telemetry` feature，client 内部日志并入 `tracing`（与 `utils::logging` 同一 subscriber） |
+| 日志 / 追踪 | 启用 pulsar `telemetry` feature，client 内部日志并入 `tracing`（与 `utils::logging` 同一 subscriber）；mq 自身日志统一带 `mq.instance` / `mq.subscription` / `mq.topic` 字段 |
 | Span | 发布：`tracing::debug_span!("mq.publish", messaging.system="pulsar", messaging.destination=..)`；消费：`mq.consume` + `messaging.message_id` |
 | 属性命名 | 对齐 OTel Messaging 语义约定，便于现有 `otel-collector-config.yaml` 直接接收 |
-| 健康 | `Bus::health()` 返回 `{enabled, connected, brokers}`；本轮**不挂到** `/healthz`（零接线），由未来使用方接入 |
+| 健康 | `Bus::health()` 返回 `{enabled, connected, brokers, instance_id, subscription_scope}`；`Bus::stats()` 返回 `{producers, subscriptions, pending_publishes}`；本轮**不挂到** `/healthz`（零接线），由未来使用方接入 |
 | 脱敏 | `PULSAR_TOKEN` 不打印；日志只打 scheme + broker 数量，不打完整 URL 的凭据部分 |
 
 ---
@@ -494,9 +681,11 @@ pub enum MqError {
 
 | 层级 | 内容 | 命令 |
 |---|---|---|
-| 单测（无 broker） | 信封序列化 / 版本兼容 / `TopicName` 解析（合法与非法：大写、空、超长、`//`、`;`）/ 退避曲线 / 内存实现投递与背压 | `cargo test -p mq` |
+| 单测（无 broker） | 信封序列化 / `partition_key` 兼容（缺省字段）/ 版本兼容 / `TopicName` 解析（合法与非法：大写、空、超长、`//`、`;`）/ 退避曲线 / 内存实现投递与背压 | `cargo test -p mq` |
+| 多客户端单测 | `subscription_name`（`instance` 含 `instance_id`、`shared` 不含）；`purpose` 非法值；同 `Bus` 重复订阅拒绝；同 Bus 并发首发同一 topic 只建 1 个 producer；`close()` 幂等 | `cargo test -p mq` |
 | 编译验证 | Pulsar 驱动在无 broker 环境下可编译 | `cargo check -p mq --features pulsar` |
 | 集成（可选） | 发布→消费→ack；nack 重投；超限进 DLQ；断连重连；优雅退出不丢消息 | `docker compose --profile mq up -d` → `PULSAR_TEST_URL=... cargo test -p mq --features pulsar --test pulsar_e2e` |
+| 多客户端集成 | `shared` 两 Bus 处理计数之和 = N；`instance` 两 Bus 各收 N；两 Bus producer 名不冲突；`bootstrap` 订阅收到历史而常驻订阅只收增量 | 同上 |
 | 零影响验证 | 默认依赖树不含 pulsar | `cargo tree -p mq`（不得出现 `pulsar` / `prost v0.13`） |
 | 手测 | 示例对跑 100 条 + 观察 `health()` | `cargo run -p mq --features pulsar --example publish` / `subscribe` |
 
@@ -510,9 +699,9 @@ pub enum MqError {
 
 | 阶段 | 内容 | 工作量 | 验收信号 |
 |---|---|---|---|
-| **P0** | `crates/mq` 骨架：`Cargo.toml`（features 门控）+ `lib.rs` / `envelope.rs` / `error.rs` / `config.rs` / `memory.rs` / `retry.rs` + 根 `Cargo.toml` 登记 + `tests/envelope.rs` | 0.5 天 | `cargo test -p mq` 通过；`cargo tree -p mq` 无 pulsar |
-| **P1** | `src/pulsar.rs`（Publisher / Subscriber / 重连 / 死信 / 优雅退出 / token 认证）+ `examples/{publish,subscribe}.rs` + `tests/pulsar_e2e.rs` + `docker-compose.yml` 增 `pulsar`（profile `mq`，standalone） | 1 天 | 对跑 100 条不丢；kill 客户端后自动重连 |
-| **P2** | 本文档 + `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + `TODO.md` 条目 | 0.5 天 | 文档链接可达、条目编号不冲突 |
+| **P0** | `crates/mq` 骨架：`Cargo.toml`（features 门控）+ `lib.rs`（`init` / `try_bus` / `from_config` / `Bus::close`）/ `envelope.rs`（含 `partition_key`）/ `error.rs`（`AlreadySubscribed` 等）/ `config.rs`（`SubscriptionScope` / `instance_id` / `subscription_name()`）/ `memory.rs` / `retry.rs` + 根 `Cargo.toml` 登记 + `tests/envelope.rs` | 0.75 天 | `cargo test -p mq` 通过；`cargo tree -p mq` 无 pulsar；`subscription_name` 两分支单测通过 |
+| **P1** | `src/pulsar.rs`（Publisher / Subscriber / producer 池 + single-flight / 订阅注册表 / 重连 / 死信 / 优雅退出 / token 认证）+ `examples/{publish,subscribe}.rs` + `tests/pulsar_e2e.rs`（含多客户端用例）+ `docker-compose.yml` 增 `pulsar`（profile `mq`，standalone） | 1.25 天 | 对跑 100 条不丢；kill 客户端后自动重连；`shared` 分摊计数 = N；`instance` 各自全量 |
+| **P2** | 本文档 v0.2（多客户端 / 多实例语义）+ `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + `TODO.md` 条目 | 0.5 天 | 文档链接可达、条目编号不冲突 |
 
 ### 12.2 变更文件清单（代码阶段）
 
@@ -542,6 +731,10 @@ pub enum MqError {
 | R7 | 若误把 feature 设为默认，`cargo build --workspace` 变慢 | CI 时间上升 | `default = ["memory"]`；CI 增加一条 `cargo tree` 断言 |
 | R8 | 驱动升级（6.x → 7.x）破坏 API | 返工 | 驱动隔离在 `src/pulsar.rs` 单文件内，其余代码只依赖 trait |
 | R9 | 集群节点实现时发现信封字段不足（如缺 `partition` 路由信息） | 需要改契约 | `schema_version` + JSON payload 允许扩展；必要时新增可选字段（不破坏旧消费端） |
+| R10 | 默认 `scope=instance` 导致多副本重复消费 | 重复写图 / 重复计费 | 集群部署必须显式 `PULSAR_SUBSCRIPTION_SCOPE=shared`；启动日志打印解析后的订阅名；§5.2 表格化 |
+| R11 | 同机多进程 `instance_id` 相同 → 订阅名相同 | 两个进程静默分摊消息 | 显式 `PULSAR_INSTANCE_ID`；`SNOWFLAKE_WORKER_ID` 必须互异；启动期打印 `instance_id` |
+| R12 | 新节点加入既有订阅无法回放 | 图状态缺失 | 两段式引导：`bootstrap` 订阅（`earliest` / `read_compacted`）→ 追平后切共享订阅 |
+| R13 | 同进程误用 `from_config` 建多个 `Bus` | 多连接 + producer 命名压力 | 生产只暴露 `init()`；`from_config` 文档标注测试专用；producer 名含 `pid` / `bus_seq` |
 
 ---
 
@@ -555,6 +748,8 @@ pub enum MqError {
 | 先做业务事件（`graph.node.upsert`）再做客户端 | 内核 `model.rs` 仍是骨架，事件形状必返工 |
 | 本轮就接 `/healthz` 与启动初始化 | 与「零接线」目标冲突，且桌面端无意义 |
 | `admin-api` 特性（Pulsar Admin REST） | 强制引入 `reqwest + native-tls`；需要建 topic 时用本仓已有 reqwest(rustls) 直连 Admin REST |
+| 进程内允许多个 `Bus` 并存（不做单例） | 多连接 + producer 命名压力 + 无法统一关闭；多客户端语义会退化成「每个 Bus 各自一套订阅」 |
+| 多副本默认 `shared`（不分 scope） | 单机多进程调试时互相抢消息；`instance` / `shared` 必须在配置上显式可选 |
 
 ---
 
@@ -562,8 +757,10 @@ pub enum MqError {
 
 ```text
 节点 A ──publish──► persistent://public/default/tg.{cluster}.graph.{shard}
-                          │  partition_key = node_id
-                          │  subscription = {prefix}-graph-replicate（KeyShared）
+                          │  Envelope.partition_key = node_id（message key）
+                          │  subscription = {prefix}-graph-replicate
+                          │    scope = shared + KeyShared（多节点分摊）
+                          │  新节点引导：{prefix}-{node_id}-bootstrap（earliest）
 节点 B ◄──consume─────────┘
   └─ 应用到本地 trustgraph-lite 内核（内核不感知 Pulsar）
 ```
@@ -577,3 +774,4 @@ pub enum MqError {
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-11-18 | v0.1 | 首版：确定「只做客户端基建」范围、`pulsar 6.9.1` + rustls(ring) 选型、单 crate 双 feature 布局、信封与配置契约 |
+| 2026-11-19 | v0.2 | 补充「多客户端 / 多实例」语义（§5.2）：进程内 `Bus` 单例、producer 池 + 订阅注册表、`PULSAR_SUBSCRIPTION_SCOPE`；`partition_key` 移入 `Envelope`；`Bus::close` / `MqStats` / 新错误变体；修正新节点回放边界 |
