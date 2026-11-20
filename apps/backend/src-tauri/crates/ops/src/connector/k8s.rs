@@ -73,6 +73,82 @@ impl K8sConnector {
     pub fn namespace(&self) -> Option<&str> {
         self.config.namespace.as_deref()
     }
+
+    /// 读取 Pod 的容器名（终端 / 日志的容器下拉；Pod 不存在时返回可读错误）
+    ///
+    /// 只调用 `GET pods/{name}`，不读取容器内容；多容器 Pod 必须由调用方显式选择。
+    ///
+    /// # Errors
+    ///
+    /// 命名空间 / Pod 名为空返回 [`OpsError::Config`]；Pod 不存在按 404 归类。
+    pub async fn pod_containers(&self, namespace: &str, pod: &str) -> OpsResult<Vec<String>> {
+        let namespace = namespace.trim();
+        let pod = pod.trim();
+        if namespace.is_empty() || pod.is_empty() {
+            return Err(OpsError::Config(
+                "命名空间与 Pod 名不能为空".to_string(),
+            ));
+        }
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let object = api
+            .get(pod)
+            .await
+            .map_err(|err| map_kube_error("GET pods", err))?;
+        Ok(object
+            .spec
+            .map(|spec| spec.containers.into_iter().map(|item| item.name).collect())
+            .unwrap_or_default())
+    }
+
+    /// 校验 Pod 内的容器处于 Running（终端开会话前必须确认）
+    ///
+    /// 多容器 Pod 未指定容器时返回容器列表，由调用方决定默认容器。
+    ///
+    /// # Errors
+    ///
+    /// Pod 不存在 / 容器名不匹配 / 容器未运行均返回可读错误。
+    pub async fn ensure_container_running(
+        &self,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+    ) -> OpsResult<Vec<String>> {
+        let containers = self.pod_containers(namespace, pod).await?;
+        let target = container
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(name) = target
+            && !containers.iter().any(|item| item == name)
+        {
+            return Err(OpsError::Api(format!(
+                "Pod {namespace}/{pod} 中不存在容器 {name}"
+            )));
+        }
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let object = api
+            .get(pod)
+            .await
+            .map_err(|err| map_kube_error("GET pods", err))?;
+        let statuses = object
+            .status
+            .as_ref()
+            .and_then(|status| status.container_statuses.as_ref());
+        let name = target
+            .map(ToString::to_string)
+            .or_else(|| containers.first().cloned())
+            .ok_or_else(|| OpsError::Api(format!("Pod {namespace}/{pod} 没有容器")))?;
+        let running = statuses
+            .and_then(|statuses| statuses.iter().find(|status| status.name == name))
+            .and_then(|status| status.state.as_ref())
+            .and_then(|state| state.running.as_ref())
+            .is_some();
+        if !running {
+            return Err(OpsError::Api(format!(
+                "容器 {name} 未在运行，无法打开终端"
+            )));
+        }
+        Ok(containers)
+    }
 }
 
 /// 依据认证方式构建 kube [`Config`]，并把超时预算写进去
@@ -703,12 +779,19 @@ fn decorate_pod(object: &Pod, mut record: ResourceRecord) -> ResourceRecord {
                 .sum::<i32>()
         })
         .unwrap_or(0);
+    // 容器名列表供前端「日志 / 指标 / 终端」的容器下拉直接使用，避免二次查询
+    let container_names: Vec<String> = object
+        .spec
+        .as_ref()
+        .map(|spec| spec.containers.iter().map(|item| item.name.clone()).collect())
+        .unwrap_or_default();
     record.attributes = serde_json::json!({
         "node_name": node_name,
         "pod_ip": object.status.as_ref().and_then(|status| status.pod_ip.clone()),
         "qos_class": object.status.as_ref().and_then(|status| status.qos_class.clone()),
         "restart_count": restarts,
         "container_count": object.spec.as_ref().map(|spec| spec.containers.len()),
+        "container_names": container_names,
     });
     record
 }

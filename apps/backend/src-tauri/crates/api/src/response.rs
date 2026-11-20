@@ -140,6 +140,8 @@ impl IntoResponse for ApiError {
             409 => StatusCode::CONFLICT,
             429 => StatusCode::TOO_MANY_REQUESTS,
             503 => StatusCode::SERVICE_UNAVAILABLE,
+            // 容器日志 / 性能：上游（Docker daemon / APIServer）超时
+            504 => StatusCode::GATEWAY_TIMEOUT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
 

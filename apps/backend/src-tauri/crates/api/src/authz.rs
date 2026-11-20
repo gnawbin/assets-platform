@@ -337,6 +337,38 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ),
     ("GET", "/api/ops/links", "ops:resource:list"),
     ("POST", "/api/ops/links/{linkId}/bind", "ops:link:bind"),
+    // ===== 容器日志 / 性能 / 终端 =====
+    (
+        "GET",
+        "/api/ops/connections/{connectionId}/containers/{container}/logs",
+        "ops:container:logs",
+    ),
+    (
+        "GET",
+        "/api/ops/connections/{connectionId}/containers/{container}/stats",
+        "ops:container:stats",
+    ),
+    (
+        "GET",
+        "/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/logs",
+        "ops:pod:logs",
+    ),
+    (
+        "GET",
+        "/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/metrics",
+        "ops:pod:metrics",
+    ),
+    ("POST", "/api/ops/terminal/sessions", "ops:terminal:exec"),
+    (
+        "DELETE",
+        "/api/ops/terminal/sessions/{sessionId}",
+        "ops:terminal:exec",
+    ),
+    (
+        "GET",
+        "/api/ops/terminal/sessions/{sessionId}/ws",
+        "ops:terminal:exec",
+    ),
     // ===== 运维终端（SSH）=====
     // 权限点遵守「模块:资源[:动作]」，SSH 单独作为模块：ssh:target:* / ssh:session:*
     ("GET", "/api/ops/ssh/targets", "ssh:target:list"),

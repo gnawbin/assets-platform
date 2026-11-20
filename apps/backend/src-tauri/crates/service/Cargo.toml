@@ -28,6 +28,8 @@ jsonwebtoken.workspace = true
 parser.workspace = true
 # 运维采集（Docker / Swarm / K8s 只读连接器）；feature 在这里一次打开，api 与 tauri 层共用
 ops = {workspace = true, features = ["docker", "k8s"]}
+# 容器终端（exec）独立 crate：Docker + K8s backend，绝不复用只读采集链路
+ops-exec.workspace = true
 # 远程终端传输（SSH）：本 crate 一次性打开 ssh feature，api / tauri 层共享
 remote-shell = {workspace = true, features = ["ssh"]}
 rand.workspace = true

@@ -1,6 +1,8 @@
 pub mod assets_categories_service;
 pub mod assets_service;
 pub mod api_key_service;
+pub mod container_exec_service;
+pub mod container_probe_service;
 pub mod conversation_service;
 pub mod department_service;
 pub mod doc_parser;

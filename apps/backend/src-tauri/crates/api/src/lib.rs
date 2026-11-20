@@ -9,6 +9,7 @@ pub mod auth;
 pub mod authz;
 pub mod category_routes;
 pub mod chat_routes;
+pub mod container_routes;
 pub mod conversation_routes;
 pub mod department_routes;
 pub mod health;
@@ -164,6 +165,9 @@ pub async fn start_http_server_with(
 
     // ===== SSH 会话空闲回收（方案 §4.3）：进程内只启动一次 =====
     service::ssh_service::spawn_idle_reaper();
+
+    // ===== 容器终端会话空闲回收（仅 OPS_CONTAINER_EXEC_ENABLED=true 时生效）=====
+    service::container_exec_service::spawn_idle_reaper();
 
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
@@ -341,6 +345,26 @@ pub async fn build_router(
         )
         .with_state(ssh_state);
 
+    // 容器终端：开会话（REST）与终端通道（WS）共用票据状态。
+    // 与 SSH 同构：只有 REST 那个子 router 叠 auth / authz 中间件。
+    let container_state = std::sync::Arc::new(container_routes::ContainerRouterState {
+        tickets: ssh_ticket::store(),
+    });
+    let container_open_router = Router::new()
+        .route(
+            "/api/ops/terminal/sessions",
+            post(container_routes::open_session),
+        )
+        .with_state(container_state.clone())
+        .layer(middleware::from_fn(authz::authz_middleware))
+        .layer(middleware::from_fn(auth_middleware));
+    let container_ws_router = Router::new()
+        .route(
+            "/api/ops/terminal/sessions/{sessionId}/ws",
+            get(container_routes::session_ws),
+        )
+        .with_state(container_state);
+
     // 合并所有路由（外部注入的路由在顶层合并，不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
     let has_extra_routes = extra_routes.is_some();
     let mut app = create_router(pool)
@@ -348,7 +372,9 @@ pub async fn build_router(
         .merge(chat_router)
         .merge(conversation_router)
         .merge(ssh_open_router)
-        .merge(ssh_ws_router);
+        .merge(ssh_ws_router)
+        .merge(container_open_router)
+        .merge(container_ws_router);
 
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
@@ -683,6 +709,23 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/ops/connections/{id}/collect", post(ops_routes::collect_now))
         .route("/api/ops/links", get(ops_routes::list_links))
         .route("/api/ops/links/{linkId}/bind", post(ops_routes::bind_link))
+        // 容器日志 / 性能（只读）；终端开会话与 WS 需要票据状态，在 build_router 里单独装配
+        .route(
+            "/api/ops/connections/{connectionId}/containers/{container}/logs",
+            get(container_routes::container_logs),
+        )
+        .route(
+            "/api/ops/connections/{connectionId}/containers/{container}/stats",
+            get(container_routes::container_stats),
+        )
+        .route(
+            "/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/logs",
+            get(container_routes::pod_logs),
+        )
+        .route(
+            "/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/metrics",
+            get(container_routes::pod_metrics),
+        )
         // 运维终端（SSH）：除「开会话」与 WS 之外的 6 条 REST
         // 注：「开会话」与 WS 需要票据状态，在 build_router 里单独装配
         .route(

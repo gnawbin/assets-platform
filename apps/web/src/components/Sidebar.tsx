@@ -27,6 +27,7 @@ import {
   IconStack2,
   IconHierarchy,
   IconChevronDown,
+  IconBox,
 } from '@tabler/icons-react';
 
 import { getUserMenus, type MenuItem } from '@/services/menuService';
@@ -46,6 +47,8 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   IconHierarchy: <IconHierarchy size={18} />,
   IconServer: <IconServer size={18} />,
   IconStack2: <IconStack2 size={18} />,
+  // 菜单 63「容器运维」
+  IconBox: <IconBox size={18} />,
 };
 
 

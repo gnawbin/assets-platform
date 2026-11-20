@@ -47,6 +47,8 @@ llm = {path = "crates/llm"}
 llm-anthropic = {path = "crates/llm-anthropic"}
 llm-openai = {path = "crates/llm-openai"}
 ops = {path = "crates/ops"}
+# 容器终端（exec）：独立的写操作 crate，Docker + K8s backend
+ops-exec = {path = "crates/ops-exec"}
 parser = {path = "crates/parser"}
 # 远程终端传输：只放 SSH 协议与字节流（零 HTTP / 零数据库），
 # 会话编排、审计与 WebSocket 桥接在 service / api 层

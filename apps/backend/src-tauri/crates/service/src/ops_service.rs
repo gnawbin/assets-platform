@@ -140,6 +140,9 @@ pub struct OpsConnectionInput {
     pub poll_interval_secs: Option<u32>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// 是否允许容器终端（默认 false；终端环境开关之外的连接级开关）
+    #[serde(default)]
+    pub exec_enabled: Option<bool>,
 }
 // ======================== 出参 DTO ========================
 
@@ -160,6 +163,8 @@ pub struct OpsConnectionView {
     pub max_items: usize,
     pub poll_interval_secs: u32,
     pub enabled: bool,
+    /// 是否允许容器终端（默认关闭）
+    pub exec_enabled: bool,
     /// 连接层级：local / intranet / remote（仅用于界面风险提示）
     pub tier: String,
     /// 风险提示文案（明文 TCP、跳过 TLS 校验等）
@@ -430,7 +435,8 @@ pub fn auth_kind_to_payload(kind: &AuthKind) -> Option<OpsAuthPayload> {
 /// `ops_connection` 的显式列清单（与 `OpsConnection` 字段一一对应）
 const CONNECTION_COLUMNS: &str = "id, connection_name, provider, endpoint, auth_type, auth_config_enc, \
      credential_hint, namespace, timeout_secs, docker_api_version, max_items, poll_interval_secs, \
-     enabled, last_collect_at, last_error, created_by, created_at, updated_by, updated_at, deleted";
+     enabled, exec_enabled, last_collect_at, last_error, created_by, created_at, updated_by, \
+     updated_at, deleted";
 
 /// 认证方式是否携带需要加密保存的凭证
 fn auth_requires_credential(auth_type: &str) -> bool {
@@ -592,6 +598,7 @@ fn row_to_view(row: &OpsConnection) -> OpsConnectionView {
         max_items: row.max_items.max(1) as usize,
         poll_interval_secs: row.poll_interval_secs.max(1) as u32,
         enabled: row.enabled != 0,
+        exec_enabled: row.exec_enabled != 0,
         tier: tier_of(&row.endpoint),
         risk_hints: risk_hints_for(&row.auth_type, &row.endpoint),
         last_collect_at: row.last_collect_at.map(|t| t.to_rfc3339()),
@@ -619,7 +626,7 @@ fn encrypt_auth(payload: &OpsAuthPayload) -> Result<String, String> {
 }
 
 /// 连接行 → `ConnectionConfig`
-fn config_from_row(row: &OpsConnection) -> Result<ConnectionConfig, String> {
+pub(crate) fn config_from_row(row: &OpsConnection) -> Result<ConnectionConfig, String> {
     let provider = provider_from_str(&row.provider)?;
     if provider.is_data_store() {
         return Err(format!(
@@ -668,7 +675,7 @@ pub async fn list_connections() -> Result<Vec<OpsConnectionView>, String> {
 }
 
 /// 读取单行（不存在即报错）
-async fn load_row(id: i64) -> Result<OpsConnection, String> {
+pub(crate) async fn load_row(id: i64) -> Result<OpsConnection, String> {
     let pool = database::get_read_pool().map_err(|err| format!("数据库连接失败: {err}"))?;
     let p = database::schema_prefix();
     let sql = format!(
@@ -736,8 +743,8 @@ pub async fn create_connection(
         "INSERT INTO {p}ops_connection \
          (id, connection_name, provider, endpoint, auth_type, auth_config_enc, credential_hint, \
           namespace, timeout_secs, docker_api_version, max_items, poll_interval_secs, enabled, \
-          created_by, created_at, updated_by, updated_at, deleted) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $14, NOW(), 0) \
+          exec_enabled, created_by, created_at, updated_by, updated_at, deleted) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), $15, NOW(), 0) \
          RETURNING {CONNECTION_COLUMNS}"
     );
     let row = sqlx::query_as::<_, OpsConnection>(sqlx::AssertSqlSafe(sql))
@@ -754,6 +761,11 @@ pub async fn create_connection(
         .bind(input.max_items.unwrap_or(20000).max(1) as i32)
         .bind(input.poll_interval_secs.unwrap_or(300).max(1) as i32)
         .bind(if input.enabled.unwrap_or(true) { 1_i16 } else { 0_i16 })
+        .bind(if input.exec_enabled.unwrap_or(false) {
+            1_i16
+        } else {
+            0_i16
+        })
         .bind(user_id)
         .fetch_one(&pool)
         .await
@@ -822,7 +834,7 @@ pub async fn update_connection(
         "UPDATE {p}ops_connection SET connection_name = $2, provider = $3, endpoint = $4, \
          auth_type = $5, auth_config_enc = $6, credential_hint = $7, namespace = $8, \
          timeout_secs = $9, docker_api_version = $10, max_items = $11, poll_interval_secs = $12, \
-         enabled = $13, updated_by = $14, updated_at = NOW() \
+         enabled = $13, exec_enabled = $14, updated_by = $15, updated_at = NOW() \
          WHERE id = $1 AND deleted = 0 RETURNING {CONNECTION_COLUMNS}"
     );
     let row = sqlx::query_as::<_, OpsConnection>(sqlx::AssertSqlSafe(sql))
@@ -839,6 +851,11 @@ pub async fn update_connection(
         .bind(input.max_items.unwrap_or(20000).max(1) as i32)
         .bind(input.poll_interval_secs.unwrap_or(300).max(1) as i32)
         .bind(if input.enabled.unwrap_or(true) { 1_i16 } else { 0_i16 })
+        .bind(if input.exec_enabled.unwrap_or(false) {
+            1_i16
+        } else {
+            0_i16
+        })
         .bind(user_id)
         .fetch_one(&pool)
         .await
@@ -872,7 +889,7 @@ pub async fn delete_connection(id: i64) -> Result<(), String> {
 ///
 /// 只覆盖本模块负责的容器 / 编排来源。数据资产来源（缓存 / 向量库）的采集
 /// 实现归属各自的 vector 侧 crate，本模块显式拒绝，绝不「静默当作成功」。
-async fn build_connector(config: ConnectionConfig) -> Result<Arc<dyn Connector>, String> {
+pub(crate) async fn build_connector(config: ConnectionConfig) -> Result<Arc<dyn Connector>, String> {
     match config.provider {
         Provider::Docker | Provider::Swarm => DockerConnector::connect(config)
             .map(|connector| Arc::new(connector) as Arc<dyn Connector>)

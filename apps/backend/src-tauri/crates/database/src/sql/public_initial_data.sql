@@ -3592,6 +3592,42 @@ UPDATE public.sys_menu
    AND perms = 'ssh:session:open';
 
 -- ==============================
+-- 11.2 容器运维（日志 / 性能 / 终端）菜单与按钮
+-- 必须位于「12. 默认角色菜单关联」之前，否则 role_id=1 不会自动获得菜单 63。
+-- ==============================
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 63, '容器运维', 7, '/ops/containers', '/ops/containers/page', 'IconBox', 4, true, 'ops:resource:list', 2, false, 'get_ops_links', 'GET', '/api/ops/links', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 63);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 174, '查看容器日志', 63, NULL, NULL, NULL, 1, true, 'ops:container:logs', 3, true, 'get_ops_container_logs', 'GET', '/api/ops/connections/{connectionId}/containers/{container}/logs', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 174);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 175, '查看容器性能', 63, NULL, NULL, NULL, 2, true, 'ops:container:stats', 3, true, 'get_ops_container_stats', 'GET', '/api/ops/connections/{connectionId}/containers/{container}/stats', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 175);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 176, '查看 Pod 日志', 63, NULL, NULL, NULL, 3, true, 'ops:pod:logs', 3, true, 'get_ops_pod_logs', 'GET', '/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/logs', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 176);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 177, '查看 Pod 指标', 63, NULL, NULL, NULL, 4, true, 'ops:pod:metrics', 3, true, 'get_ops_pod_metrics', 'GET', '/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/metrics', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 177);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 178, '打开容器终端', 63, NULL, NULL, NULL, 5, true, 'ops:terminal:exec', 3, true, 'open_ops_terminal_session', 'POST', '/api/ops/terminal/sessions', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 178);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 179, '关闭容器终端', 63, NULL, NULL, NULL, 6, true, 'ops:terminal:exec', 3, true, 'close_ops_terminal_session', 'DELETE', '/api/ops/terminal/sessions/{sessionId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 179);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 180, '终端接入(WS)', 63, NULL, NULL, NULL, 7, true, 'ops:terminal:exec', 3, true, 'attach_ops_terminal_session', 'GET', '/api/ops/terminal/sessions/{sessionId}/ws', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 180);
+
+-- ==============================
 -- 12. 默认角色菜单关联（super_admin 角色 → 所有菜单）
 -- ==============================
 -- 必须放在**所有** sys_menu INSERT 之后执行，否则后续追加的菜单

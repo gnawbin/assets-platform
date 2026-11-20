@@ -993,6 +993,14 @@ fn task_record(endpoint: &str, task: Task) -> Option<ResourceRecord> {
 }
 
 impl DockerConnector {
+    /// 底层 bollard 客户端（终端 exec 由 `ops-exec` 使用）
+    ///
+    /// 只暴露客户端本身，不改变本连接器「只读采集」的职责：
+    /// 终端能力必须走独立 crate + 独立权限点，不能在本 crate 内直接 exec。
+    pub fn client(&self) -> &Docker {
+        &self.docker
+    }
+
     /// 拉取容器日志（最近 `lines` 行；累计超过 `max_bytes` 立即停止并置 `truncated`）
     ///
     /// 只读：对应 `GET /containers/{id}/logs`。`tty=true` 的容器日志帧是

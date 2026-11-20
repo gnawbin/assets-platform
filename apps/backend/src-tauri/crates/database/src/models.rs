@@ -1278,6 +1278,8 @@ pub struct OpsConnection {
     pub max_items: i32,                  //单类资源采集上限
     pub poll_interval_secs: i32,         //轮询间隔（秒），供调度器后续使用
     pub enabled: i16,                    //启用标记：1=启用 0=停用
+    /// 是否允许容器终端（默认关闭；`open_session` 必须校验为 1）
+    pub exec_enabled: i16,
     pub last_collect_at: Option<DateTime<Utc>>, //最近一次采集时间
     pub last_error: Option<String>,      //最近一次失败原因
     #[serde(
@@ -1388,6 +1390,45 @@ pub struct OpsSshSession {
     pub bytes_out: i64, //目标主机 → 客户端
     pub exit_code: Option<i32>,
     pub error: Option<String>, //失败原因（不含凭证）
+}
+
+/// 容器终端会话审计实体（Docker + K8s 共用）
+/// 对应表：{schema}.ops_terminal_session
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct OpsTerminalSession {
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub id: i64,
+    /// docker / k8s
+    pub provider: String,
+    /// 软引用 ops_connection.id
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub connection_id: i64,
+    /// docker_container / k8s_pod
+    pub target_kind: String,
+    /// Docker 容器 Id（asset_ops_link.resource_uid 口径）
+    pub container_uid: Option<String>,
+    /// K8s 命名空间
+    pub namespace: Option<String>,
+    /// K8s Pod 名
+    pub pod_name: Option<String>,
+    /// 容器名（Docker / K8s 都有；K8s 多容器必填）
+    pub container_name: Option<String>,
+    /// 实际使用的 shell
+    pub shell: Option<String>,
+    #[serde(serialize_with = "i64_to_string", deserialize_with = "i64_from_string")]
+    pub user_id: i64,
+    /// opening / active / closed / failed
+    pub state: String,
+    pub client_ip: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub ended_at: Option<DateTime<Utc>>,
+    /// 客户端 → 容器 的累计字节数
+    pub bytes_in: i64,
+    /// 容器 → 客户端 的累计字节数
+    pub bytes_out: i64,
+    pub exit_code: Option<i32>,
+    /// 失败原因（不含终端输出）
+    pub error: Option<String>,
 }
 
 /// 外部系统 API Key 实体

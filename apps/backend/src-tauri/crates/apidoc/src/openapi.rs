@@ -47,6 +47,7 @@ use utoipa::{Modify, OpenApi};
         (name = "流程管理-报废", description = "资产报废流程"),
         (name = "流程管理-采购", description = "资产采购流程"),
         (name = "运维采集", description = "Docker / Swarm / Kubernetes 只读采集"),
+        (name = "容器运维", description = "容器 / Pod 日志、性能与交互终端（WebSocket 通道不在本文档登记）"),
         (name = "运维终端", description = "SSH 主机配置、指纹扫描与交互式终端（WebSocket 通道不在本文档登记）"),
         (name = "大文件上传", description = "S3 分片上传与断点续传"),
         (name = "智能问答", description = "RAG + LLM 的 SSE 流式问答"),
@@ -183,6 +184,13 @@ use utoipa::{Modify, OpenApi};
         api::ops_routes::collect_now,
         api::ops_routes::list_links,
         api::ops_routes::bind_link,
+        // 容器日志 / 性能 / 终端（6 条 REST；WS 通道不登记到 OpenAPI）
+        api::container_routes::container_logs,
+        api::container_routes::container_stats,
+        api::container_routes::pod_logs,
+        api::container_routes::pod_metrics,
+        api::container_routes::open_session,
+        api::container_routes::close_session,
         // 运维终端（SSH）：10 条 REST（WS 通道不登记到 OpenAPI）
         api::ssh_routes::list_targets,
         api::ssh_routes::get_target,

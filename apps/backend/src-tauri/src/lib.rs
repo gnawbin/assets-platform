@@ -243,6 +243,12 @@ pub fn run() {
             commands::ops_commands::collect_ops_resources,
             commands::ops_commands::get_ops_links,
             commands::ops_commands::bind_ops_link,
+            commands::ops_commands::get_ops_container_logs,
+            commands::ops_commands::get_ops_container_stats,
+            commands::ops_commands::get_ops_pod_logs,
+            commands::ops_commands::get_ops_pod_metrics,
+            commands::ops_commands::open_ops_terminal_session,
+            commands::ops_commands::close_ops_terminal_session,
             // AI Agent 沙箱（CubeSandbox；SANDBOX_ENABLED=false 时统一返回错误）
             commands::sandbox_commands::sandbox_health,
             commands::sandbox_commands::sandbox_session,

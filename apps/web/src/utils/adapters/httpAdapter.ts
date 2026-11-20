@@ -91,6 +91,28 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     collect_ops_resources: { method: 'POST', path: '/api/ops/connections/{id}/collect' },
     get_ops_links: { method: 'GET', path: '/api/ops/links' },
     bind_ops_link: { method: 'POST', path: '/api/ops/links/{linkId}/bind' },
+    // 容器日志 / 性能 / 终端（WS 通道走 buildOpsTerminalWsUrl，不经过本映射表）
+    get_ops_container_logs: {
+        method: 'GET',
+        path: '/api/ops/connections/{connectionId}/containers/{container}/logs',
+    },
+    get_ops_container_stats: {
+        method: 'GET',
+        path: '/api/ops/connections/{connectionId}/containers/{container}/stats',
+    },
+    get_ops_pod_logs: {
+        method: 'GET',
+        path: '/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/logs',
+    },
+    get_ops_pod_metrics: {
+        method: 'GET',
+        path: '/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/metrics',
+    },
+    open_ops_terminal_session: { method: 'POST', path: '/api/ops/terminal/sessions' },
+    close_ops_terminal_session: {
+        method: 'DELETE',
+        path: '/api/ops/terminal/sessions/{sessionId}',
+    },
 
     // ======================== 运维终端（SSH） ========================
     // 注意：WS 通道（/sessions/{sessionId}/ws）走 buildSshWsUrl，不经过本映射表
