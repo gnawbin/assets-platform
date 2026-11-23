@@ -16,7 +16,7 @@ use dashmap::DashMap;
 
 use super::response::ApiError;
 use axum::{extract::Request, middleware::Next, response::Response};
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, DecodingKey};
 use serde::{Deserialize, Serialize};
 
 use service::api_key_service::UserAuthority;
@@ -232,33 +232,19 @@ pub fn parse_credential(token: &str) -> Result<Credential, ApiError> {
     Ok(Credential::Jwt(token.to_string()))
 }
 
-/// 构造 JWT 校验参数（与签发侧共用 `iss` / `aud` 配置）
-///
-/// **必须显式设置 audience**：`jsonwebtoken` 11 的 `Validation::default()` 是
-/// `validate_aud = true` 且 `aud = None`，此时**只要令牌带 `aud` 声明就返回
-/// `InvalidAudience`**（见 `validation.rs` 的 `(TryParse::Parsed(_), None)` 分支）。
-/// 签发侧自 Phase 3 起固定写 `aud`，因此用默认校验会让所有 HTTP 请求 401
-/// 「无效的认证令牌」。
-///
-/// 兼容说明：`jsonwebtoken` 仅在令牌**存在** `aud` / `iss` 时才比对，
-/// 历史令牌（无这两个声明）依旧放行；严格模式由
-/// [`service::user_service::check_token_scope`] 的 `JWT_STRICT_ISS_AUD` 控制。
-fn jwt_validation() -> Validation {
-    let mut validation = Validation::default();
-    validation.set_audience(&[service::user_service::jwt_audience()]);
-    validation.set_issuer(&[service::user_service::jwt_issuer()]);
-    validation
-}
-
 /// 从请求中提取并验证 JWT token
 pub fn verify_token(token: &str) -> Result<Claims, ApiError> {
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| "assets-platform-default-secret-key".to_string());
 
+    // `jsonwebtoken` 12 起 `from_secret` 返回 `Result`（空密钥视为非法）
+    let decoding_key = DecodingKey::from_secret(jwt_secret.as_bytes())
+        .map_err(|e| ApiError::internal_error(format!("JWT 密钥配置无效: {}", e)))?;
+
     let token_data = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(jwt_secret.as_bytes()),
-        &jwt_validation(),
+        &decoding_key,
+        &service::user_service::jwt_validation(),
     )
     .map_err(|e| {
         tracing::warn!("JWT 验证失败: {}", e);
@@ -601,7 +587,8 @@ mod tests {
         encode(
             &jsonwebtoken::Header::default(),
             claims,
-            &jsonwebtoken::EncodingKey::from_secret(b"assets-platform-default-secret-key"),
+            &jsonwebtoken::EncodingKey::from_secret(b"assets-platform-default-secret-key")
+                .expect("测试密钥应可构造"),
         )
         .expect("测试令牌应可签发")
     }
@@ -650,7 +637,7 @@ mod tests {
     /// 校验参数与签发参数一致（防止有人改回 `Validation::default()`）
     #[test]
     fn validation_scope_matches_signing_scope() {
-        let validation = jwt_validation();
+        let validation = service::user_service::jwt_validation();
         let audience = validation.aud.expect("audience 必须显式设置");
         assert!(audience.contains(&service::user_service::jwt_audience()));
         let issuer = validation.iss.expect("issuer 必须显式设置");
