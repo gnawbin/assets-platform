@@ -256,6 +256,7 @@ async fn process_service_task(
         "agent_interrupt",
         "agent_approved",
         "approval_comment",
+        "approval_votes",
     ] {
         variables.remove(key);
     }

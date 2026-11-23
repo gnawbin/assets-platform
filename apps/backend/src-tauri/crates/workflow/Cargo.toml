@@ -19,4 +19,5 @@ service.workspace = true
 sqlx = { workspace = true, features = ["uuid", "json"] }
 tokio.workspace = true
 tracing.workspace = true
+utils.workspace = true
 uuid = { workspace = true, features = ["serde"] }

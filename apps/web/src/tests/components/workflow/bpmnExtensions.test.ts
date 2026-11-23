@@ -127,3 +127,32 @@ describe('扩展参数序列化', () => {
         expect(config.temperature).toBe(0.2);
     });
 });
+
+
+describe('多用户审批扩展字段', () => {
+    it('写入 data-assignee-* 并可按 assets:EngineConfig 回显', () => {
+        const factory = createFakeFactory();
+        const businessObject = createBusinessObjectForPreset(getPreset('approval')!, factory, {
+            engine: {
+                assignee: '101',
+                assigneeIds: '101,102',
+                assigneeNames: '张三,李四',
+                assigneeMode: 'user',
+                approvalType: 'all',
+                approvalVariable: 'approved',
+            },
+        });
+
+        expect(businessObject.$attrs['data-assignee']).toBe('101');
+        expect(businessObject.$attrs['data-assignee-ids']).toBe('101,102');
+        expect(businessObject.$attrs['data-assignee-name']).toBe('张三,李四');
+        expect(businessObject.$attrs['data-assignee-mode']).toBe('user');
+        expect(readEngineFields(businessObject)).toMatchObject({
+            assignee: '101',
+            assigneeIds: '101,102',
+            assigneeNames: '张三,李四',
+            assigneeMode: 'user',
+            approvalType: 'all',
+        });
+    });
+});

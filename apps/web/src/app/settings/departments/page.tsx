@@ -43,6 +43,7 @@ import {
   type Department,
 } from '@/services/departmentService';
 import { getTenants, type Tenant } from '@/services/tenantService';
+import { getUsers, type User } from '@/services/userService';
 import { useAuthStore } from '@/store/authStore';
 
 // 树节点接口
@@ -83,7 +84,9 @@ const DepartmentsPage: React.FC = () => {
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [formParentId, setFormParentId] = useState<string | null>(null);
   const [formName, setFormName] = useState('');
+  const [formLeaderId, setFormLeaderId] = useState<string | null>(null);
   const [formDesc, setFormDesc] = useState('');
+  const [users, setUsers] = useState<User[]>([]);
 
   // 使用 useApi 管理增删改操作
   const { execute: doInsert, loading: saving } = useApi(insertDepartment);
@@ -126,6 +129,33 @@ const DepartmentsPage: React.FC = () => {
       fetchDepartments();
     }
   }, [selectedTenantId]);
+
+  // 部门负责人候选用户
+  useEffect(() => {
+    if (!selectedTenantId) {
+      setUsers([]);
+      return;
+    }
+    getUsers(selectedTenantId)
+      .then(setUsers)
+      .catch((err) => {
+        console.error('加载用户列表失败:', err);
+        setUsers([]);
+      });
+  }, [selectedTenantId]);
+
+  const leaderOptions = users
+    .filter((item) => item.status !== 0)
+    .map((item) => ({
+      value: String(item.id),
+      label: item.real_name || item.username,
+    }));
+
+  const getLeaderName = (leaderId: string | null): string => {
+    if (!leaderId) return '未设置';
+    const leader = users.find((item) => String(item.id) === leaderId);
+    return leader ? leader.real_name || leader.username : `用户#${leaderId}`;
+  };
 
   // 构建树结构
   const buildTree = (depts: Department[]) => {
@@ -186,6 +216,7 @@ const DepartmentsPage: React.FC = () => {
     setFormMode('add');
     setFormParentId(parentId);
     setFormName('');
+    setFormLeaderId(null);
     setFormDesc('');
     setFormModalOpen(true);
   };
@@ -196,6 +227,7 @@ const DepartmentsPage: React.FC = () => {
     setFormMode('edit');
     setFormParentId(selectedDept.parent_id);
     setFormName(selectedDept.department_name);
+    setFormLeaderId(selectedDept.leader_id ?? null);
     setFormDesc(selectedDept.description || '');
     setFormModalOpen(true);
   };
@@ -217,6 +249,7 @@ const DepartmentsPage: React.FC = () => {
         await doInsert({
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
+          leaderId: formLeaderId,
           description: formDesc.trim() || null,
           tenantId: selectedTenantId,
         });
@@ -227,6 +260,7 @@ const DepartmentsPage: React.FC = () => {
           id: selectedDept.id,
           departmentName: formName.trim(),
           parentId: formParentId?.toString() ?? null,
+          leaderId: formLeaderId,
           description: formDesc.trim() || null,
         });
         notifySuccess('部门更新成功');
@@ -481,6 +515,14 @@ const DepartmentsPage: React.FC = () => {
                     </Group>
                     <Group>
                       <Text size="sm" c="dimmed" w={80}>
+                        部门负责人
+                      </Text>
+                      <Text size="sm">
+                        {getLeaderName(selectedDept.leader_id)}
+                      </Text>
+                    </Group>
+                    <Group>
+                      <Text size="sm" c="dimmed" w={80}>
                         全路径
                       </Text>
                       <Text size="sm" c="blue">
@@ -540,6 +582,16 @@ const DepartmentsPage: React.FC = () => {
             required
             value={formName}
             onChange={(e) => setFormName(e.target.value)}
+          />
+          <Select
+            label="部门负责人"
+            placeholder="请选择部门负责人（可选）"
+            data={leaderOptions}
+            value={formLeaderId}
+            onChange={setFormLeaderId}
+            searchable
+            clearable
+            nothingFoundMessage="暂无可选用户"
           />
           <Textarea
             label="描述"

@@ -35,6 +35,7 @@ pub mod ssh_ticket;
 pub mod tenant_routes;
 pub mod upload_routes;
 pub mod user_routes;
+pub mod workflow_routes;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -464,6 +465,39 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route(
             "/api/assets/intangible/{id}",
             delete(asset_routes::delete_intangible_asset),
+        )
+        // 工作流
+        .route(
+            "/api/workflows",
+            get(workflow_routes::list_workflows).post(workflow_routes::save_workflow),
+        )
+        .route(
+            "/api/workflows/execute",
+            post(workflow_routes::execute_workflow),
+        )
+        .route(
+            "/api/workflows/executions",
+            get(workflow_routes::list_executions),
+        )
+        .route(
+            "/api/workflows/executions/{executionId}",
+            get(workflow_routes::get_execution),
+        )
+        .route(
+            "/api/workflows/executions/{executionId}/cancel",
+            post(workflow_routes::cancel_execution),
+        )
+        .route(
+            "/api/workflows/pending-tasks",
+            get(workflow_routes::list_pending_tasks),
+        )
+        .route(
+            "/api/workflows/tasks/{taskId}/complete",
+            post(workflow_routes::complete_user_task),
+        )
+        .route(
+            "/api/workflows/{id}",
+            get(workflow_routes::get_workflow).delete(workflow_routes::delete_workflow),
         )
         // 部门
         .route("/api/departments", get(department_routes::get_departments))

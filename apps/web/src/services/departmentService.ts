@@ -13,6 +13,7 @@ export interface Department {
     id: string;
     department_name: string;
     parent_id: string | null;
+    leader_id: string | null;
     description: string | null;
     created_by: string | null;
     created_at: string | null;
@@ -35,12 +36,14 @@ export function getDepartments(tenantId?: string | null) {
 export function insertDepartment(params: {
     departmentName: string;
     parentId: string | null;
+    leaderId: string | null;
     description: string | null;
     tenantId: string | null;
 }) {
     return api.post<Department>('insert_department', {
         department_name: params.departmentName,
         parent_id: params.parentId,
+        leader_id: params.leaderId,
         description: params.description,
         tenant_id: params.tenantId,
     });
@@ -51,12 +54,14 @@ export function updateDepartment(params: {
     id: string;
     departmentName: string;
     parentId: string | null;
+    leaderId: string | null;
     description: string | null;
 }) {
     return api.put<Department>('update_department', {
         id: params.id,
         department_name: params.departmentName,
         parent_id: params.parentId,
+        leader_id: params.leaderId,
         description: params.description,
     });
 }

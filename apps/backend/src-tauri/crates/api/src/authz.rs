@@ -138,6 +138,9 @@ pub const AUTH_ONLY_ROUTES: &[(&str, &str)] = &[
     // LLM 用户偏好：个人配置，只需要登录（归属取令牌 sub）
     ("GET", "/api/llm/user-setting"),
     ("POST", "/api/llm/user-setting"),
+    // 工作流待办与审批：个人任务，只需登录（handler 再校验审批组成员）
+    ("GET", "/api/workflows/pending-tasks"),
+    ("POST", "/api/workflows/tasks/{taskId}/complete"),
 ];
 
 /// 完全公开（不经过认证中间件）的路由，仅用于自检对账
@@ -181,6 +184,23 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
         "DELETE",
         "/api/assets/intangible/{id}",
         "asset:software:delete",
+    ),
+    // ===== 工作流 =====
+    ("GET", "/api/workflows", "workflow:list"),
+    ("GET", "/api/workflows/{id}", "workflow:list"),
+    ("POST", "/api/workflows", "workflow:create"),
+    ("DELETE", "/api/workflows/{id}", "workflow:create"),
+    ("POST", "/api/workflows/execute", "workflow:create"),
+    ("GET", "/api/workflows/executions", "workflow:history"),
+    (
+        "GET",
+        "/api/workflows/executions/{executionId}",
+        "workflow:history",
+    ),
+    (
+        "POST",
+        "/api/workflows/executions/{executionId}/cancel",
+        "workflow:create",
     ),
     // ===== 部门 =====
     ("GET", "/api/departments", "system:department:list"),

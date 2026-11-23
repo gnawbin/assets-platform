@@ -50,6 +50,11 @@ export function toSelectedElement(element: any): SelectedBpmnElement | null {
         const assignee = readUserTaskAssignee(businessObject);
         if (assignee) engine.assignee = assignee;
     }
+    if (kind === 'approval' && !engine.assigneeName) {
+        const attrs = businessObject.$attrs as Record<string, unknown> | undefined;
+        const name = asString(attrs?.['data-assignee-name']);
+        if (name) engine.assigneeName = name;
+    }
     const eventDefinitionType = Array.isArray(businessObject.eventDefinitions)
         ? asString(businessObject.eventDefinitions[0]?.$type)
         : '';
@@ -156,11 +161,28 @@ export function createModelerApi(modeler: any): BpmnCanvasApi {
             modeling.updateProperties(element, { calledElement: fields.wfType });
         }
         // 审批人同时写到标准 UserTask 的 data-assignee，保证导出的 BPMN 单独部署也能识别
-        if (fields.assignee !== undefined && element.businessObject?.$type === 'bpmn:UserTask') {
-            const assignee = asString(fields.assignee);
-            modeling.updateProperties(element, {
-                'data-assignee': assignee ? assignee : undefined,
-            });
+        if (element.businessObject?.$type === 'bpmn:UserTask') {
+            const dataAttrs: Record<string, unknown> = {};
+            if (fields.assignee !== undefined) {
+                dataAttrs['data-assignee'] = asString(fields.assignee) || undefined;
+            }
+            if (fields.assigneeName !== undefined || fields.assigneeNames !== undefined) {
+                dataAttrs['data-assignee-name'] =
+                    asString(fields.assigneeNames) ||
+                    asString(fields.assigneeName) ||
+                    undefined;
+            }
+            if (fields.assigneeIds !== undefined) {
+                dataAttrs['data-assignee-ids'] =
+                    asString(fields.assigneeIds) || undefined;
+            }
+            if (fields.assigneeMode !== undefined) {
+                dataAttrs['data-assignee-mode'] =
+                    asString(fields.assigneeMode) || undefined;
+            }
+            if (Object.keys(dataAttrs).length > 0) {
+                modeling.updateProperties(element, dataAttrs);
+            }
         }
     };
 

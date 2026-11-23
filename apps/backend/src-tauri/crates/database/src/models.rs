@@ -338,6 +338,8 @@ pub struct Department {
     pub department_name: String, //部门名称,记录部门的名称
     #[serde(serialize_with = "opt_i64_to_string")]
     pub parent_id: Option<i64>, //父部门ID，外键，关联自身id，实现部门层级关系，顶级部门parent_id为null
+    #[serde(serialize_with = "opt_i64_to_string")]
+    pub leader_id: Option<i64>, //部门负责人用户ID
     pub description: Option<String>, //描述，记录部门的详细描述信息
     #[serde(serialize_with = "opt_i64_to_string")]
     pub created_by: Option<i64>, //创建人，记录创建该部门的管理员

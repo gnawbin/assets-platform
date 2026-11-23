@@ -133,6 +133,27 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     update_department: { method: 'PUT', path: '/api/departments/{id}' },
     delete_department: { method: 'DELETE', path: '/api/departments/{id}' },
 
+    // ======================== 工作流 ========================
+    list_workflows: { method: 'GET', path: '/api/workflows' },
+    get_workflow: { method: 'GET', path: '/api/workflows/{id}' },
+    save_workflow: { method: 'POST', path: '/api/workflows' },
+    delete_workflow: { method: 'DELETE', path: '/api/workflows/{id}' },
+    execute_workflow: { method: 'POST', path: '/api/workflows/execute' },
+    list_executions: { method: 'GET', path: '/api/workflows/executions' },
+    get_execution: {
+        method: 'GET',
+        path: '/api/workflows/executions/{executionId}',
+    },
+    cancel_execution: {
+        method: 'POST',
+        path: '/api/workflows/executions/{executionId}/cancel',
+    },
+    list_pending_tasks: { method: 'GET', path: '/api/workflows/pending-tasks' },
+    complete_user_task: {
+        method: 'POST',
+        path: '/api/workflows/tasks/{taskId}/complete',
+    },
+
     // ======================== 用户 ========================
     get_current_user: { method: 'GET', path: '/api/users/me' },
     get_users: { method: 'GET', path: '/api/users' },

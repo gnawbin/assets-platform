@@ -23,6 +23,12 @@ COMMENT ON COLUMN public.sys_tenant.is_leaf IS '是否末级节点（末级才�
 
 COMMENT ON COLUMN public.sys_tenant.schema_name IS '对应 PostgreSQL schema 名，如 factory_a（仅末级节点需要）';
 
+-- sys_department 表增加部门负责人
+ALTER TABLE public.sys_department
+ADD COLUMN IF NOT EXISTS leader_id BIGINT;
+
+COMMENT ON COLUMN public.sys_department.leader_id IS '部门负责人用户ID';
+
 -- sys_user 表补充缺失列
 
 -- 将 tenant_id 改为可空（超级管理员不属于任何机构）

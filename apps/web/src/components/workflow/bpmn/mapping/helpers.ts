@@ -13,6 +13,8 @@ import type { EngineFields, ElementKind, ValidationIssue } from '../types';
 /** 执行器支持的 IR 节点类型 */
 export const IR_NODE_TYPES: WorkflowNodeType[] = [
     'trigger',
+    'agent',
+    'approval',
     'skill',
     'llm',
     'condition',
@@ -271,14 +273,40 @@ export function engineToNodeConfig(kind: ElementKind, engine: EngineFields): Rec
                 ...(engine.temperature !== undefined ? { temperature: engine.temperature } : {}),
                 ...(engine.maxTokens !== undefined ? { max_tokens: engine.maxTokens } : {}),
             };
-        case 'approval':
+        case 'approval': {
+            const assigneeIds = (engine.assigneeIds || '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
             return {
                 kind: 'approval',
-                assignee: engine.assignee || '',
+                assignee: engine.assignee || assigneeIds[0] || '',
+                ...(engine.assigneeMode ? { assignee_mode: engine.assigneeMode } : {}),
+                ...(engine.assigneeName ? { assignee_name: engine.assigneeName } : {}),
+                ...(engine.assigneeNames ? { assignee_names: engine.assigneeNames } : {}),
+                ...(assigneeIds.length > 0 ? { assignee_ids: assigneeIds } : {}),
+                ...(engine.approvalType ? { approval_type: engine.approvalType } : {}),
+                ...(engine.assigneeDeptId
+                    ? { assignee_dept_id: engine.assigneeDeptId }
+                    : {}),
+                ...(engine.assigneeDeptName
+                    ? { assignee_dept_name: engine.assigneeDeptName }
+                    : {}),
+                ...(engine.assigneeDeptScope
+                    ? { assignee_dept_scope: engine.assigneeDeptScope }
+                    : {}),
+                ...(engine.assigneeDeptIncludeChildren
+                    ? { assignee_dept_include_children: true }
+                    : {}),
+                ...(engine.assigneeFormField
+                    ? { assignee_form_field: engine.assigneeFormField }
+                    : {}),
+                ...(engine.rejectAction ? { reject_action: engine.rejectAction } : {}),
                 ...(engine.approvalTitle ? { title: engine.approvalTitle } : {}),
                 ...(engine.approvalDescription ? { description: engine.approvalDescription } : {}),
                 ...(engine.approvalVariable ? { variable: engine.approvalVariable } : {}),
             };
+        }
         default:
             return {};
     }
@@ -403,8 +431,18 @@ export function validateDefinition(
                     });
                 }
                 break;
-            case 'approval':
-                if (!asString(config.assignee)) {
+            case 'approval': {
+                const assigneeMode = asString(config.assignee_mode);
+                const hasAssigneeIds =
+                    Array.isArray(config.assignee_ids) && config.assignee_ids.length > 0;
+                const hasAssignee =
+                    Boolean(asString(config.assignee)) ||
+                    hasAssigneeIds ||
+                    (assigneeMode === 'department' &&
+                        Boolean(asString(config.assignee_dept_id))) ||
+                    (assigneeMode === 'form' &&
+                        Boolean(asString(config.assignee_form_field)));
+                if (!hasAssignee) {
                     issues.push({
                         level: 'warning',
                         elementId: node.id,
@@ -419,6 +457,7 @@ export function validateDefinition(
                     });
                 }
                 break;
+            }
             case 'code':
                 if (!asString(config.code)) {
                     issues.push({ level: 'warning', elementId: node.id, message: `代码节点「${node.label}」代码为空。` });
@@ -540,6 +579,18 @@ export function readEngineFields(businessObject: any): EngineFields {
         maxIterations: asNumber(readModdleValue(config, 'maxIterations')),
         interruptPolicy: asString(readModdleValue(config, 'interruptPolicy')) || undefined,
         assignee: asString(readModdleValue(config, 'assignee')) || undefined,
+        assigneeMode: asString(readModdleValue(config, 'assigneeMode')) || undefined,
+        assigneeName: asString(readModdleValue(config, 'assigneeName')) || undefined,
+        assigneeNames: asString(readModdleValue(config, 'assigneeNames')) || undefined,
+        assigneeIds: asString(readModdleValue(config, 'assigneeIds')) || undefined,
+        approvalType: asString(readModdleValue(config, 'approvalType')) || undefined,
+        assigneeDeptId: asString(readModdleValue(config, 'assigneeDeptId')) || undefined,
+        assigneeDeptName: asString(readModdleValue(config, 'assigneeDeptName')) || undefined,
+        assigneeDeptScope: asString(readModdleValue(config, 'assigneeDeptScope')) || undefined,
+        assigneeDeptIncludeChildren:
+            readModdleValue(config, 'assigneeDeptIncludeChildren') === true || undefined,
+        assigneeFormField: asString(readModdleValue(config, 'assigneeFormField')) || undefined,
+        rejectAction: asString(readModdleValue(config, 'rejectAction')) || undefined,
         approvalTitle: asString(readModdleValue(config, 'approvalTitle')) || undefined,
         approvalDescription: asString(readModdleValue(config, 'approvalDescription')) || undefined,
         approvalVariable: asString(readModdleValue(config, 'approvalVariable')) || undefined,

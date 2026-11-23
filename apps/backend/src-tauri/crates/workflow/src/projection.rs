@@ -128,7 +128,7 @@ pub async fn sync_execution(execution_id: &str) -> Result<(), String> {
         return Ok(());
     };
     let current_status: String = row.try_get("status").unwrap_or_default();
-    if current_status == "cancelled" {
+    if current_status == "cancelled" || current_status == "rejected" {
         return Ok(());
     }
 
@@ -218,6 +218,134 @@ pub async fn sync_execution(execution_id: &str) -> Result<(), String> {
             mapped.bpmn_status
         );
     }
+    Ok(())
+}
+
+/// 追加一条审批投票到节点的 `output.approvals`。
+///
+/// `final_decision` 为 `Some` 时表示审批组已到终态，同时写入最终
+/// `approved` 与节点状态。
+#[allow(clippy::too_many_arguments)]
+pub async fn append_approval_result(
+    execution_id: &str,
+    node_id: &str,
+    task_id: &str,
+    assignee: &str,
+    assignee_name: Option<&str>,
+    approved: bool,
+    comment: Option<&str>,
+    final_decision: Option<bool>,
+) -> Result<(), String> {
+    let execution_id: i64 = execution_id
+        .parse()
+        .map_err(|e| format!("无效的执行记录ID: {execution_id}（{e}）"))?;
+    let pool = database::get_write_pool().map_err(|e| e.to_string())?;
+    let prefix = database::schema_prefix();
+
+    let existing: Option<Option<Value>> = sqlx::query_scalar::<_, Option<Value>>(
+        sqlx::AssertSqlSafe(format!(
+            "SELECT node_results FROM {}workflow_execution WHERE id = $1 AND deleted = 0",
+            prefix
+        )),
+    )
+    .bind(execution_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("读取节点执行结果失败: {e}"))?;
+    let Some(existing) = existing else {
+        return Err(format!("执行记录 {execution_id} 不存在"));
+    };
+
+    let mut results: Vec<Value> = existing
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let index = results
+        .iter()
+        .position(|item| item.get("node_id").and_then(Value::as_str) == Some(node_id));
+    let mut entry = match index {
+        Some(index) => results.remove(index),
+        None => json!({ "node_id": node_id }),
+    };
+    if !entry.is_object() {
+        entry = json!({ "node_id": node_id });
+    }
+
+    let status = match final_decision {
+        Some(false) => "failed",
+        Some(true) => "success",
+        None => "running",
+    };
+    if let Value::Object(map) = &mut entry {
+        map.insert("status".to_string(), json!(status));
+        let output = map
+            .entry("output".to_string())
+            .or_insert_with(|| json!({}));
+        if !output.is_object() {
+            *output = json!({});
+        }
+        if let Value::Object(output_map) = output {
+            if let Some(final_decision) = final_decision {
+                output_map.insert("approved".to_string(), json!(final_decision));
+            }
+            let approvals = output_map
+                .entry("approvals".to_string())
+                .or_insert_with(|| json!([]));
+            if !approvals.is_array() {
+                *approvals = json!([]);
+            }
+            if let Value::Array(items) = approvals {
+                items.push(json!({
+                    "task_id": task_id,
+                    "assignee": assignee,
+                    "assignee_name": assignee_name,
+                    "approved": approved,
+                    "comment": comment,
+                    "created_at": Utc::now(),
+                }));
+            }
+        }
+    }
+
+    results.push(entry);
+    let sql = format!(
+        "UPDATE {}workflow_execution
+         SET node_results = $2, current_node_id = $3, updated_at = NOW()
+         WHERE id = $1 AND deleted = 0",
+        prefix
+    );
+    sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(execution_id)
+        .bind(Value::Array(results))
+        .bind(node_id)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("写入审批结果失败: {e}"))?;
+    Ok(())
+}
+
+/// 审批被拒绝后把执行记录标记为 rejected。
+pub async fn mark_execution_rejected(
+    execution_id: &str,
+    message: &str,
+) -> Result<(), String> {
+    let execution_id: i64 = execution_id
+        .parse()
+        .map_err(|e| format!("无效的执行记录ID: {execution_id}（{e}）"))?;
+    let pool = database::get_write_pool().map_err(|e| e.to_string())?;
+    let prefix = database::schema_prefix();
+    let sql = format!(
+        "UPDATE {}workflow_execution
+         SET status = 'rejected', bpmn_status = 'approval_rejected',
+             error_message = $2, finished_at = COALESCE(finished_at, NOW()), updated_at = NOW()
+         WHERE id = $1 AND deleted = 0",
+        prefix
+    );
+    sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(execution_id)
+        .bind(message)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("标记审批拒绝失败: {e}"))?;
     Ok(())
 }
 

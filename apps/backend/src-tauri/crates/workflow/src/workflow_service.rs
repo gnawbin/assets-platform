@@ -5,7 +5,7 @@
 //! 读取也使用写连接池，避免主从延迟导致“刚保存就查不到 / 刚执行就读不到状态”。
 
 use crate::bpmn::BpmnCompiler;
-use crate::projection::{append_node_result, current_status, sync_execution};
+use crate::projection::{current_status, sync_execution};
 use crate::service::WorkflowManager;
 use crate::types::*;
 use serde_json::{json, Value};
@@ -37,6 +37,105 @@ fn row_time(row: &PgRow, column: &str) -> Option<chrono::DateTime<chrono::Utc>> 
     row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(column)
         .ok()
         .flatten()
+}
+
+fn variables_from_input(input_data: Option<Value>) -> HashMap<String, Value> {
+    let mut variables = HashMap::new();
+    match input_data {
+        Some(Value::Object(map)) => {
+            for (key, value) in map {
+                variables.insert(key, value);
+            }
+        }
+        Some(other) => {
+            variables.insert("input".to_string(), other);
+        }
+        None => {}
+    }
+    variables
+}
+
+async fn current_user_tenant(user_id: i64) -> Result<Option<i64>, String> {
+    let pool = pool()?;
+    let row: Option<Option<i64>> = sqlx::query_scalar(
+        "SELECT tenant_id FROM public.sys_user
+         WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
+    )
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("查询当前用户租户失败: {e}"))?;
+    if let Some(tenant_id) = row.flatten() {
+        return Ok(Some(tenant_id));
+    }
+
+    // 超级管理员可能没有 sys_user.tenant_id，回退到当前 schema 对应的租户。
+    let schema = database::current_schema_name();
+    if schema == "public" {
+        return Ok(None);
+    }
+    sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM public.sys_tenant WHERE schema_name = $1 LIMIT 1",
+    )
+    .bind(schema)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("查询当前 schema 租户失败: {e}"))
+}
+
+async fn user_display_name(user_id: i64) -> Option<String> {
+    let pool = pool().ok()?;
+    sqlx::query_scalar::<_, String>(
+        "SELECT COALESCE(NULLIF(real_name, ''), username)
+         FROM public.sys_user WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
+    )
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn assignee_display_name(assignee: &str) -> Option<String> {
+    if let Ok(user_id) = assignee.trim().parse::<i64>() {
+        return user_display_name(user_id).await;
+    }
+    let pool = pool().ok()?;
+    sqlx::query_scalar::<_, String>(
+        "SELECT COALESCE(NULLIF(real_name, ''), username)
+         FROM public.sys_user
+         WHERE (username = $1 OR real_name = $1)
+           AND (deleted IS NULL OR deleted = 0)
+         LIMIT 1",
+    )
+    .bind(assignee)
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+/// 兼容历史流程：assignee 可能是用户 ID，也可能是用户名 / 姓名。
+async fn assignee_matches_user(assignee: &str, user_id: i64) -> bool {
+    if assignee.trim() == user_id.to_string() {
+        return true;
+    }
+    let Ok(pool) = pool() else {
+        return false;
+    };
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT username, COALESCE(real_name, '')
+         FROM public.sys_user
+         WHERE id = $1 AND (deleted IS NULL OR deleted = 0)",
+    )
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten();
+    row.is_some_and(|(username, real_name)| {
+        assignee == username || (!real_name.is_empty() && assignee == real_name)
+    })
 }
 
 /// 从 IR 提取节点类型摘要，与前端 `node_types` 展示保持一致。
@@ -389,6 +488,13 @@ impl WorkflowService {
             .ok_or_else(|| "工作流缺少 BPMN XML，请在编辑器中保存后再执行".to_string())?;
         let compiled = BpmnCompiler::compile(&xml, &definition)?;
 
+        // 审批组计划必须在启动实例前解析，失败则整个执行失败。
+        let input_variables = variables_from_input(input.input_data.clone());
+        let tenant_id = current_user_tenant(user_id).await?;
+        let approval_groups =
+            crate::assignee::resolve_approval_groups(&definition, &input_variables, tenant_id)
+                .await?;
+
         let schema = database::current_schema_name();
         let manager = WorkflowManager::global()?;
         let runtime = manager.runtime(&schema).await?;
@@ -412,24 +518,14 @@ impl WorkflowService {
         .await
         .map_err(|e| format!("创建执行记录失败: {e}"))?;
 
-        let mut variables: HashMap<String, Value> = HashMap::new();
-        match input.input_data.clone() {
-            Some(Value::Object(map)) => {
-                for (key, value) in map {
-                    variables.insert(key, value);
-                }
-            }
-            Some(other) => {
-                variables.insert("input".to_string(), other);
-            }
-            None => {}
-        }
+        let mut variables = variables_from_input(input.input_data.clone());
         let snapshot = ExecutionSnapshot::from_definition(
             workflow.id.to_string(),
             execution_id.to_string(),
             workflow.name.clone(),
             &definition,
-        );
+        )
+        .with_approval_groups(approval_groups);
         variables.insert(
             "__workflow".to_string(),
             serde_json::to_value(&snapshot).map_err(|e| format!("序列化执行快照失败: {e}"))?,
@@ -618,9 +714,15 @@ impl WorkflowService {
     }
 
     /// 待办审批任务（来自引擎的 UserTask）。
+    ///
+    /// - 普通任务按 `assignee` 过滤；
+    /// - `group:` 任务展开为审批组成员待办；
+    /// - `include_all=true` 时返回管理视图。
     pub async fn list_pending_tasks(
         workflow_id: Option<&str>,
         execution_id: Option<&str>,
+        current_user_id: Option<i64>,
+        include_all: bool,
     ) -> Result<Vec<PendingWorkflowTask>, String> {
         let schema = database::current_schema_name();
         let manager = WorkflowManager::global()?;
@@ -669,26 +771,99 @@ impl WorkflowService {
                 continue;
             }
 
-            let interrupt_payload = runtime
-                .engine
-                .get_instance_details(task.instance_id)
-                .await
-                .ok()
+            let instance = runtime.engine.get_instance_details(task.instance_id).await.ok();
+            let interrupt_payload = instance
+                .as_ref()
                 .and_then(|instance| instance.variables.get("agent_interrupt").cloned())
                 .filter(|value| !value.is_null());
 
-            list.push(PendingWorkflowTask {
-                task_id: task.task_id.to_string(),
-                instance_id: task.instance_id.to_string(),
-                node_id: task.node_id.clone(),
-                assignee: task.assignee.clone(),
-                created_at: task.created_at,
-                business_key: task.business_key.clone(),
-                execution_id: Some(exec_id.to_string()),
-                workflow_id: Some(wf_id.to_string()),
-                workflow_name: row_string(&row, "workflow_name"),
-                interrupt_payload,
-            });
+            let mut item = if task.assignee.starts_with(crate::types::GROUP_TOKEN_PREFIX) {
+                let Some(instance) = instance.as_ref() else {
+                    continue;
+                };
+                let Some(snapshot) = ExecutionSnapshot::from_variables(&instance.variables) else {
+                    tracing::warn!("审批组任务缺少 __workflow 快照: {}", task.task_id);
+                    continue;
+                };
+                let Some(plan) = snapshot.approval_groups.get(&task.node_id) else {
+                    tracing::warn!("审批组任务缺少计划: {}", task.task_id);
+                    continue;
+                };
+                let group = crate::approval_group::ensure_group(
+                    exec_id,
+                    task.instance_id,
+                    task.task_id,
+                    &task.node_id,
+                    plan,
+                )
+                .await?;
+                if include_all {
+                    let mut item = crate::approval_group::group_pending_task(
+                        &group,
+                        task.task_id,
+                        &ApprovalMember {
+                            user_id: task.assignee.clone(),
+                            user_name: "审批组".to_string(),
+                        },
+                        false,
+                    );
+                    item.assignee = task.assignee.clone();
+                    item.assignee_name = Some("审批组".to_string());
+                    item.has_voted = None;
+                    item
+                } else {
+                    let Some(user_id) = current_user_id else {
+                        continue;
+                    };
+                    let Some(member) = group.member(user_id) else {
+                        continue;
+                    };
+                    if crate::approval_group::has_voted(task.task_id, user_id).await? {
+                        continue;
+                    }
+                    crate::approval_group::group_pending_task(
+                        &group,
+                        task.task_id,
+                        member,
+                        false,
+                    )
+                }
+            } else {
+                if !include_all {
+                    let Some(user_id) = current_user_id else {
+                        continue;
+                    };
+                    if !assignee_matches_user(&task.assignee, user_id).await {
+                        continue;
+                    }
+                }
+                PendingWorkflowTask {
+                    task_id: task.task_id.to_string(),
+                    instance_id: task.instance_id.to_string(),
+                    node_id: task.node_id.clone(),
+                    assignee: task.assignee.clone(),
+                    created_at: task.created_at,
+                    business_key: None,
+                    execution_id: None,
+                    workflow_id: None,
+                    workflow_name: None,
+                    interrupt_payload: None,
+                    assignee_name: assignee_display_name(&task.assignee).await,
+                    approval_type: Some("single".to_string()),
+                    member_count: Some(1),
+                    approved_count: None,
+                    rejected_count: None,
+                    has_voted: None,
+                }
+            };
+
+            item.created_at = task.created_at;
+            item.business_key = task.business_key.clone();
+            item.execution_id = Some(exec_id.to_string());
+            item.workflow_id = Some(wf_id.to_string());
+            item.workflow_name = row_string(&row, "workflow_name");
+            item.interrupt_payload = interrupt_payload;
+            list.push(item);
         }
         Ok(list)
     }
@@ -701,8 +876,8 @@ impl WorkflowService {
     pub async fn complete_user_task(
         task_id: &str,
         variables: Value,
-        _user_id: i64,
-    ) -> Result<(), String> {
+        user_id: i64,
+    ) -> Result<ApprovalDecisionResult, String> {
         let task_uuid = Uuid::parse_str(task_id.trim())
             .map_err(|e| format!("无效的审批任务ID: {task_id}（{e}）"))?;
         let schema = database::current_schema_name();
@@ -717,31 +892,19 @@ impl WorkflowService {
             .find(|item| item.task_id == task_uuid)
             .ok_or_else(|| format!("审批任务 {task_id} 不存在或已处理"))?;
 
-        let mut variables: HashMap<String, Value> = match variables {
-            Value::Object(map) => map.into_iter().collect(),
-            Value::Null => HashMap::new(),
-            other => {
-                let mut map = HashMap::new();
-                map.insert("input".to_string(), other);
-                map
-            }
-        };
-        if let Some(approved) = variables.get("approved").and_then(Value::as_bool) {
-            variables.insert("agent_approved".to_string(), json!(approved));
+        let mut variable_map = variables_from_input(Some(variables));
+        let approved = variable_map
+            .get("approved")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| "审批结果缺少 approved 字段".to_string())?;
+        let comment = variable_map
+            .get("comment")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        variable_map.insert("agent_approved".to_string(), json!(approved));
+        if let Some(comment) = &comment {
+            variable_map.insert("approval_comment".to_string(), json!(comment));
         }
-        if let Some(comment) = variables.get("comment").and_then(Value::as_str) {
-            variables.insert("approval_comment".to_string(), json!(comment));
-        }
-        let approval_output = json!({
-            "approved": variables.get("approved").cloned().unwrap_or(Value::Null),
-            "comment": variables.get("comment").cloned().unwrap_or(Value::Null),
-        });
-
-        database::with_schema(schema.clone(), async {
-            runtime.engine.complete_user_task(task_uuid, variables).await
-        })
-        .await
-        .map_err(|e| format!("完成审批任务失败: {e}"))?;
 
         let pool = pool()?;
         let prefix = database::schema_prefix();
@@ -756,30 +919,160 @@ impl WorkflowService {
         .await
         .map_err(|e| format!("查询审批任务所属执行记录失败: {e}"))?;
 
-        if let Some(execution_id) = execution_id {
-            let execution_id = execution_id.to_string();
-            let _ = append_node_result(
+        let snapshot = runtime
+            .engine
+            .get_instance_details(task.instance_id)
+            .await
+            .ok()
+            .and_then(|instance| ExecutionSnapshot::from_variables(&instance.variables));
+
+        let mut decision = ApprovalDecisionResult {
+            status: "completed".to_string(),
+            approved_count: i32::from(approved),
+            rejected_count: i32::from(!approved),
+            member_count: 1,
+        };
+        let mut final_decision = Some(approved);
+        let mut assignee_name = user_display_name(user_id).await;
+        let reject_terminates: bool;
+
+        if task.assignee.starts_with(crate::types::GROUP_TOKEN_PREFIX) {
+            let snapshot = snapshot
+                .as_ref()
+                .ok_or_else(|| "审批组任务缺少执行快照".to_string())?;
+            let plan = snapshot
+                .approval_groups
+                .get(&task.node_id)
+                .ok_or_else(|| "审批组任务缺少审批组计划".to_string())?;
+            let execution_id_num =
+                execution_id.ok_or_else(|| "审批组任务缺少执行记录".to_string())?;
+            reject_terminates = plan.reject_action != "continue";
+            assignee_name = plan
+                .members
+                .iter()
+                .find(|member| member.user_id == user_id.to_string())
+                .map(|member| member.user_name.clone())
+                .or(assignee_name);
+
+            let (result, final_approved) = crate::approval_group::submit_vote(
+                execution_id_num,
+                task.instance_id,
+                task.task_id,
+                &task.node_id,
+                user_id,
+                &variable_map,
+                plan,
+            )
+            .await?;
+            decision = result;
+            final_decision = final_approved;
+
+            if let Some(approved) = final_decision {
+                let votes = crate::approval_group::list_votes(task.task_id)
+                    .await
+                    .unwrap_or_default();
+                variable_map.insert("approval_votes".to_string(), json!(votes));
+                variable_map.insert("approved".to_string(), json!(approved));
+                let approval_variable = snapshot
+                    .node_configs
+                    .get(&task.node_id)
+                    .and_then(|node| {
+                        node.config
+                            .get("approval_variable")
+                            .or_else(|| node.config.get("variable"))
+                    })
+                    .and_then(Value::as_str)
+                    .unwrap_or("approved");
+                if approval_variable != "approved" {
+                    variable_map.insert(approval_variable.to_string(), json!(approved));
+                }
+                database::with_schema(schema.clone(), async {
+                    runtime
+                        .engine
+                        .complete_user_task(task_uuid, variable_map.clone())
+                        .await
+                })
+                .await
+                .map_err(|e| format!("完成审批任务失败: {e}"))?;
+            }
+        } else {
+            if !assignee_matches_user(&task.assignee, user_id).await {
+                return Err("您不是该审批任务的审批人".to_string());
+            }
+            reject_terminates = snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.node_configs.get(&task.node_id))
+                .and_then(|node| node.config.get("reject_action"))
+                .and_then(Value::as_str)
+                .map(|value| value == "terminate")
+                .unwrap_or(false);
+            let approval_variable = snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.node_configs.get(&task.node_id))
+                .and_then(|node| {
+                    node.config
+                        .get("approval_variable")
+                        .or_else(|| node.config.get("variable"))
+                })
+                .and_then(Value::as_str)
+                .unwrap_or("approved");
+            if approval_variable != "approved" {
+                variable_map.insert(approval_variable.to_string(), json!(approved));
+            }
+            database::with_schema(schema.clone(), async {
+                runtime
+                    .engine
+                    .complete_user_task(task_uuid, variable_map.clone())
+                    .await
+            })
+            .await
+            .map_err(|e| format!("完成审批任务失败: {e}"))?;
+        }
+
+        match final_decision {
+            Some(false) if reject_terminates => decision.status = "rejected".to_string(),
+            Some(false) => decision.status = "completed".to_string(),
+            None => decision.status = "pending".to_string(),
+            Some(true) => decision.status = "completed".to_string(),
+        }
+
+        if let Some(execution_id_num) = execution_id {
+            let execution_id = execution_id_num.to_string();
+            let _ = crate::projection::append_approval_result(
                 &execution_id,
                 &task.node_id,
-                None,
-                "success",
-                None,
-                Some(&approval_output),
-                None,
+                &task.task_id.to_string(),
+                &user_id.to_string(),
+                assignee_name.as_deref(),
+                approved,
+                comment.as_deref(),
+                final_decision,
             )
             .await;
             if let Err(error) = sync_execution(&execution_id).await {
                 tracing::warn!("审批后同步执行状态失败: {}", error);
             }
+            if final_decision == Some(false) && reject_terminates {
+                let message = format!(
+                    "审批未通过：{}",
+                    assignee_name.as_deref().unwrap_or(&user_id.to_string())
+                );
+                if let Err(error) =
+                    crate::projection::mark_execution_rejected(&execution_id, &message).await
+                {
+                    tracing::warn!("标记审批拒绝状态失败: {}", error);
+                }
+            }
         }
 
         tracing::info!(
-            "审批任务已完成: task_id={}, node_id={}, instance_id={}",
+            "审批任务已完成: task_id={}, node_id={}, instance_id={}, status={}",
             task_uuid,
             task.node_id,
-            task.instance_id
+            task.instance_id,
+            decision.status
         );
-        Ok(())
+        Ok(decision)
     }
 
     /// 按 `definition_hash` 决定是否重新部署，返回引擎定义 key。

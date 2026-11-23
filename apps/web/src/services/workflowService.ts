@@ -167,7 +167,7 @@ export interface WorkflowExecution {
     workflow_name?: string;
     trigger_type: string;
     /** waiting：引擎挂起中（等待审批 / 定时器 / 服务任务回调） */
-    status: 'running' | 'waiting' | 'success' | 'failed' | 'cancelled';
+    status: 'running' | 'waiting' | 'success' | 'failed' | 'rejected' | 'cancelled';
     input_data?: unknown;
     result_data?: unknown;
     error_message?: string;
@@ -205,6 +205,22 @@ export interface PendingWorkflowTask {
     workflow_id?: string;
     workflow_name?: string;
     interrupt_payload?: unknown;
+    /** 审批人姓名（后端 enrichment） */
+    assignee_name?: string;
+    /** single / all（会签） / any（或签） */
+    approval_type?: 'single' | 'all' | 'any';
+    member_count?: number;
+    approved_count?: number;
+    rejected_count?: number;
+    has_voted?: boolean;
+}
+
+/** 审批提交结果 */
+export interface ApprovalDecisionResult {
+    status: 'pending' | 'completed' | 'rejected';
+    approved_count: number;
+    rejected_count: number;
+    member_count: number;
 }
 
 // ======================== 服务方法 ========================
@@ -257,7 +273,7 @@ export async function saveWorkflow(params: {
  * 删除工作流（软删除）
  */
 export async function deleteWorkflow(id: string): Promise<void> {
-    await api.post<void>('delete_workflow', { id });
+    await api.delete<void>('delete_workflow', { id });
 }
 
 /**
@@ -316,10 +332,12 @@ export async function cancelExecution(executionId: string): Promise<void> {
 export async function listPendingTasks(params?: {
     workflowId?: string;
     executionId?: string;
+    includeAll?: boolean;
 }): Promise<PendingWorkflowTask[]> {
     return api.get<PendingWorkflowTask[]>('list_pending_tasks', {
         workflowId: params?.workflowId,
         executionId: params?.executionId,
+        includeAll: params?.includeAll,
     });
 }
 
@@ -332,8 +350,8 @@ export async function listPendingTasks(params?: {
 export async function completeUserTask(params: {
     taskId: string;
     variables?: Record<string, unknown>;
-}): Promise<void> {
-    await api.post<void>('complete_user_task', {
+}): Promise<ApprovalDecisionResult> {
+    return api.post<ApprovalDecisionResult>('complete_user_task', {
         taskId: params.taskId,
         variables: params.variables,
     });

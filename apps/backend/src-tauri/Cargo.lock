@@ -415,6 +415,7 @@ dependencies = [
  "utils",
  "utoipa",
  "uuid",
+ "workflow",
 ]
 
 [[package]]
@@ -15223,6 +15224,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
+ "utils",
  "uuid",
 ]
 
