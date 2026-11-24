@@ -105,7 +105,24 @@ async fn execute_skill_handler(
             .ok_or_else(|| format!("Skill '{}' 未找到", req.skill_id))?
     };
 
-    // 待执行代码：优先取 config.code（显式脚本），否则把选中文本交给沙箱解释器
+    // 运行模式决定执行路径：默认 in_process（同进程、不启用沙盒）
+    let mode = service::sandbox_service::mode();
+    if mode == service::sandbox_service::SandboxMode::InProcess {
+        let mut metadata = HashMap::new();
+        metadata.insert("skill_id".to_string(), req.skill_id.clone());
+        metadata.insert("sandbox".to_string(), mode.as_str().to_string());
+        metadata.insert("executor".to_string(), "unavailable".to_string());
+        return Ok(Json(
+            SkillResult::new(
+                in_process_skill_message(&skill_name),
+                "markdown",
+                "after_selection",
+            )
+            .with_metadata(metadata),
+        ));
+    }
+
+    // 待执行代码：优先取 config.code（显式脚本），否则把选中文本交给沙箱执行
     let code = req
         .config
         .get("code")
@@ -138,7 +155,8 @@ async fn execute_skill_handler(
             metadata.insert("skill_id".to_string(), req.skill_id.clone());
             metadata.insert("exit_code".to_string(), result.exit_code.to_string());
             metadata.insert("duration_ms".to_string(), result.duration_ms.to_string());
-            metadata.insert("sandbox".to_string(), "cube".to_string());
+            metadata.insert("sandbox".to_string(), mode.as_str().to_string());
+            metadata.insert("executor".to_string(), "sandbox".to_string());
 
             Ok(Json(
                 SkillResult::new(output, "markdown", "after_selection").with_metadata(metadata),
@@ -150,6 +168,13 @@ async fn execute_skill_handler(
             "after_selection",
         ))),
     }
+}
+
+/// 同进程模式下的 Skill 提示（不涉及 Python：本项目没有解释器执行器）
+fn in_process_skill_message(skill_name: &str) -> String {
+    format!(
+        "> ℹ️ **{skill_name} 未执行**\n>\n> 当前为同进程模式（mode=in_process）：内置 Skill 执行器尚未实现，自定义 Skill 需要沙盒。\n> 如需沙盒执行，请把配置 `[sandbox] mode` 设为 `cube` 或 `openshell`。"
+    )
 }
 
 /// 注册自定义 Skill
@@ -200,4 +225,18 @@ async fn unregister_skill_handler(
 async fn get_skill_count_handler(State(state): State<Arc<SkillRouterState>>) -> Json<usize> {
     let registry = state.registry.lock().await;
     Json(registry.skill_count())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn in_process_message_tells_user_what_to_do() {
+        let message = in_process_skill_message("生成摘要");
+        assert!(message.contains("生成摘要"));
+        assert!(message.contains("未执行"));
+        assert!(message.contains("mode=in_process"));
+        assert!(message.contains("cube") && message.contains("openshell"));
+    }
 }

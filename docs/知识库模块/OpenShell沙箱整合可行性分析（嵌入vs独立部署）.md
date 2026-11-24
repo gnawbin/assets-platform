@@ -1,7 +1,8 @@
 # OpenShell 沙箱整合可行性分析（嵌入式 vs 独立部署）
 
 > 结论先行：**不推荐嵌入式，推荐「独立部署 + 客户端接入」；实现落在新增 crate `sandbox-openshell`，不并入 `crates/sandbox-cube`。**
-> 契约仍由 `crates/sandbox` 持有，`service` 通过 `SANDBOX_BACKEND` 在 CubeSandbox / OpenShell / Disabled 之间切换。
+> 契约仍由 `crates/sandbox` 持有，`service` 通过 `SANDBOX_MODE` 在 `in_process` / CubeSandbox / OpenShell 之间切换。
+> 运行模式默认 **`in_process`（不启用沙盒）**：`SANDBOX_BACKEND` / OpenShell 相关开关仅在显式设置 `mode = "cube" | "openshell"` 后生效。
 
 ---
 
@@ -35,9 +36,9 @@
 | 🧭 **部署形态** | **独立部署**（gateway 独立进程/容器/Helm Release），平台侧只做 gRPC 客户端 |
 | 📦 **代码归属** | **新增 `crates/sandbox-openshell`**；`crates/sandbox-cube` 保持单协议、零改动 |
 | 🧱 **契约** | 扩展 `crates/sandbox`（补 `image` / `command` / `labels` / `policy` / `endpoint`），保持向后兼容 |
-| 🔀 **切换方式** | `service::sandbox_service` 增加 `SandboxBackend` 枚举，配置 `SANDBOX_BACKEND=cube\|openshell` |
-| 🖥️ **桌面端** | 不可本地部署（Windows 不在官方安装路径内），维持 `SANDBOX_ENABLED=false` 或连内网 gateway |
-| 🔀 **调用形态** | 默认 **M2 / M1b：Agent 整体跑在沙箱内**；`SANDBOX_AGENT_IN_SANDBOX=false` 回退 M1a（Agent 在平台进程内，见 §6.6） |
+| 🔀 **切换方式** | `service::sandbox_service` 增加 `SandboxMode` 枚举，配置 `SANDBOX_MODE=in_process\|cube\|openshell`（旧键 `SANDBOX_ENABLED` + `SANDBOX_BACKEND` 兼容） |
+| 🖥️ **桌面端** | 不可本地部署（Windows 不在官方安装路径内），维持 `mode="in_process"`（默认）或连内网 gateway |
+| 🔀 **调用形态** | 沙盒启用后（`mode=openshell`）默认 **M2 / M1b：Agent 整体跑在沙箱内**；`agent_in_sandbox=false` 回退 M1a（Agent 在平台进程内，见 §6.6）；沙盒默认关闭（`in_process`）时 Agent 始终在平台进程内 |
 | 📊 **审计** | OCSF → OTel collector，**同时**落 `sys_oper_log`（双通道，见 §6.8） |
 
 否决嵌入式的两条硬理由：
@@ -219,7 +220,7 @@ graph TB
 | 与既有分层一致 | ❌ | ✅（对齐 `llm/llm-openai`、`vector/vector-*`） | ❌ 一 crate 两协议栈 |
 | 安全 / 隔离 | ❌ 业务进程拿 Docker root | ✅ 分权、分故障域 | ✅ 但依赖树污染 |
 | 桌面端影响 | 灾难 | 中：多一个庞大的 gRPC 依赖树 | 大：cube 的用户被迫编入 tonic |
-| 可替换 / 可回滚 | ❌ | ✅ `SANDBOX_BACKEND` 一行切换 | ⚠️ |
+| 可替换 / 可回滚 | ❌ | ✅ `SANDBOX_MODE` 一行切换 | ⚠️ |
 | 依赖纪律 | — | ✅ `reqwest` 与 `tonic` 物理隔离 | ❌ 冲突 |
 | 运维成本 | 低部署 + 高排障 | 中（一套 compose/Helm） | 中 |
 | **结论** | 否决 | **采纳** | 否决 |
@@ -253,10 +254,11 @@ crates/sandbox-openshell/
 ### 6.2 service 接入（唯一逻辑改动）
 
 ```rust
-/// 沙箱后端（`SANDBOX_BACKEND`，缺省 cube 以保持现有行为）
+/// 沙箱运行模式（`SANDBOX_MODE`；默认 in_process，不启用沙盒）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SandboxBackend {
+pub enum SandboxMode {
     #[default]
+    InProcess,
     Cube,
     OpenShell,
 }
@@ -265,9 +267,10 @@ pub enum SandboxBackend {
 if !config.should_enable() {
     return Arc::new(DisabledRuntime);
 }
-let runtime: Arc<dyn SandboxRuntime> = match config.backend {
-    SandboxBackend::Cube => match CubeSandboxRuntime::from_env() { /* 现有逻辑 */ },
-    SandboxBackend::OpenShell => match OpenShellRuntime::from_env() { /* 失败同样降级 Disabled */ },
+let runtime: Arc<dyn SandboxRuntime> = match config.mode {
+    SandboxMode::InProcess => Arc::new(DisabledRuntime),
+    SandboxMode::Cube => match CubeSandboxRuntime::from_env() { /* 现有逻辑 */ },
+    SandboxMode::OpenShell => match OpenShellRuntime::from_env() { /* 失败同样降级 Disabled */ },
 };
 ```
 
@@ -284,10 +287,11 @@ let runtime: Arc<dyn SandboxRuntime> = match config.backend {
 ```toml
 # ======================== 沙箱（CubeSandbox / OpenShell）========================
 [sandbox]
-# 总开关：false = DisabledRuntime（能力不可用但进程正常启动）
-enabled = false
-# 后端选择：cube（默认，现有行为）| openshell
-backend = "cube"
+# 运行模式：in_process（默认，不启用沙盒）| cube | openshell
+mode = "in_process"
+# 兼容旧键（deprecated）：未设置 mode 时，enabled=true 等价 mode=cube|openshell
+# enabled = false
+# backend = "cube"
 
 # ---- Cube 段保持原样（base_url / api_key / template_id / data_host_suffix / envd_port / proxy_node_ip / python）----
 
@@ -310,7 +314,7 @@ openshell_policy = ""
 openshell_ready_timeout_secs = 120
 ```
 
-映射结果：`SANDBOX_BACKEND`、`SANDBOX_OPENSHELL_GATEWAY_URL`、`SANDBOX_OPENSHELL_TOKEN` ……**无需改加载代码**。
+映射结果：`SANDBOX_MODE`、`SANDBOX_OPENSHELL_GATEWAY_URL`、`SANDBOX_OPENSHELL_TOKEN` ……**无需改加载代码**（旧键 `SANDBOX_BACKEND` / `SANDBOX_ENABLED` 仍被识别，用于兼容现网配置）。
 
 ### 6.4 部署拓扑
 
@@ -341,7 +345,7 @@ graph LR
 |------|--------|------|
 | 开发 / 单机 | `docker-compose.yml` 增 `openshell-gateway` 服务 | `ghcr.io/nvidia/openshell/gateway:latest`、`-p 127.0.0.1:8080:8080`、`-v openshell-state:/var/openshell`、`-v /var/run/docker.sock:/var/run/docker.sock`、`OPENSHELL_DB_URL=sqlite:/var/openshell/gateway.db`；**与 assets-server 分容器** |
 | 生产（K8s） | Helm `oci://ghcr.io/nvidia/openshell/helm-chart` | 独立命名空间 / 独立节点池；平台侧只配 URL + token + CA |
-| 桌面端 | 不部署 | `SANDBOX_ENABLED=false`；或连内网 gateway（与 Cube 同路径） |
+| 桌面端 | 不部署 | `mode="in_process"`（缺省）；或连内网 gateway（与 Cube 同路径） |
 
 ### 6.5 租户映射
 
@@ -355,9 +359,9 @@ graph LR
 
 ### 6.6 Agent 的两种落位：默认沙箱内（M2 / M1b），可回退平台进程（M1a）
 
-**决策**：缺省 **Agent 整体运行在 OpenShell 沙箱内**（§3.3 的 M2，即 M1 的后端模式的"沙箱托管"子形态 M1b）——OpenShell 的设计中心正是「策略 + 凭证占位符 + supervisor 托管」；`SANDBOX_AGENT_IN_SANDBOX=false` 时回退到 **M1a：Agent 在平台进程内，沙箱只执行工具代码**。
+**决策**：沙盒**默认关闭**（`mode = "in_process"`，Agent 在平台进程内运行，不连接任何沙箱服务）；显式设置 `mode = "openshell"` 后，缺省 **Agent 整体运行在 OpenShell 沙箱内**（§3.3 的 M2，即 M1 的后端模式的"沙箱托管"子形态 M1b）——OpenShell 的设计中心正是「策略 + 凭证占位符 + supervisor 托管」；`SANDBOX_AGENT_IN_SANDBOX=false` 时回退到 **M1a：Agent 在平台进程内，沙箱只执行工具代码**。
 
-| 维度 | **M1b / M2（默认）Agent 在沙箱内** | **M1a（回退）Agent 在平台进程内** |
+| 维度 | **M1b / M2（沙盒启用后默认）Agent 在沙箱内** | **M1a（回退；也是默认模式下的唯一形态）Agent 在平台进程内** |
 |------|-----------------------------------|-----------------------------------|
 | 推理 / 规划 / 记忆 | 沙箱镜像内的 agent 运行时 | `workflow/src/agent.rs`（adk-graph StateGraph）+ `service::llm_gateway_service` |
 | 沙箱职责 | 保护 agent 的**全部** shell / 文件 / 网络 | 只保护「代码/命令执行」这一段 |
@@ -371,8 +375,10 @@ graph LR
 
 ```toml
 [sandbox]
-# true（缺省）= Agent 在沙箱内（M1b/M2）；false = 平台进程内（M1a）
-agent_in_sandbox = true
+# 运行模式：in_process（缺省，Agent 始终在平台进程内）| cube | openshell
+mode = "in_process"
+# 仅 mode="openshell" 时有效；false（缺省）= Agent 在平台进程内（M1a）
+agent_in_sandbox = false
 # M1b 时镜像必须自带 agent 运行时；M1a 时只需解释器镜像
 openshell_image = ""
 openshell_command = ""
@@ -380,7 +386,7 @@ openshell_command = ""
 
 **对现有代码的精确影响**：
 
-| 文件 | M1b（默认） | M1a（回退） |
+| 文件 | M1b（沙盒启用后默认） | M1a（回退） |
 |------|-------------|-------------|
 | `workflow/src/sandbox_node.rs` | 需扩展：会话句柄复用、流式输出、审批中断 | 不改（`execute(runtime.as_ref(), ...)` 已契约驱动） |
 | `workflow/src/agent.rs` | 需重构：agent 生命周期移入沙箱，平台只保留编排 | 不改 |
@@ -575,7 +581,7 @@ service:
 
 | 项 | 影响 | 应对 |
 |----|------|------|
-| `openshell-sdk` 未上 crates.io | `Cargo.lock` 出现 git source；**首次/CI 构建需联网**，离线环境需 vendor | 在 `[workspace.dependencies]` 用 `git + tag` 固定；部署文档写明「离线构建需 `cargo vendor`」；`README.md` 的 offline 承诺同步修订 |
+| `openshell-sdk` 未上 crates.io | `Cargo.lock` 出现 git source；**首次/CI 构建需联网**，离线环境需 vendor | **已落地改为 vendored `.proto` + `tonic` + `protoc-bin-vendored` 自建客户端**（无 git 依赖，见 Rust 版文档 §10.5）；`openshell-sdk`（git tag）保留为备选 |
 | tonic / prost | 新增 gRPC 依赖树；若 SDK 未内置生成代码则**需要 `protoc`** | 落地前实测（`cargo build -p sandbox-openshell` 于干净环境）；若需 `protoc`，写进 README 前置依赖表 |
 | workspace 规则 | `[workspace.dependencies]` **不允许 optional** | 若必须让桌面端不编 OpenShell：`openshell-sdk` 以 optional **在 `crates/sandbox-openshell` 本地**声明 + crate feature；但会与「开关走 env 而非 feature」冲突，**建议先无条件编译**，实测后再决策 |
 | 二进制体积 | 桌面版显著增大（tonic + TLS） | 与上一条联动评估；必要时把 OpenShell 实现限定在 `server` 二进制 |
@@ -600,7 +606,7 @@ service:
 | `api` | 内部端点服务间鉴权（无凭据 401）、批量背压、失败不阻塞主链路 | 集成测试 | `cargo test -p api sandbox_audit` |
 | 端到端 | `openshell logs` 与 `sys_oper_log` 中同一条事件可按 `event_uid` 对齐 | 冒烟 | 见下方冒烟第 9 步 |
 
-手工冒烟（`SANDBOX_BACKEND=openshell`）：
+手工冒烟（`mode=openshell`）：
 
 1. `openshell status` → `Connected` / `Authenticated`；
 2. `POST /api/sandbox/sessions` → 200 + 句柄；
@@ -609,7 +615,7 @@ service:
 5. `POST .../files` + `GET .../files` 往返一致（base64）；
 6. `POST .../pause` → `POST .../resume` → `exec` 可用，**且提示内存态丢失**；
 7. `DELETE` 会话 → `exec` 返回 404/409；
-8. `SANDBOX_BACKEND=cube` 重启 → 现有 Cube 链路回归；`enabled=false` → 桌面登录/资产/上传全正常；
+8. `mode=cube` 重启 → 现有 Cube 链路回归；`mode=in_process`（缺省）→ 桌面登录/资产/上传全正常；
 9. 触发一次策略拒绝（`curl` 未白名单域名）→ OTel 日志与 `sys_oper_log` 同时出现同一 `event_uid`。
 
 ---
@@ -621,7 +627,7 @@ service:
 | **P0 运维前置** | 部署 gateway（compose 或 Helm），确定 workspace / 镜像 / token / CA；记录 gateway 与 SDK tag | 部署记录 | `openshell status` = Connected；能手工 `sandbox create` + `exec` |
 | **P1 契约扩展** | `SandboxSpec.{image,command,labels,policy_yaml}`、`SandboxHandle.endpoint`；补单测 | `crates/sandbox` | `cargo test -p sandbox` / `-p sandbox-cube` 全绿（零回归） |
 | **P2 实现 crate** | `crates/sandbox-openshell`（client/convert/policy/error）+ 假 gateway 测试 | 新 crate | `cargo test -p sandbox-openshell` |
-| **P3 service 接入** | `SandboxBackend` + `agent_in_sandbox` 开关 + 配置键 + 降级 + test-only setter | `sandbox_service.rs` | `SANDBOX_BACKEND=openshell` 时 exec 走 OpenShell；`cube` 行为不变；开关可回退 M1a |
+| **P3 service 接入** | `SandboxMode` + `agent_in_sandbox` 开关 + 配置键 + 降级 + test-only setter | `sandbox_service.rs` | `mode=openshell` 时 exec 走 OpenShell；`cube` 行为不变；默认 `in_process` 时全链路可用 |
 | **P4 部署与文档** | `.env.example.toml`、`docker-compose.yml`、部署指南补「运行期外部依赖」、本文档、README 索引 | 配置 + 文档 | 按本文档可复现部署 + 冒烟清单通过 |
 | **P5 审计与可观测** | gateway OCSF → OTel；`sandbox_audit` 落 `sys_oper_log`（映射 / 脱敏 / 截断 / 去重 / 保留期） | `sandbox_audit.rs` + 内部路由 + collector 配置 | 冒烟第 9 步通过；`sys_oper_log` 可按 `event_uid` 对齐 |
 | **P6 可选** | 策略模板化（`NetworkPolicy` + 文件白名单 → YAML）、middleware 脱敏、CI/CD 场景、`logs`/快照能力实测 | 策略文件 + 评估结论 | 策略可 review / 可回滚 |
@@ -672,8 +678,8 @@ service:
 | `crates/sandbox/src/model.rs` | `SandboxSpec` 增 `image/command/labels/policy_yaml`；`SandboxHandle` 增 `endpoint`（均带默认值） |
 | `crates/sandbox/src/lib.rs` | `pub use` 新类型字段（无破坏） |
 | `crates/service/Cargo.toml` | 增 `sandbox-openshell` |
-| `crates/service/src/sandbox_service.rs` | `SandboxBackend` + 后端选择 + `should_enable` 分后端 + test-only runtime setter |
-| `apps/backend/.env.example.toml` | `[sandbox]` 增 `backend` 与 `openshell_*`（扁平标量） |
+| `crates/service/src/sandbox_service.rs` | `SandboxMode` + 模式选择 + `should_enable` 分模式 + test-only runtime setter |
+| `apps/backend/.env.example.toml` | `[sandbox]` 增 `mode`（默认 `in_process`）与 `openshell_*`（扁平标量） |
 | `docker-compose.yml` | 新增 `openshell-gateway` 服务（独立容器） |
 | `docs/桌面与Web双形态部署指南.md` | §3.3 运行期外部依赖补「OpenShell gateway（按需）」 |
 | `docs/知识库模块/README.md` | 文档索引增一行 |
@@ -705,7 +711,7 @@ service:
 
 | 项 | 决策 | 落点 |
 |----|------|------|
-| Agent 落位 | **默认 M2 / M1b：Agent 整体跑在沙箱内**；`SANDBOX_AGENT_IN_SANDBOX=false` 回退 M1a（平台进程内） | §6.6 |
+| Agent 落位 | 沙盒启用后（`mode=openshell`）默认 **M2 / M1b：Agent 整体跑在沙箱内**；`agent_in_sandbox=false` 回退 M1a（平台进程内）；沙盒默认关闭（`in_process`） | §6.6 |
 | 审计通道 | **双写**：OCSF → OTel collector，**同时**落 `sys_oper_log` | §6.8 |
 | 模型调用归属 | **L1**：沙箱内 agent 出网访问平台 LLM 网关 | §6.7 |
 | 代码归属 | 新增 `crates/sandbox-openshell`，`sandbox-cube` 不动 | §5、§6.1 |
@@ -731,6 +737,8 @@ service:
 |------|------|------|
 | 2026-11-13 | v1.0 | 初稿：核对 OpenShell v0.1.8 架构/接口/部署与 SDK 发布状态；给出「嵌入式 vs 独立部署」两层辨析；确定独立部署 + 新增 `crates/sandbox-openshell`、契约向后兼容扩展、错误映射、安全边界、实施计划与变更清单 |
 | 2026-11-13 | v1.1 | 补充：①§3.3 集成模式 M1~M8（含"调用关系与部署形态正交"）；②§3.4 外部材料核验表（OpenClaw / RESTful / Mirror Mode / Cisco AI Defense 等 16 条逐条核验）；③§6.6 Agent 默认落位沙箱内（M1b/M2）+ `SANDBOX_AGENT_IN_SANDBOX` 回退 M1a；④§6.7 模型调用走 L1（平台 LLM 网关）；⑤§6.8 OCSF 审计双通道（OTel + `sys_oper_log`）；⑥§9/§10/§11/§12/§14 同步（新增 P5 审计、`sandbox_audit` 模块与内部端点） |
+| 2026-11-24 | v1.2 | 明确沙盒**默认关闭**：配置改为 `mode = "in_process"`（默认）/ `cube` / `openshell`，旧键 `enabled + backend` 兼容；M1b 仅在 `mode=openshell` + `agent_in_sandbox=true` 时生效 |
+| 2026-11-24 | v1.3 | 客户端实现方式变更：不采用 `openshell-sdk` 的 git 依赖，改为 vendored `.proto` + `tonic` + `protoc-bin-vendored` 自建 `sandbox-openshell`（无 git 依赖）；`service` 已按 `mode=openshell` 装配 |
 
 ---
 

@@ -27,6 +27,10 @@ pub mod register_routes;
 pub mod response;
 pub mod role_routes;
 pub mod sandbox_routes;
+// 沙箱审计内部接收端点（服务间鉴权；不挂 protected_routes）
+pub mod sandbox_audit_routes;
+// 沙箱内部 LLM 端点（OpenAI 兼容；服务间鉴权）
+pub mod internal_llm_routes;
 pub mod security;
 pub mod skill_routes;
 // 运维终端（SSH）：REST + WebSocket，票据单独一个模块
@@ -164,6 +168,9 @@ pub async fn start_http_server_with(
     // ===== 沙箱空闲回收（设计文档 §6.2）：未启用时内部直接返回 =====
     service::sandbox_service::spawn_idle_reaper();
 
+    // ===== 沙箱审计保留期清理（每日一次；失败只 WARN）=====
+    spawn_sandbox_audit_cleanup();
+
     // ===== SSH 会话空闲回收（方案 §4.3）：进程内只启动一次 =====
     service::ssh_service::spawn_idle_reaper();
 
@@ -282,7 +289,7 @@ pub async fn build_router(
     };
 
     // 初始化智能问答路由（SSE 流式对话 + 会话管理，LLM Router 全局共享）
-    let (chat_router, conversation_router) = {
+    let (chat_router, conversation_router, internal_llm_router) = {
         let llm_router = llm_router.ok_or_else(|| {
             anyhow::anyhow!(
                 "LLM Router 未初始化，无法注册 /api/chat/stream 与 /api/conversations*"
@@ -301,7 +308,9 @@ pub async fn build_router(
 
         // 会话管理：路径占位符沿用命令参数名 {convId}，前端 extractParams 才能剥离
         let conversation_state =
-            std::sync::Arc::new(conversation_routes::ConversationRouterState { llm_router });
+            std::sync::Arc::new(conversation_routes::ConversationRouterState {
+                llm_router: llm_router.clone(),
+            });
         let conversation_router = Router::new()
             .route(
                 "/api/conversations",
@@ -325,7 +334,20 @@ pub async fn build_router(
             .layer(middleware::from_fn(authz::authz_middleware))
             .layer(middleware::from_fn(auth_middleware));
 
-        (chat_router, conversation_router)
+        // 内部 LLM 端点（沙箱 runner 专用）：只挂认证，handler 内校验服务身份 + scope
+        let internal_llm_state = std::sync::Arc::new(internal_llm_routes::InternalLlmState {
+            llm: llm_router.clone(),
+            pool: pool.clone(),
+        });
+        let internal_llm_router = Router::new()
+            .route(
+                "/internal/llm/v1/chat/completions",
+                post(internal_llm_routes::chat_completions),
+            )
+            .with_state(internal_llm_state)
+            .layer(middleware::from_fn(auth_middleware));
+
+        (chat_router, conversation_router, internal_llm_router)
     };
 
     // 运维终端（SSH）：开会话（REST）与终端通道（WS）共用票据状态。
@@ -372,6 +394,7 @@ pub async fn build_router(
         .merge(upload_router)
         .merge(chat_router)
         .merge(conversation_router)
+        .merge(internal_llm_router)
         .merge(ssh_open_router)
         .merge(ssh_ws_router)
         .merge(container_open_router)
@@ -807,7 +830,7 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             "/api/oauth-clients/{id}",
             put(oauth_routes::update_oauth_client).delete(oauth_routes::delete_oauth_client),
         )
-        // AI Agent 沙箱（CubeSandbox；SANDBOX_ENABLED=false 时统一返回 503）
+        // AI Agent 沙箱（默认 mode=in_process：统一返回 503；mode=cube|openshell 时走对应后端）
         .route("/api/sandbox/health", get(sandbox_routes::health))
         .route(
             "/api/sandbox/sessions",
@@ -863,11 +886,21 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .layer(middleware::from_fn(authz::authz_middleware))
         .layer(middleware::from_fn(auth_middleware));
 
+    // 沙箱审计内部端点：只挂认证（API Key），handler 内校验服务身份 + scope；
+    // 不挂 authz（服务身份没有 UserContext，会被一律 403）。
+    let audit_routes = Router::new()
+        .route(
+            "/internal/sandbox/audit",
+            post(sandbox_audit_routes::ingest),
+        )
+        .layer(middleware::from_fn(auth_middleware));
+
     // 合并所有路由（大文件上传路由在 start_http_server 中通过 .merge() 添加）
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .merge(skill_routes)
+        .merge(audit_routes)
         .with_state(state)
 }
 
@@ -915,6 +948,50 @@ fn spawn_cleanup_task() {
         loop {
             cleanup_once().await;
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        }
+    });
+}
+
+/// 沙箱审计保留期清理间隔（秒）：每日一次
+const SANDBOX_AUDIT_CLEANUP_INTERVAL_SECS: u64 = 24 * 3600;
+
+/// `SANDBOX_AUDIT_RETENTION_DAYS`（缺省 180，最小 1）
+fn sandbox_audit_retention_days() -> u64 {
+    std::env::var("SANDBOX_AUDIT_RETENTION_DAYS")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .filter(|days| *days > 0)
+        .unwrap_or(180)
+}
+
+/// 启动沙箱审计保留期清理任务（进程内只启动一次）
+///
+/// 写库失败只记 WARN；数据库尚未就绪时跳过本轮，下一轮再试。
+fn spawn_sandbox_audit_cleanup() {
+    let retention_days = sandbox_audit_retention_days();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        loop {
+            match database::get_pool() {
+                Ok(pool) => {
+                    match service::sandbox_audit::cleanup(&pool, retention_days).await {
+                        Ok(0) => tracing::debug!("沙箱审计清理：无需删除"),
+                        Ok(removed) => tracing::info!(
+                            removed,
+                            retention_days,
+                            "沙箱审计过期记录已清理"
+                        ),
+                        Err(error) => tracing::warn!("沙箱审计清理失败: {error}"),
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("沙箱审计清理跳过（数据库未就绪）: {error}");
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(
+                SANDBOX_AUDIT_CLEANUP_INTERVAL_SECS,
+            ))
+            .await;
         }
     });
 }

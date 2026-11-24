@@ -2,7 +2,7 @@
 //!
 //! 职责边界（设计文档 §6.1）：
 //! 1. 配置装载：`SANDBOX_*` 环境变量（由 `.env.toml` 的 `[sandbox]` 段映射）；
-//! 2. 运行时单例：`SANDBOX_ENABLED=false`（缺省）时装 [`DisabledRuntime`]，
+//! 2. 运行时单例：`mode = "in_process"`（缺省，不启用沙盒）时装 [`DisabledRuntime`]，
 //!    保证「不配置也能启动」，所有能力返回 `Unsupported`；
 //! 3. 会话亲和：`SessionKey(tenant, user, scope) → 沙箱句柄`，避免每次执行都冷启动；
 //! 4. TTL 回收：空闲超过 `SANDBOX_SESSION_TTL_SECS` 先 `pause`，超过
@@ -19,6 +19,7 @@ use sandbox::{
     SandboxRuntime, SandboxSpec, SandboxState, SandboxSummary, DEFAULT_TIMEOUT_SECS,
 };
 use sandbox_cube::CubeSandboxRuntime;
+use sandbox_openshell::OpenShellRuntime;
 use tokio::sync::Mutex;
 
 /// 会话键：租户 + 用户 + 业务会话（对话 ID / 工作流运行 ID / Skill ID）
@@ -47,13 +48,55 @@ impl SessionKey {
     }
 }
 
+/// 沙箱运行模式
+///
+/// - [`SandboxMode::InProcess`]（缺省）：**同进程，不启用沙盒**，不连接任何外部服务；
+/// - [`SandboxMode::Cube`]：CubeSandbox（需 `SANDBOX_BASE_URL`）；
+/// - [`SandboxMode::OpenShell`]：OpenShell gateway（实现见 P2/P3，当前装配时降级为 Disabled）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SandboxMode {
+    /// 同进程（缺省）
+    #[default]
+    InProcess,
+    /// CubeSandbox
+    Cube,
+    /// OpenShell（尚未实现）
+    OpenShell,
+}
+
+impl SandboxMode {
+    /// 稳定字符串（日志 / 健康信息 / 业务元数据）
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InProcess => "in_process",
+            Self::Cube => "cube",
+            Self::OpenShell => "openshell",
+        }
+    }
+
+    /// 解析配置值（大小写、`-` 与 `_` 容错；`none` / `off` / `disabled` 视同 `in_process`）
+    #[must_use]
+    pub fn parse(raw: &str) -> Option<Self> {
+        let normalized = raw.trim().to_ascii_lowercase().replace(['-', ' '], "_");
+        match normalized.as_str() {
+            "in_process" | "inprocess" | "none" | "off" | "disabled" => Some(Self::InProcess),
+            "cube" | "cube_sandbox" | "cubesandbox" => Some(Self::Cube),
+            "openshell" | "open_shell" => Some(Self::OpenShell),
+            _ => None,
+        }
+    }
+}
+
 /// 沙箱配置（**不含密钥**，密钥留在 [`sandbox_cube::CubeOptions`]，其 `Debug` 已脱敏）
 #[derive(Debug, Clone)]
 pub struct SandboxConfig {
-    /// 总开关
-    pub enabled: bool,
+    /// 运行模式（缺省 `InProcess`：同进程，不启用沙盒）
+    pub mode: SandboxMode,
     /// CubeAPI 根地址（仅用于日志与诊断展示）
     pub base_url: String,
+    /// OpenShell gateway 地址（仅用于日志与 `should_enable` 判定；连接由 `sandbox-openshell` 懒建）
+    pub openshell_gateway_url: String,
     /// 缺省模板
     pub template_id: String,
     /// 沙箱存活 / 续期时长（秒）
@@ -69,8 +112,9 @@ pub struct SandboxConfig {
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            mode: SandboxMode::InProcess,
             base_url: String::new(),
+            openshell_gateway_url: String::new(),
             template_id: String::new(),
             timeout_secs: DEFAULT_TIMEOUT_SECS,
             session_ttl_secs: 900,
@@ -86,8 +130,13 @@ impl SandboxConfig {
     pub fn from_env() -> Self {
         let defaults = Self::default();
         Self {
-            enabled: parse_bool("SANDBOX_ENABLED", defaults.enabled),
+            mode: resolve_mode(
+                env_trim("SANDBOX_MODE").as_deref(),
+                env_trim("SANDBOX_ENABLED").as_deref(),
+                env_trim("SANDBOX_BACKEND").as_deref(),
+            ),
             base_url: env_trim("SANDBOX_BASE_URL").unwrap_or_default(),
+            openshell_gateway_url: env_trim("SANDBOX_OPENSHELL_GATEWAY_URL").unwrap_or_default(),
             template_id: env_trim("SANDBOX_TEMPLATE_ID").unwrap_or_default(),
             timeout_secs: parse_u32("SANDBOX_TIMEOUT_SECS", defaults.timeout_secs).max(1),
             session_ttl_secs: parse_u64("SANDBOX_SESSION_TTL_SECS", defaults.session_ttl_secs)
@@ -102,10 +151,18 @@ impl SandboxConfig {
         }
     }
 
-    /// 是否真正装配 CubeSandbox（`enabled` 且 `base_url` 非空）
+    /// 当前模式是否具备装配条件
+    ///
+    /// - `InProcess`：永远 false（同进程，不装配沙盒）；
+    /// - `Cube`：需 `SANDBOX_BASE_URL` 非空；
+    /// - `OpenShell`：需 `SANDBOX_OPENSHELL_GATEWAY_URL` 非空（gateway 独立部署）。
     #[must_use]
     pub fn should_enable(&self) -> bool {
-        self.enabled && !self.base_url.trim().is_empty()
+        match self.mode {
+            SandboxMode::InProcess => false,
+            SandboxMode::Cube => !self.base_url.trim().is_empty(),
+            SandboxMode::OpenShell => !self.openshell_gateway_url.trim().is_empty(),
+        }
     }
 }
 
@@ -126,35 +183,80 @@ pub fn config() -> &'static SandboxConfig {
     CONFIG.get_or_init(SandboxConfig::from_env)
 }
 
+/// 当前运行模式（缺省 [`SandboxMode::InProcess`]）
+#[must_use]
+pub fn mode() -> SandboxMode {
+    config().mode
+}
+
 /// 全局运行时（缺省 [`DisabledRuntime`]）
 pub fn runtime() -> Arc<dyn SandboxRuntime> {
     RUNTIME
         .get_or_init(|| {
             let config = config();
-            if !config.should_enable() {
-                tracing::info!(
-                    enabled = config.enabled,
-                    base_url = %config.base_url,
-                    "沙箱未启用：装配 DisabledRuntime（代码执行能力返回 Unsupported）"
-                );
-                return Arc::new(DisabledRuntime);
-            }
-
-            match CubeSandboxRuntime::from_env() {
-                Ok(runtime) => {
+            match config.mode {
+                SandboxMode::InProcess => {
                     tracing::info!(
-                        base_url = %config.base_url,
-                        template = %config.template_id,
-                        "沙箱运行时已就绪（CubeSandbox）"
-                    );
-                    Arc::new(runtime)
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        "沙箱运行时初始化失败，降级为 DisabledRuntime：{}",
-                        to_message(&error)
+                        mode = config.mode.as_str(),
+                        "沙箱未启用（同进程模式）：装配 DisabledRuntime"
                     );
                     Arc::new(DisabledRuntime)
+                }
+                SandboxMode::OpenShell => {
+                    if !config.should_enable() {
+                        tracing::info!(
+                            mode = config.mode.as_str(),
+                            "OpenShell 配置不完整（SANDBOX_OPENSHELL_GATEWAY_URL 为空）：装配 DisabledRuntime"
+                        );
+                        return Arc::new(DisabledRuntime);
+                    }
+
+                    match OpenShellRuntime::from_env() {
+                        Ok(runtime) => {
+                            tracing::info!(
+                                gateway = %config.openshell_gateway_url,
+                                workspace = %std::env::var("SANDBOX_OPENSHELL_WORKSPACE")
+                                    .unwrap_or_else(|_| "default".to_string()),
+                                "沙箱运行时已就绪（OpenShell）"
+                            );
+                            Arc::new(runtime)
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                "OpenShell 运行时初始化失败，降级为 DisabledRuntime：{}",
+                                to_message(&error)
+                            );
+                            Arc::new(DisabledRuntime)
+                        }
+                    }
+                }
+                SandboxMode::Cube => {
+                    if !config.should_enable() {
+                        tracing::info!(
+                            mode = config.mode.as_str(),
+                            base_url = %config.base_url,
+                            "Cube 配置不完整（SANDBOX_BASE_URL 为空）：装配 DisabledRuntime"
+                        );
+                        return Arc::new(DisabledRuntime);
+                    }
+
+                    match CubeSandboxRuntime::from_env() {
+                        Ok(runtime) => {
+                            tracing::info!(
+                                base_url = %config.base_url,
+                                template = %config.template_id,
+                                "沙箱运行时已就绪（CubeSandbox）"
+                            );
+                            Arc::new(runtime)
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                "沙箱运行时初始化失败，降级为 DisabledRuntime：{}",
+                                to_message(&error)
+                            );
+                            Arc::new(DisabledRuntime)
+                        }
+                    }
                 }
             }
         })
@@ -213,11 +315,62 @@ fn parse_u32(key: &str, default: u32) -> u32 {
         .unwrap_or(default)
 }
 
-/// `true` / `1` / `yes` / `on` 视为开；其余一律按缺省值处理
-fn parse_bool(key: &str, default: bool) -> bool {
-    match env_trim(key).map(|v| v.to_ascii_lowercase()) {
-        Some(value) => matches!(value.as_str(), "true" | "1" | "yes" | "on"),
-        None => default,
+/// `true` / `1` / `yes` / `on` 视为开
+fn parse_bool_value(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes" | "on"
+    )
+}
+
+/// 解析运行模式：`SANDBOX_MODE` 优先，未设置时兼容旧键 `SANDBOX_ENABLED` + `SANDBOX_BACKEND`
+///
+/// 规则（安全优先：任何异常都回退到 `InProcess`，即不启用沙盒）：
+/// 1. `SANDBOX_MODE` 合法 → 直接采用；非法 → `InProcess` + WARN；
+/// 2. 未设置 `SANDBOX_MODE` 且 `SANDBOX_ENABLED` 为假（缺省）→ `InProcess`；
+/// 3. 旧键开启时按 `SANDBOX_BACKEND`（缺省 `cube`）解析；未知值 → `InProcess` + WARN。
+fn resolve_mode(
+    mode: Option<&str>,
+    legacy_enabled: Option<&str>,
+    legacy_backend: Option<&str>,
+) -> SandboxMode {
+    if let Some(raw) = mode.map(str::trim).filter(|value| !value.is_empty()) {
+        return match SandboxMode::parse(raw) {
+            Some(parsed) => parsed,
+            None => {
+                tracing::warn!(
+                    value = %raw,
+                    "SANDBOX_MODE 非法，回退为 in_process（不启用沙盒）"
+                );
+                SandboxMode::InProcess
+            }
+        };
+    }
+
+    if !legacy_enabled.map(parse_bool_value).unwrap_or(false) {
+        return SandboxMode::InProcess;
+    }
+
+    let backend = legacy_backend
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("cube");
+
+    match SandboxMode::parse(backend) {
+        Some(parsed @ (SandboxMode::Cube | SandboxMode::OpenShell)) => {
+            tracing::info!(
+                mode = parsed.as_str(),
+                "已按旧键 SANDBOX_ENABLED + SANDBOX_BACKEND 推导运行模式"
+            );
+            parsed
+        }
+        _ => {
+            tracing::warn!(
+                value = %backend,
+                "SANDBOX_BACKEND 未知，回退为 in_process（不启用沙盒）"
+            );
+            SandboxMode::InProcess
+        }
     }
 }
 
@@ -314,9 +467,22 @@ pub async fn run_command(
     command: String,
     argv: Vec<String>,
 ) -> Result<ExecResult, String> {
+    run_command_with_options(key, command, argv, None, None).await
+}
+
+/// 执行命令（可指定工作目录 / 单次超时；供 Agent 沙箱工具使用）
+pub async fn run_command_with_options(
+    key: SessionKey,
+    command: String,
+    argv: Vec<String>,
+    cwd: Option<String>,
+    timeout_secs: Option<u32>,
+) -> Result<ExecResult, String> {
     let handle = ensure_session(key).await?;
     let request = ExecRequest {
         argv,
+        cwd,
+        timeout_secs,
         ..ExecRequest::command(command)
     };
     exec_with_guard(&handle.id, request).await
@@ -411,12 +577,23 @@ pub async fn release_session(key: SessionKey) -> Result<(), String> {
     }
 }
 
-/// 控制面健康检查
+/// 控制面健康检查（消息里显式带出运行模式）
 pub async fn health() -> Result<HealthInfo, String> {
-    runtime()
+    let info = runtime()
         .health()
         .await
-        .map_err(|error| to_message(&error))
+        .map_err(|error| to_message(&error))?;
+    let base = info.message.unwrap_or_default();
+    let message = if base.is_empty() {
+        format!("mode={}", config().mode.as_str())
+    } else {
+        format!("{base}（mode={}）", config().mode.as_str())
+    };
+    Ok(HealthInfo {
+        ok: info.ok,
+        version: info.version,
+        message: Some(message),
+    })
 }
 
 /// 按租户列出沙箱（`metadata.tenant` 过滤）
@@ -511,39 +688,120 @@ mod tests {
     }
 
     #[test]
-    fn should_enable_requires_flag_and_base_url() {
-        let enabled_with_url = SandboxConfig {
-            enabled: true,
+    fn should_enable_requires_mode_and_base_url() {
+        let cube_with_url = SandboxConfig {
+            mode: SandboxMode::Cube,
             base_url: "http://cubeapi:3000".to_string(),
             ..SandboxConfig::default()
         };
-        assert!(enabled_with_url.should_enable());
+        assert!(cube_with_url.should_enable());
 
-        let enabled_without_url = SandboxConfig {
-            enabled: true,
+        let cube_without_url = SandboxConfig {
+            mode: SandboxMode::Cube,
             base_url: "  ".to_string(),
             ..SandboxConfig::default()
         };
-        assert!(!enabled_without_url.should_enable());
+        assert!(!cube_without_url.should_enable());
 
-        let disabled_with_url = SandboxConfig {
-            enabled: false,
+        let in_process_with_url = SandboxConfig {
             base_url: "http://cubeapi:3000".to_string(),
             ..SandboxConfig::default()
         };
-        assert!(!disabled_with_url.should_enable());
+        assert!(!in_process_with_url.should_enable(), "默认同进程不得装配沙盒");
+
+        let openshell_without_gateway = SandboxConfig {
+            mode: SandboxMode::OpenShell,
+            base_url: "http://cubeapi:3000".to_string(),
+            ..SandboxConfig::default()
+        };
+        assert!(
+            !openshell_without_gateway.should_enable(),
+            "OpenShell 未配置 gateway 时不得装配"
+        );
+
+        let openshell_with_gateway = SandboxConfig {
+            mode: SandboxMode::OpenShell,
+            openshell_gateway_url: "http://127.0.0.1:8080".to_string(),
+            ..SandboxConfig::default()
+        };
+        assert!(openshell_with_gateway.should_enable());
     }
 
     #[test]
     fn defaults_are_safe_when_env_missing() {
         let defaults = SandboxConfig::default();
-        assert!(!defaults.enabled, "缺省必须是关闭");
+        assert_eq!(
+            defaults.mode,
+            SandboxMode::InProcess,
+            "缺省必须是同进程（不启用沙盒）"
+        );
         assert_eq!(defaults.timeout_secs, DEFAULT_TIMEOUT_SECS);
         assert!(defaults.session_ttl_secs >= 30);
-        assert!(parse_bool("__SANDBOX_NO_SUCH_ENV__", true));
-        assert!(!parse_bool("__SANDBOX_NO_SUCH_ENV__", false));
+        assert!(parse_bool_value("true"));
+        assert!(parse_bool_value(" ON "));
+        assert!(!parse_bool_value("false"));
+        assert!(!parse_bool_value("0"));
         assert_eq!(parse_u64("__SANDBOX_NO_SUCH_ENV__", 7), 7);
         assert_eq!(parse_u32("__SANDBOX_NO_SUCH_ENV__", 9), 9);
+    }
+
+    #[test]
+    fn resolve_mode_prefers_explicit_value() {
+        assert_eq!(
+            resolve_mode(Some("cube"), Some("false"), None),
+            SandboxMode::Cube
+        );
+        assert_eq!(
+            resolve_mode(Some(" OpenShell "), None, None),
+            SandboxMode::OpenShell
+        );
+        assert_eq!(
+            resolve_mode(Some("IN-PROCESS"), Some("true"), Some("cube")),
+            SandboxMode::InProcess
+        );
+        assert_eq!(
+            resolve_mode(Some("none"), Some("true"), Some("openshell")),
+            SandboxMode::InProcess
+        );
+    }
+
+    #[test]
+    fn resolve_mode_falls_back_on_invalid_value() {
+        assert_eq!(
+            resolve_mode(Some("bogus"), Some("true"), Some("cube")),
+            SandboxMode::InProcess
+        );
+    }
+
+    #[test]
+    fn resolve_mode_maps_legacy_keys() {
+        assert_eq!(resolve_mode(None, None, None), SandboxMode::InProcess);
+        assert_eq!(
+            resolve_mode(None, Some("false"), Some("openshell")),
+            SandboxMode::InProcess
+        );
+        assert_eq!(resolve_mode(None, Some("true"), None), SandboxMode::Cube);
+        assert_eq!(
+            resolve_mode(None, Some("1"), Some("openshell")),
+            SandboxMode::OpenShell
+        );
+        assert_eq!(
+            resolve_mode(None, Some("true"), Some("bogus")),
+            SandboxMode::InProcess
+        );
+    }
+
+    #[test]
+    fn mode_as_str_round_trips_with_parse() {
+        for mode in [
+            SandboxMode::InProcess,
+            SandboxMode::Cube,
+            SandboxMode::OpenShell,
+        ] {
+            assert_eq!(SandboxMode::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(SandboxMode::parse("cube-sandbox"), Some(SandboxMode::Cube));
+        assert_eq!(SandboxMode::parse("nope"), None);
     }
 
     #[test]

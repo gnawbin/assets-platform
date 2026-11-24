@@ -22,3 +22,5 @@ thiserror.workspace = true
 [dev-dependencies]
 # `DisabledRuntime` 的契约测试需要 async 运行时
 tokio.workspace = true
+# 向后兼容测试：新字段必须能从旧 JSON 反序列化
+serde_json.workspace = true

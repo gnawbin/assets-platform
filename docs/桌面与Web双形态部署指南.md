@@ -235,6 +235,10 @@ API_PORT=3001 \
 PostgreSQL（必需）、S3/MinIO（必需）、SurrealDB（知识库向量，按需）、
 doc-parser（按需）、OTel Collector（可选）。
 
+**沙箱为可选项（默认不启用）**：`[sandbox] mode = "in_process"`（缺省）时不需要 CubeSandbox 或 OpenShell gateway；
+只有显式配置 `mode = "cube"` 或 `"openshell"` 时才引入对应服务
+（详见 `docs/知识库模块/OpenShell沙箱Agent落地设计（Rust版）.md`）。
+
 数据库建表 / 迁移 SQL 以 `include_str!` 编译进二进制（`crates/database/src/sql/*.sql`），
 **部署机不需要额外的 SQL 文件**。
 

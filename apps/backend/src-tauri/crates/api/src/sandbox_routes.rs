@@ -14,7 +14,7 @@ use axum::{Extension, Json};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 
-use sandbox::{ExecResult, FileEntry, HealthInfo, SandboxHandle};
+use sandbox::{DISABLED_REASON, ExecResult, FileEntry, HealthInfo, SandboxHandle};
 use service::sandbox_service::{self, SessionKey};
 
 use super::auth::UserContext;
@@ -86,9 +86,19 @@ fn session_key(user: &UserContext, scope: &str) -> SessionKey {
     SessionKey::new(user.schema_name.clone(), user.user_id, scope)
 }
 
+/// 判断服务层文案是否属于「能力未启用」（应映射 503 而不是 500）
+///
+/// 依赖三条稳定标记：契约层的 [`DISABLED_REASON`]、`DisabledRuntime::health` 的
+/// 「沙箱未启用」、以及 `SandboxError::Unsupported` 的「能力不支持」。
+fn is_unavailable(message: &str) -> bool {
+    message.contains("能力不支持")
+        || message.contains("沙箱未启用")
+        || message.contains(DISABLED_REASON)
+}
+
 /// 服务层错误串 → HTTP 错误（带状态码分类）
 fn service_error(message: String) -> ApiError {
-    if message.contains("能力不支持") || message.contains("SANDBOX_ENABLED") {
+    if is_unavailable(&message) {
         ApiError::service_unavailable(message)
     } else if message.contains("请求非法") || message.contains("超过上限") {
         ApiError::bad_request(message)
@@ -364,4 +374,27 @@ pub async fn delete_session(
         .await
         .map(|()| Json(ApiResponse::success(())))
         .map_err(service_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_messages_map_to_503() {
+        assert!(is_unavailable("沙箱未启用（mode=in_process）"));
+        assert!(is_unavailable("能力不支持：exec"));
+        assert!(is_unavailable(DISABLED_REASON));
+        assert!(is_unavailable(&format!(
+            "{}（提示：请设置 [sandbox] mode）",
+            DISABLED_REASON
+        )));
+    }
+
+    #[test]
+    fn ordinary_errors_are_not_treated_as_unavailable() {
+        assert!(!is_unavailable("执行超时（60s）"));
+        assert!(!is_unavailable("请求非法：代码超过上限 262144 字节"));
+        assert!(!is_unavailable("CubeSandbox 服务端异常"));
+    }
 }

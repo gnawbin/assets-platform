@@ -63,6 +63,10 @@ storage = {path = "crates/storage"}
 # CubeAPI / CubeProxy 的实现在 crates/sandbox-cube（独持 reqwest）
 sandbox = {path = "crates/sandbox"}
 sandbox-cube = {path = "crates/sandbox-cube"}
+# OpenShell 客户端（gateway 独立部署；proto 已 vendor 进 crate，无 git 依赖）
+sandbox-openshell = {path = "crates/sandbox-openshell"}
+# Agent 纯逻辑（提示词 + 动作解析）：workflow 与沙箱侧 agent-runner 共用
+agent-core = {path = "crates/agent-core"}
 utils = {path = "crates/utils"}
 # 向量数据存储：crates/vector 只放 trait 与数据类型，三个实现各自持有驱动、互不依赖
 vector = {path = "crates/vector"}
@@ -80,6 +84,13 @@ toml = "1.2.1+spec-1.1.0"
 
 # ---- 异步运行时 / 数据库 ----
 async-trait = "0.1.92"
+# OpenShell：vendored .proto + tonic 自建客户端（不依赖 git 依赖，规避大包拉取受限）
+tonic = {version = "0.14.9", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"]}
+tonic-prost = "0.14.9"
+tonic-prost-build = "0.14.9"
+prost = "0.14.6"
+prost-types = "0.14.6"
+protoc-bin-vendored = "3.3.0"
 axum = {version = "0.8.9", features = ["macros", "ws"]}
 dashmap = "6.1.0"
 futures = "0.3.34"

@@ -28,6 +28,7 @@ pub(crate) fn to_handle(dto: &SandboxDto, options: &CubeOptions) -> SandboxHandl
         created_at: normalize_time(dto.started_at.clone()),
         data_host_suffix: options.data_host_suffix.clone(),
         envd_port: options.envd_port,
+        endpoint: None,
     }
 }
 

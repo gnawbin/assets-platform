@@ -9,6 +9,21 @@ use serde::{Deserialize, Serialize};
 pub struct SandboxSpec {
     /// 模板 ID 或模板别名（空 → 使用实现方的默认模板）
     pub template_id: String,
+    /// 工作负载镜像（OpenShell 的「模板」= 镜像 + 主进程命令；`None`/空 → 用实现方默认；Cube 实现忽略）
+    #[serde(default)]
+    pub image: Option<String>,
+    /// 主进程命令（空 → 使用镜像默认 ENTRYPOINT；Cube 实现忽略）
+    #[serde(default)]
+    pub command: Vec<String>,
+    /// 后端无关的业务标签（OpenShell 直接作为 labels；`list` 按此过滤）
+    ///
+    /// 与 [`Self::metadata`] 的区别：`metadata` 是 Cube 实现既有的服务端透传字段，
+    /// `labels` 是跨后端语义。两者都由 `service` 从会话键填充，实现方忽略不认识的键。
+    #[serde(default)]
+    pub labels: BTreeMap<String, String>,
+    /// 策略 YAML 原文（OpenShell policy：出网 / 文件 / 进程；进 Git 版本化；Cube 实现忽略）
+    #[serde(default)]
+    pub policy_yaml: Option<String>,
     /// 存活时长（秒），到期由服务端暂停 / 销毁
     pub timeout_secs: u32,
     /// 业务标签：本平台固定写入 `tenant` / `user_id` / `session_id` 三个键，
@@ -58,6 +73,9 @@ pub struct SandboxHandle {
     pub data_host_suffix: String,
     /// 数据面 envd 端口
     pub envd_port: u16,
+    /// 实现方的数据面入口（OpenShell 填 gateway 返回的 endpoint；Cube 为 `None`）
+    #[serde(default)]
+    pub endpoint: Option<String>,
 }
 
 impl SandboxHandle {
@@ -273,6 +291,7 @@ mod tests {
             created_at: None,
             data_host_suffix: suffix.to_string(),
             envd_port: crate::DEFAULT_ENVD_PORT,
+            endpoint: None,
         }
     }
 
@@ -330,6 +349,61 @@ mod tests {
     #[test]
     fn network_policy_defaults_to_deny_all() {
         assert_eq!(NetworkPolicy::default(), NetworkPolicy::DenyAll);
+    }
+
+    #[test]
+    fn spec_new_fields_default_and_round_trip() {
+        let spec = SandboxSpec::default();
+        assert!(spec.image.is_none());
+        assert!(spec.command.is_empty());
+        assert!(spec.labels.is_empty());
+        assert!(spec.policy_yaml.is_none());
+
+        let spec = SandboxSpec {
+            image: Some("registry.internal/agent-runner:0.1.0".to_string()),
+            command: vec!["agent-runner".to_string(), "serve".to_string()],
+            labels: BTreeMap::from([("tenant".to_string(), "tenant_a".to_string())]),
+            policy_yaml: Some("network:\n  default: deny\n".to_string()),
+            ..SandboxSpec::default()
+        };
+        let json = serde_json::to_string(&spec).expect("规格应可序列化");
+        let parsed: SandboxSpec = serde_json::from_str(&json).expect("规格应可反序列化");
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn spec_deserializes_legacy_json_without_new_fields() {
+        // 旧版序列化一定包含这些字段（它们当时没有 serde(default)）
+        let legacy = r#"{"template_id":"py","timeout_secs":30,"metadata":{"tenant":"t"},
+            "env":{},"network":"DenyAll","volume_mounts":[]}"#;
+        let spec: SandboxSpec =
+            serde_json::from_str(legacy).expect("旧 JSON 必须仍可反序列化");
+        assert_eq!(spec.template_id, "py");
+        assert_eq!(spec.timeout_secs, 30);
+        assert_eq!(spec.metadata.get("tenant").map(String::as_str), Some("t"));
+        assert!(spec.image.is_none());
+        assert!(spec.command.is_empty());
+        assert!(spec.labels.is_empty());
+        assert!(spec.policy_yaml.is_none());
+    }
+
+    #[test]
+    fn handle_endpoint_is_optional_and_backward_compatible() {
+        let mut handle = handle("cube.app");
+        assert!(handle.endpoint.is_none());
+        handle.endpoint = Some("https://gateway.internal:8080".to_string());
+
+        let json = serde_json::to_string(&handle).expect("句柄应可序列化");
+        assert!(json.contains("gateway.internal"));
+        let parsed: SandboxHandle = serde_json::from_str(&json).expect("句柄应可反序列化");
+        assert_eq!(parsed, handle);
+
+        let legacy: SandboxHandle = serde_json::from_str(
+            r#"{"id":"sb-1","state":"Running","template_id":null,"created_at":null,"data_host_suffix":"cube.app","envd_port":49983}"#,
+        )
+        .expect("旧 JSON 必须仍可反序列化");
+        assert_eq!(legacy.id, "sb-1");
+        assert!(legacy.endpoint.is_none());
     }
 
     #[test]

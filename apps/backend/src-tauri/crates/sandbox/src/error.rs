@@ -59,7 +59,7 @@ pub enum SandboxError {
     /// 执行超时
     #[error("执行超时（{0}s）")]
     Timeout(u64),
-    /// 当前实现不支持该能力（含 `SANDBOX_ENABLED=false`）
+    /// 当前实现不支持该能力（含 `mode=in_process`）
     #[error("能力不支持：{0}")]
     Unsupported(String),
     /// 调用被取消
@@ -183,7 +183,7 @@ impl SandboxError {
             Self::Transport(_) => "检查到 CubeAPI / CubeProxy 的网络连通性与 SANDBOX_BASE_URL",
             Self::Decode(_) => "响应格式与预期不符，可能 CubeSandbox 版本升级导致协议变化",
             Self::Timeout(_) => "执行超时，缩短任务或调大 SANDBOX_TIMEOUT_SECS",
-            Self::Unsupported(_) => "该能力未启用（SANDBOX_ENABLED=false）或当前实现不支持",
+            Self::Unsupported(_) => "该能力未启用（mode=in_process）或当前实现不支持",
             Self::Cancelled => "调用被取消，无需处理",
         }
     }

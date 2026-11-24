@@ -323,6 +323,16 @@ async fn process_service_task(
                     .collect(),
             ),
             approval,
+            user_id: variables
+                .get("user_id")
+                .or_else(|| variables.get("created_by"))
+                .and_then(|value| {
+                    value
+                        .as_i64()
+                        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+                })
+                .unwrap_or(0),
+            sandbox_scope: format!("wf:{execution_id}"),
         })
         .await;
     let duration = (Utc::now() - started).num_milliseconds();

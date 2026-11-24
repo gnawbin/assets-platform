@@ -1,0 +1,25 @@
+[package]
+edition = "2024"
+name = "agent-runner"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# 沙箱内可执行体：单步执行 agent 循环（LLM 调用 + 本地工具）。
+# 硬约束：不得依赖 service / database / sqlx / axum / workflow ——
+# 否则平台密钥链与 DB 依赖会被带进沙箱镜像。
+[dependencies]
+agent-core.workspace = true
+llm.workspace = true
+llm-openai.workspace = true
+tokio = { workspace = true, features = ["process"] }
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+clap.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+uuid.workspace = true

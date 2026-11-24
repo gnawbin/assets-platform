@@ -84,7 +84,7 @@ pub type BoxedSandboxRuntime = Box<dyn SandboxRuntime>;
 
 /// 未启用沙箱时使用的空实现
 ///
-/// `SANDBOX_ENABLED=false`（缺省）时装它：所有能力返回
+/// `mode = "in_process"`（缺省）时装它：所有能力返回
 /// [`SandboxError::Unsupported`]，`health()` 返回 `ok=false`，
 /// **不 panic、不阻塞启动**，保证「不配置也能用」。
 #[derive(Debug, Default, Clone, Copy)]
@@ -96,7 +96,7 @@ impl SandboxRuntime for DisabledRuntime {
         Ok(HealthInfo {
             ok: false,
             version: None,
-            message: Some("沙箱未启用（SANDBOX_ENABLED=false）".to_string()),
+            message: Some("沙箱未启用".to_string()),
         })
     }
 
@@ -158,7 +158,7 @@ impl SandboxRuntime for DisabledRuntime {
 
 /// 未启用时的统一原因文案（`hint()` 已给出配置指引，这里只说明现状）
 fn disabled_reason() -> &'static str {
-    "sandbox disabled: SANDBOX_ENABLED=false"
+    crate::DISABLED_REASON
 }
 
 #[cfg(test)]

@@ -1,6 +1,8 @@
 # CubeSandbox 沙箱 crate 整合设计方案（crates/sandbox + crates/sandbox-cube）
 
 > 契约 crate 只放 trait 与数据类型（零 HTTP），CubeAPI / CubeProxy 的实现独立成 crate，对齐 `crates/llm` + `llm-openai` 与 `crates/vector` + `vector-*` 的分层模式
+>
+> **配置变更（2026-11-24）**：运行模式已收口为 `[sandbox] mode = "in_process" | "cube" | "openshell"`（缺省 `in_process`，即同进程、不启用沙盒）。本文中的 `SANDBOX_ENABLED` 是旧键，仅在未设置 `mode` 时兼容生效；默认不启用沙盒，详见 [OpenShell沙箱Agent落地设计（Rust版）](./OpenShell沙箱Agent落地设计（Rust版）.md)。
 
 ---
 

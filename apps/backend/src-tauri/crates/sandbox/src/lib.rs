@@ -53,3 +53,10 @@ pub const MAX_LIST_LIMIT: u32 = 500;
 
 /// 数据面 envd 端口缺省值
 pub const DEFAULT_ENVD_PORT: u16 = 49983;
+
+/// 未启用沙盒时的统一原因标记
+///
+/// 与 `service::sandbox_service::SandboxMode` 的缺省值一致：默认 `in_process`
+/// （同进程、不启用沙盒）。`api` 用它把「未启用」稳定映射为 503，避免依赖
+/// 易变的配置键名。
+pub const DISABLED_REASON: &str = "sandbox disabled: mode=in_process";

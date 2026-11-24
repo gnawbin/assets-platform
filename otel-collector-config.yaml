@@ -25,6 +25,9 @@ exporters:
     verbosity: detailed
   debug:
     verbosity: detailed
+  # OCSF 安全事件落盘（上游文档 §6.8 通道 1；SIEM 可再加 otlphttp）
+  file:
+    path: /tmp/ocsf.log
 
 service:
   pipelines:
@@ -39,4 +42,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [logging, debug]
+      exporters: [logging, debug, file]
