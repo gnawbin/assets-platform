@@ -6,6 +6,7 @@
 use crate::agent::{AgentConfig, AgentGraphRunner, AgentInvocation, AgentOutcome};
 use crate::persistence::{PostgresCheckpointer, PostgresWorkflowPersistence};
 use crate::projection::{append_node_result, sync_execution};
+use crate::sandbox_agent::SandboxAgentRunner;
 use crate::types::*;
 use chrono::Utc;
 use engine_core::WorkflowEngine;
@@ -24,6 +25,8 @@ pub struct TenantWorkflowRuntime {
     pub engine: Arc<WorkflowEngine>,
     pub checkpoints: Arc<PostgresCheckpointer>,
     pub runner: Arc<AgentGraphRunner>,
+    /// 沙箱内 Agent 执行器（`SANDBOX_AGENT_IN_SANDBOX=true` 且 `mode=openshell` 时启用）
+    pub sandbox_runner: Arc<SandboxAgentRunner>,
     /// ServiceTask Worker 的常驻任务句柄；持有它即可在运行时存活期间持续拉取任务。
     #[allow(dead_code)]
     worker: Mutex<Option<JoinHandle<()>>>,
@@ -89,10 +92,12 @@ impl WorkflowManager {
         .await?;
 
         let runner = Arc::new(AgentGraphRunner::new(self.llm.clone(), checkpoints.clone()));
+        let sandbox_runner = Arc::new(SandboxAgentRunner::new());
         let worker = spawn_worker(
             schema.clone(),
             engine.clone(),
             runner.clone(),
+            sandbox_runner.clone(),
         );
 
         Ok(Arc::new(TenantWorkflowRuntime {
@@ -100,6 +105,7 @@ impl WorkflowManager {
             engine,
             checkpoints,
             runner,
+            sandbox_runner,
             worker: Mutex::new(Some(worker)),
         }))
     }
@@ -188,6 +194,7 @@ fn spawn_worker(
     schema: String,
     engine: Arc<WorkflowEngine>,
     runner: Arc<AgentGraphRunner>,
+    sandbox_runner: Arc<SandboxAgentRunner>,
 ) -> JoinHandle<()> {
     let worker_id = format!("tauri-{}-{}", schema, Uuid::new_v4());
     tokio::spawn(async move {
@@ -204,7 +211,7 @@ fn spawn_worker(
                 let task_id = task.id;
                 let result = database::with_schema(
                     schema.clone(),
-                    process_service_task(&engine, &runner, &worker_id, task),
+                    process_service_task(&engine, &runner, &sandbox_runner, &worker_id, task),
                 )
                 .await;
                 if let Err(error) = result {
@@ -231,9 +238,58 @@ fn spawn_worker(
     })
 }
 
+/// 记录 `agent_approval`（审批申请）审计事件
+///
+/// 只记 kind / tool / step / 状态，**不写** tool arguments 与 LLM 原文；
+/// 写库失败只 WARN，不影响审批链路（与 gateway 审计同一张表）。
+async fn audit_approval_requested(
+    execution_id: &str,
+    node_id: &str,
+    user_id: i64,
+    in_sandbox: bool,
+    payload: &Value,
+) {
+    let data = payload.get("data").filter(|value| value.is_object());
+    let step = payload
+        .get("step")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            data.and_then(|data| data.get("step"))
+                .and_then(Value::as_u64)
+        })
+        .map(|value| u32::try_from(value).unwrap_or(u32::MAX));
+
+    let mut event =
+        service::sandbox_audit::AgentEvent::new("agent_approval", format!("wf:{execution_id}"));
+    event.runner = Some(if in_sandbox { "sandbox" } else { "platform" }.to_string());
+    event.user_id = (user_id > 0).then_some(user_id);
+    event.node = Some(node_id.to_string());
+    event.status = Some("requested".to_string());
+    event.step = step;
+    event.detail = data
+        .and_then(|data| data.get("kind"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    event.tool = data
+        .and_then(|data| data.get("tool"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+
+    let scope = format!("wf:{execution_id}");
+    let Ok(pool) = database::get_write_pool() else {
+        tracing::warn!(%scope, "Agent 审批申请审计跳过：写库连接不可用");
+        return;
+    };
+    let outcome = service::sandbox_audit::record_agent(&pool, &event.build()).await;
+    if outcome.inserted == 0 {
+        tracing::warn!(?outcome, %scope, "Agent 审批申请审计未写入");
+    }
+}
+
 async fn process_service_task(
     engine: &WorkflowEngine,
     runner: &AgentGraphRunner,
+    sandbox_runner: &SandboxAgentRunner,
     worker_id: &str,
     task: engine_core::runtime::PendingServiceTask,
 ) -> Result<(), String> {
@@ -311,30 +367,41 @@ async fn process_service_task(
     .await;
 
     let started = Utc::now();
-    let outcome = runner
-        .run(AgentInvocation {
-            thread_id: thread_id.clone(),
-            node_id: task.node_id.clone(),
-            config,
-            input: Value::Object(
-                variables
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-            ),
-            approval,
-            user_id: variables
-                .get("user_id")
-                .or_else(|| variables.get("created_by"))
-                .and_then(|value| {
-                    value
-                        .as_i64()
-                        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-                })
-                .unwrap_or(0),
-            sandbox_scope: format!("wf:{execution_id}"),
+    let agent_user_id = variables
+        .get("user_id")
+        .or_else(|| variables.get("created_by"))
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
         })
-        .await;
+        .unwrap_or(0);
+    let invocation = AgentInvocation {
+        thread_id: thread_id.clone(),
+        node_id: task.node_id.clone(),
+        config,
+        input: Value::Object(
+            variables
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        ),
+        approval,
+        user_id: agent_user_id,
+        sandbox_scope: format!("wf:{execution_id}"),
+    };
+    // M1b：Agent 循环在沙箱内（OpenShell）时走 step 协议；其余组合回退 M1a。
+    let in_sandbox = crate::sandbox_agent::enabled();
+    let outcome = if in_sandbox {
+        tracing::debug!(
+            "Agent 在沙箱内执行: thread_id={}, node_id={}",
+            invocation.thread_id,
+            invocation.node_id
+        );
+        sandbox_runner.run(invocation).await
+    } else {
+        runner.run(invocation).await
+    };
     let duration = (Utc::now() - started).num_milliseconds();
 
     match outcome {
@@ -381,6 +448,15 @@ async fn process_service_task(
                 .complete_service_task(task.id, worker_id, complete)
                 .await
                 .map_err(|e| format!("提交 Agent 审批中断失败: {e}"))?;
+
+            audit_approval_requested(
+                &execution_id,
+                &task.node_id,
+                agent_user_id,
+                in_sandbox,
+                &payload,
+            )
+            .await;
 
             let _ = append_node_result(
                 &execution_id,

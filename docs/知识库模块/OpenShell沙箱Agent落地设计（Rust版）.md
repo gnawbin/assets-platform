@@ -393,31 +393,51 @@ let provider = OpenAiProvider::new(OpenAiOptions::new(
 
 ## 9. 沙箱镜像与构建
 
-### 9.1 Dockerfile
+### 9.1 Dockerfile（已落地，B4'）
 
 ```dockerfile
-# apps/agent-sandbox/Dockerfile
-FROM rust:1.9x-slim AS build            # 版本对齐 apps/backend/src-tauri/rust-toolchain.toml
+# apps/agent-sandbox/Dockerfile（节选；完整文件见仓库）
+FROM rust:${RUST_VERSION}-slim-bookworm AS build
 WORKDIR /src
-COPY apps/backend/src-tauri ./apps/backend/src-tauri   # 需要完整 workspace（[workspace.dependencies]）
-RUN cargo build --release -p agent-runner
+COPY apps/backend/src-tauri ./apps/backend/src-tauri
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/apps/backend/src-tauri/target \
+    cargo build --release --locked -p agent-runner --bin agent-runner
 
 FROM debian:bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
- && useradd -m -u 10001 agent \
+ && groupadd -g 10001 agent \
+ && useradd -m -u 10001 -g agent -s /bin/bash agent \
  && mkdir -p /workspace/in /workspace/out /workspace/artifacts \
- && chown -R agent:agent /workspace
-COPY --from=build /src/apps/backend/src-tauri/target/release/agent-runner /usr/local/bin/
-USER agent
+ && chown -R 10001:10001 /workspace
+COPY --from=build /src/apps/backend/src-tauri/target/release/agent-runner /usr/local/bin/agent-runner
 WORKDIR /workspace
-ENTRYPOINT ["agent-runner"]
+USER 10001:10001
+HEALTHCHECK CMD ["agent-runner", "probe"]
+CMD ["sleep", "infinity"]
 ```
 
-- 运行镜像**没有编译器、没有解释器**；`reqwest` 使用 rustls/ring（仓库统一），不需要 OpenSSL。
+- 构建上下文是**仓库根**：`docker build -f apps/agent-sandbox/Dockerfile -t assets-platform/agent-runner:0.1.0 .`
+  （或 `docker compose --profile build build agent-runner`）；根 `.dockerignore` 排除前端 / `node_modules` / `target`。
+- 运行镜像**没有编译器、没有解释器和包管理器**；`reqwest` 使用 rustls/ring（仓库统一），不需要 OpenSSL。
+- **主进程是 `sleep infinity`**：`agent-runner serve` 尚未实现，当前「一次 exec = 一步」，由平台 exec 调起
+  `agent-runner step --in /workspace/in/step.json --out /workspace/out/step.json`。
+  不要改成 `ENTRYPOINT ["agent-runner"]` —— gateway 传入的 `command` 会与 ENTRYPOINT 拼接，argv 错位。
+- 非 root（`10001:10001`）与策略 `process.run_as_user/run_as_group` 一致；`HEALTHCHECK` 用 `probe`（不联网、不写盘）。
 - 若要静态 musl：`--target x86_64-unknown-linux-musl` + builder 内装 `musl-gcc`（ring 需要 CC），可跑在 distroless/scratch；成本是构建复杂，P6 再评估。
-- 镜像 tag 与 `openshell-sdk` / gateway tag 一并登记在同一张版本矩阵，一起升级（上游文档 §10「版本耦合」）。
+- 镜像 tag 与 `quay.io/ai-openshell/gateway` / supervisor 镜像一并登记在同一张版本矩阵，一起升级（上游文档 §10「版本耦合」）。
+
+配套交付（B4'）：
+
+| 文件 | 内容 |
+|---|---|
+| `apps/agent-sandbox/Dockerfile` | 上图的完整实现（构建缓存挂载、非 root、`/workspace/{in,out,artifacts}`） |
+| `apps/agent-sandbox/policies/agent.yaml` | 版本化策略：`filesystem_policy` / `landlock` / `process` / `network_policies.platform_llm` |
+| `apps/agent-sandbox/README.md` | 构建、gateway 起停、策略应用、平台配置、验收与排障 |
+| `.dockerignore`（根） | 限制构建上下文（只保留 Cargo workspace） |
+| `docker-compose.yml` | 新增 `openshell-gateway`（`quay.io/ai-openshell/gateway:latest`）与 `agent-runner`（`--profile build`） |
 
 ### 9.2 OpenShell 侧要求
 
@@ -425,48 +445,128 @@ ENTRYPOINT ["agent-runner"]
 
 ```rust
 SandboxSpec {
-    image: Some("registry.internal/agent-runner:0.1.0".into()),
-    command: vec!["agent-runner".into(), "serve".into()],  // 或按需传 step 参数
+    image: Some("assets-platform/agent-runner:0.1.0".into()),
+    command: vec!["sleep".into(), "infinity".into()],  // 主进程常驻；step 由 exec 调起
     labels: { tenant, user_id, session_id },
     network: NetworkPolicy::AllowDomains(vec!["assets-server.internal:3001".into()]),
-    policy_yaml: Some(include_str!("../policies/agent.yaml").into()),
+    policy_yaml: None,   // 策略走 gateway 侧（§9.1），平台只在 spec 里留空
     timeout_secs: 900,
     ..
 }
 ```
 
-主进程入口需支持两种形态：
+策略如何生效（B4' 定稿）：
+
+- 平台侧 `policy_yaml` 显式 `Unsupported`（proto 的 policy 是结构化字段，不做 YAML→proto 一次性映射）；
+- 版本化策略文件是 `apps/agent-sandbox/policies/agent.yaml`，由运维在建箱前 `openshell policy set --global`
+  或 `openshell sandbox create --policy ...` 应用；出网白名单变更随策略文件一起评审 / 发布。
+
+出网白名单的两个关键约束（B6' 对 vendored proto 复核，`sandbox.proto:139-167`）：
+
+| 约束 | proto 依据 | 落地 |
+|---|---|---|
+| `host` 支持 glob：`*` 匹配单个 label，`**` 可跨 label | `NetworkEndpoint.host` 注释（`.` 为分隔符） | K8s 用 `host: "**.svc.cluster.local"` 覆盖任意 namespace 的平台 Service，**不需要按 namespace 各写一份策略** |
+| `allowed_ips` 为空 → 默认 SSRF 内网拦截；非空 → 改为 allowlist 校验（loopback / link-local 恒拒） | `NetworkEndpoint.allowed_ips` 注释 | ClusterIP（`10.x`/`172.x`）与 compose bridge（`172.x`）都会被拦成 `403 policy denied`，**必须**写 service CIDR |
+
+> `allowed_ips` 的具体网段是环境参数（`kubectl get svc ... -o jsonpath='{.spec.clusterIP}'`），
+> 仓库内给的是常见 service CIDR 占位，需在目标集群实测后收窄。
+
+主进程入口（当前实现）：
 
 - `agent-runner step --in /workspace/in/step.json --out /workspace/out/step.json`：单步（由平台 `exec` 调起）；
-- `agent-runner serve`：常驻，从 stdin 读 step、向 stdout 写结果（为「常驻会话 + 流式」形态预留，首版可不实现）。
+- 镜像 `CMD ["sleep", "infinity"]`：常驻主进程（`agent-runner serve` 为「常驻会话 + 流式」预留，首版未实现）。
 
 ---
 
 ## 10. 平台侧接线
 
-### 10.1 `SandboxAgentRunner`
+### 10.1 `SandboxAgentRunner`（已实现，B5'；B4' 补 token 注入）
 
 ```rust
 // crates/workflow/src/sandbox_agent.rs
-pub struct SandboxAgentRunner { /* 不持有 LLMRouter：模型在沙箱侧调 */ }
+#[async_trait]
+pub trait SandboxIo: Send + Sync {
+    /// 执行前准备（生产实现把 AGENT_TOKEN 登记到沙箱环境；缺省 no-op）
+    async fn prepare(&self, key: &SessionKey) -> Result<(), String> { Ok(()) }
+    async fn write_file(&self, key: &SessionKey, path: &str, data: Vec<u8>) -> Result<(), String>;
+    async fn read_file(&self, key: &SessionKey, path: &str) -> Result<Vec<u8>, String>;
+    async fn exec(&self, key: &SessionKey, command: String, argv: Vec<String>,
+                  cwd: Option<String>, timeout_secs: Option<u32>) -> Result<ExecResult, String>;
+    /// 审计事件（生产实现后台写 sys_oper_log；缺省 no-op，单测注入 FakeIo 收集）
+    async fn audit(&self, event: Value) {}
+}
+
+/// 生产实现：`sandbox_service::{prepare_session_env, upload_file, download_file, run_command_with_options}`
+pub struct ServiceSandboxIo {
+    token_env: String,      // 沙箱内读取 token 的变量名（AGENT_TOKEN）
+    token: Option<String>,  // SANDBOX_AGENT_TOKEN；空 = 不注入
+}
+
+pub struct SandboxAgentRunner {
+    io: Arc<dyn SandboxIo>,          // 单测注入 FakeIo，生产用 ServiceSandboxIo
+    step_timeout_secs: u32,          // SANDBOX_AGENT_STEP_TIMEOUT_SECS（默认 120）
+    max_steps: u32,                  // SANDBOX_AGENT_MAX_STEPS（默认 6）
+    llm_base_url: String,            // SANDBOX_AGENT_LLM_BASE_URL（写进 step.json）
+    token_env: String,               // SANDBOX_AGENT_TOKEN_ENV（默认 AGENT_TOKEN）
+    default_model: String,           // SANDBOX_AGENT_MODEL
+    exec_timeout_secs: u64,          // SANDBOX_AGENT_EXEC_TIMEOUT_SECS（默认 60）
+    audit_steps: bool,               // SANDBOX_AGENT_AUDIT_STEPS（默认 true）
+}
 
 impl SandboxAgentRunner {
     /// 与 AgentGraphRunner::run 同签名，返回同一个 AgentOutcome
-    pub async fn run(&self, inv: AgentInvocation) -> AgentOutcome { /* step 循环 */ }
+    pub async fn run(&self, invocation: AgentInvocation) -> AgentOutcome { /* step 循环 */ }
 }
 ```
+
+单步循环（`run`）：
+
+1. `SessionKey::new(database::current_schema_name(), user_id, sandbox_scope)`（`scope = wf:<execution_id>`）；
+2. `serde_json::to_vec_pretty(&StepInput)` → `write_file("/workspace/in/step.json")`；
+3. `exec("agent-runner", ["step","--in","/workspace/in/step.json","--out","/workspace/out/step.json"], cwd="/workspace", timeout=step_timeout+10)`；
+4. `read_file("/workspace/out/step.json")` → `StepOutput`，按 `kind` 映射：
+
+| `StepOutput.kind` | 平台动作 |
+|---|---|
+| `final` | `AgentOutcome::Completed { output: final, state: {sandbox:true, steps, limit, tokens:{input,output}, observations} }` |
+| `tool` + `observation` | 本地工具已执行 → 追加 `observations`，`step += 1` 继续 |
+| `tool` 无 `observation` | 平台工具（`knowledge_search` / `current_time`）由 `agent::execute_platform_tool` 执行后回灌 |
+| `interrupt` | 组装 `AgentOutcome::Interrupted`（`data` 里额外带 `observations` / `step` / `steps_used`）；`interrupt` 非对象或缺少 `kind` → `Failed("沙箱 Agent 返回非法中断：…")` |
+| `error` | `AgentOutcome::Failed(error)` |
+
+护栏（B6' 起）：有效上限 `limit = min(config.max_iterations, max_steps)`（`max_iterations` 已 clamp 1..=30），
+恢复步 `step` 先 clamp 到 `0..=limit`；**达到上限返回 `Completed`（不是 `Failed`）**：
+
+```json
+{ "answer": "Agent 达到最大步数 6，已停止。", "steps": 6, "limit": 6 }
+```
+
+> 为什么改：`Failed` 会经 `service.rs::fail_service_task(retry=1)` 触发重试，导致同一节点反复建箱 / 重建 Agent；
+> 达到上限是「正常终止」而非「基础设施故障」。该行为变更记入 §19 v2.1。
+> IO/协议错误仍转 `Failed`（交给 Worker 现有重试/事故逻辑）。
+
+Token 注入（B4'）：`run` 在建箱前先 `io.prepare(&key)`，生产实现把 `SANDBOX_AGENT_TOKEN` 以
+`token_env`（缺省 `AGENT_TOKEN`）登记到 `sandbox_service::prepare_session_env`，建箱时写进 `SandboxSpec.env`；
+`prepare` 失败直接 `Failed("准备沙箱环境失败：…")`，不会带着缺 token 的沙箱去调 LLM。
+token 为空时 `SandboxAgentRunner::new` 只 WARN 一次（配置项见 §14）。
 
 选择逻辑放 `workflow/src/service.rs::process_service_task`：
 
 ```rust
-let outcome = if agent_in_sandbox_enabled() && sandbox_backend_is_openshell() {
+let outcome = if crate::sandbox_agent::enabled() {
     sandbox_runner.run(invocation).await
 } else {
-    platform_runner.run(invocation).await
+    runner.run(invocation).await
 };
 ```
 
-护栏：`SANDBOX_AGENT_IN_SANDBOX=true` 但 `SANDBOX_BACKEND != openshell` → `tracing::warn!` 并回退 M1a（避免「agent 常驻 Cube 沙箱」这种未实现的组合）。
+`TenantWorkflowRuntime` 新增 `pub sandbox_runner: Arc<SandboxAgentRunner>`，随运行时创建一次。
+
+开关判定（`sandbox_agent::enabled()` = `enabled_with(SANDBOX_AGENT_IN_SANDBOX, sandbox_service::mode())`）：
+
+- `SANDBOX_AGENT_IN_SANDBOX=true` 且 `mode=openshell` → 沙箱路径；
+- 其它组合（含 `mode=in_process/cube`）→ **WARN 一次**并回退 M1a（避免「agent 常驻 Cube 沙箱」这种未实现的组合）；
+- 默认 `in_process` + 开关 false → 与改造前逐字节一致（`cargo test -p workflow` 原有 19 个用例零改动通过）。
 
 因为两者都返回 `AgentOutcome`，下游变量（`agent_status` / `agent_interrupt` / `agent_output` / `result` / `output_<node_id>`）与 `TOPIC_AGENT_RESUME` 流程完全不用改。
 
@@ -524,26 +624,44 @@ let outcome = if agent_in_sandbox_enabled() && sandbox_backend_is_openshell() {
 
 ## 11. 中断与审批
 
-现状：`agent.rs:331` / `:369` 用 `NodeOutput::interrupt_with_data("agent_approval_required", {kind, tool, arguments, thought})`；恢复时 `service.rs:271-300` 从 `agent_interrupt.data` 取出 payload 并注入 `approved` / `comment`；`agent.rs` 用 `approval_field` 同时兼容顶层与 `data` 嵌套。
+> 现状（v2.1 起两条路径统一）：`agent.rs`（M1a，进程内）与 `sandbox_agent.rs`（M1b，沙箱）都产出**同一种**
+> `agent_interrupt` 结构；恢复时 `service.rs:279-308` 从 `agent_interrupt.data` 取出 payload 并注入
+> `approved` / `comment`，`approval_field` 同时兼容顶层与 `data` 嵌套。
 
-沙箱侧要求：
-
-1. runner 在 `before_tool` / `before_final` 时输出 `kind=interrupt`，并带上 `kind/tool/arguments/thought`；
-2. `SandboxAgentRunner` 组装成 `AgentOutcome::Interrupted { thread_id, checkpoint_id, payload }`，其中：
+统一契约（§11）：
 
 ```json
 {
   "kind": "agent_approval_required",
-  "message": "工具调用需要审批",
-  "data": { "kind": "before_tool", "tool": "sandbox_exec", "arguments": {"command":"rm -rf /tmp/x"} },
+  "message": "沙箱 Agent 等待人工审批",
+  "data": {
+    "kind": "before_tool",
+    "tool": "sandbox_exec",
+    "arguments": {"command": "rm -rf /tmp/x"},
+    "thought": null,
+    "observations": [],
+    "step": 0,
+    "steps_used": 1
+  },
   "thread_id": "...", "checkpoint_id": "...", "node_id": "...", "step": 0
 }
 ```
 
-3. `checkpoint_id` 由平台在**中断前**写入检查点后回填（沙箱不接触 DB）；
-4. 恢复时 `approval` 原样放进下一个 `in/step.json` 的 `approval` 字段，runner 直接执行被挂起的工具/返回被挂起的答案（与 `agent.rs` 的 `approval_field` 语义一致）。
+要点：
+
+1. **顶层 `kind` 恒为 `agent_approval_required`**；中断类型（`before_tool` / `before_final`）只在 `data.kind`，
+   前端与审批 UI 只依赖顶层 `kind` 判断「这是 Agent 审批」，不依赖 `data` 的字段形状；
+2. runner 在 `before_tool` / `before_final` 时输出 `kind=interrupt`，并带上 `kind/tool/arguments/thought`；
+3. `SandboxAgentRunner` 组装成 `AgentOutcome::Interrupted { thread_id, checkpoint_id, payload }`；
+   `interrupt` 必须是对象且含非空 `kind`，否则 `Failed("沙箱 Agent 返回非法中断：…")`（不再静默当 `{}` 处理，
+   避免恢复时 approve 一个「空操作」）；
+4. 恢复所需的 `observations` / `step` / `steps_used` 一并写进 `data`，`TOPIC_AGENT_RESUME` 无需新增流程变量；
+5. 恢复时 `approval` 原样放进下一个 `in/step.json` 的 `approval` 字段，runner 直接执行被挂起的工具 / 返回被挂起的答案。
+
+> `checkpoint_id`（沙箱路径）仍是合成值 `sandbox:<thread_id>:<step>`：沙箱不接触 DB，也不写 adk-graph 检查点。
 
 > 关键点：`data` 嵌套必须保留——`approval_field` 的兼容逻辑是既有行为，改形状会让历史中断记录无法恢复。
+> 因此 v2.1 只改「顶层 `kind` 的取值」，不删除 `data.kind`。
 
 ---
 
@@ -579,12 +697,32 @@ let outcome = if agent_in_sandbox_enabled() && sandbox_backend_is_openshell() {
 
 | 事件 | OCSF（gateway/supervisor） | `sys_oper_log` |
 |---|---|---|
-| 建箱/销毁 | `session_open` / `process_start` | `oper_module='sandbox'`，`target_id='wf:<exec_id>'` |
+| 建箱/销毁 | `session_open` / `process_start` | `oper_module='sandbox'`，scope 写 `client_info` 的 `scope=wf:<exec_id>`（`target_id` 为 `BIGINT`，保持 `NULL`） |
 | 策略拒绝（如 `sandbox_exec` 访问未白名单域名） | `NET:OPEN … DENIED` | `oper_type='policy_denied'` |
-| 每次 step | — | 可选：`oper_type='agent_step'`（含 step 序号、耗时、token），便于按 `target_id` 复盘 |
-| 审批中断/放行 | — | `oper_type='agent_approval'` |
+| 每次 step | — | `oper_type='agent_step'`（step 序号、耗时、token、tool 名） |
+| 审批申请 / 放行 | — | `oper_type='agent_approval'`（`status=requested` / `approved` / `rejected`） |
+| 触达步数上限 | — | `oper_type='agent_limit'` |
 
-`client_info` 统一写 `agent=openshell, sandbox=<name>, generation=<n>, runner=agent-runner/<ver>`，便于把「哪一次 step 落在哪个 generation」对上。
+`client_info` 统一格式：`agent=<runner>, sandbox=<name>, node=<node_id>, step=<n>, generation=<n>, scope=wf:<exec_id>`
+（gateway 事件缺省 `runner=openshell`，平台 Agent 事件为 `sandbox` / `platform`）。
+
+### 13.1 Agent 事件实现（B6' 已落地）
+
+| 组成 | 说明 |
+|---|---|
+| `service::sandbox_audit::AGENT_EVENTS` | `["agent_step", "agent_approval", "agent_limit"]`；`classify()` **白名单直通**，否则这三类会被关键字规则误判成 `security_event` |
+| `service::sandbox_audit::AgentEvent` | 平台侧事件构造器：`kind / scope / user_id / runner / node / step / tool / status / detail / duration_ms / tokens / approved / comment / limit` → OCSF JSON（`class_name="Agent Activity"`、`labels.session_id=scope`、`labels.user_id`、`unmapped.*`） |
+| `SandboxIo::audit()` | 默认 no-op；`ServiceSandboxIo` 用 `tokio::spawn` + `database::get_write_pool()` 调 `record_agent()`，失败只 WARN，不阻塞 step 循环；`FakeIo` 收集事件供单测断言 |
+| `agent_step` | 沙箱每一步（final / tool / interrupt / error），含 `duration_ms` 与单步 `tokens`；由 `SANDBOX_AGENT_AUDIT_STEPS` 控制（默认 true） |
+| `agent_limit` | 达到上限时写一条（`status=exceeded`，`limit`、`step`） |
+| `agent_approval`（申请） | `workflow::service::process_service_task` 在 `Interrupted` 落库成功后写（M1a/M1b 都覆盖），`runner` 按是否沙箱区分 |
+| `agent_approval`（结论） | `workflow_service::complete_user_task` 在人工审批完成后写（`approved` / `rejected` / `pending`），`user_id` = 审批人；仅当实例变量里有 `agent_interrupt` 时写（普通审批节点不受影响） |
+
+**脱敏边界（硬约束）**：只写 tool 名、中断 kind、状态、耗时、token、审批意见（截断 200 字，绝对路径→`<path>`）；
+**不写** tool arguments、提示词、LLM 输出原文——`AgentEvent` 结构体根本没有这些字段，避免未来误加。
+
+**单测覆盖**：`service` 侧 `classify` 白名单 / `AgentEvent.build()` → `to_row` 的 scope、user、step、tokens、comment 截断；
+`workflow` 侧断言 `agent_step` / `agent_limit` 事件内容且不含 `arguments` 原文。
 
 **P5 已落地（2026-11-24）**：
 
@@ -615,22 +753,49 @@ openshell_gateway_url = "http://127.0.0.1:8080"
 openshell_token = ""
 openshell_ca_cert = ""
 openshell_workspace = "default"
-openshell_image = "registry.internal/agent-runner:0.1.0"
-openshell_command = "agent-runner,serve"        # 逗号串
-openshell_policy = "policies/agent.yaml"
+openshell_image = "assets-platform/agent-runner:0.1.0"
+# 主进程命令（逗号串）：serve 未实现 → 用 sleep,infinity 常驻，step 由平台 exec 调起
+openshell_command = "sleep,infinity"
 openshell_ready_timeout_secs = 120
 # ---- M1b ----
 agent_in_sandbox = false               # 先 false，灰度再开
-agent_token_ttl_secs = 3600
+agent_llm_base_url = "http://assets-server:3001/internal/llm/v1"
+agent_token_env = "AGENT_TOKEN"        # 沙箱内读取 Bearer token 的变量名
+agent_token = ""                       # 注入沙箱的租户级 API Key（scope 含 sandbox:llm）
+agent_model = ""
 agent_step_timeout_secs = 120
 agent_max_steps = 6
+agent_exec_timeout_secs = 60
+agent_audit_steps = true               # 逐步写 agent_step 审计；审批事件不受此开关影响
 # ---- 审计 ----
 audit_retention_days = 180
 ```
 
-映射结果：`SANDBOX_BACKEND`、`SANDBOX_OPENSHELL_*`、`SANDBOX_AGENT_*`、`SANDBOX_AUDIT_RETENTION_DAYS`，无需改加载代码。
+`openshell_gateway_url` 的取值随宿主形态变化（v2.1 决策 D2：**生产 = K8s/Helm**，compose 仅开发）：
 
-沙箱侧只注入 `AGENT_TOKEN`（短时、按租户、可按沙箱撤销），**不注入**平台主密钥。
+| 宿主 | `openshell_gateway_url` | `openshell_ca_cert` |
+|---|---|---|
+| K8s（生产） | `https://openshell.<ns>.svc.cluster.local:9443` | `/etc/openshell/ca/ca.crt`（Secret 挂载） |
+| Docker Compose（仅开发） | `http://openshell-gateway:8080` | 通常留空 |
+
+映射结果：`SANDBOX_MODE`、`SANDBOX_OPENSHELL_*`、`SANDBOX_AGENT_*`、`SANDBOX_AUDIT_RETENTION_DAYS`，无需改加载代码。
+
+策略**不在** `.env.toml` 里：`SandboxSpec.policy_yaml` 仍是 `Unsupported`（§9.1），版本化策略走 gateway 侧
+`openshell policy set --global --policy apps/agent-sandbox/policies/agent.yaml`。
+
+沙箱侧只注入 `AGENT_TOKEN`（租户级 API Key），**不注入**平台主密钥。注入链路（B4'）：
+
+```
+SANDBOX_AGENT_TOKEN
+  → SandboxAgentRunner::new（token_env = SANDBOX_AGENT_TOKEN_ENV，缺省 AGENT_TOKEN）
+  → ServiceSandboxIo::prepare（建箱前登记）
+  → sandbox_service::prepare_session_env
+  → SandboxSpec.env（建箱时写入）
+  → 沙箱内 agent-runner 从 step.llm.token_env 读取
+```
+
+已存在的沙箱不会重建：换 token 后需 `release_session` 或等 TTL 回收。`agent_token` 为空时平台只 WARN 一次，
+沙箱内 LLM 调用会 401（不会静默降级）。
 
 ---
 
@@ -639,10 +804,10 @@ audit_retention_days = 180
 | 层级 | 用例 | 命令 |
 |---|---|---|
 | `agent-core` | prompt 拼装与现状一致；`parse_llm_json` 兼容代码围栏/前后说明/非法 JSON；`validate_action` 各分支 | `cargo test -p agent-core` |
-| `workflow` | **重构前后测试一条不改**（保证搬运零漂移） | `cargo test -p workflow` |
-| `agent-runner` | `step` 子命令：假 LLM（axum dev-dep 起本地服务）→ 输出 `tool`/`final`/`interrupt`；本地工具超时/越界/输出截断 | `cargo test -p agent-runner` |
+| `workflow` | 原有用例零漂移 + `sandbox_agent`：final / 本地工具 / 平台工具 / interrupt（含非法中断两条）/ 恢复 / error / 步数上限（优雅 `Completed`）/ 节点 `max_iterations` 收紧 / 恢复步越界 / token 累计 / 审计事件不含 arguments / 写失败 / prepare 失败（38 passed） | `cargo test -p workflow --lib` |
+| `agent-runner` | `step` 子命令：假 LLM（axum dev-dep 起本地服务）→ 输出 `tool`/`final`/`interrupt`；`before_final` 中断 + resume；本地工具超时/越界/输出截断（14 passed） | `cargo test -p agent-runner` |
 | `api` | 内部端点：无凭据 401、用户 JWT 403、scope 不足 403、跨租户取不到数据、`llm_call_record` 有行 | `cargo test -p api internal_llm` |
-| `service` | 后端选择、降级、会话复用、TTL 回收（stub runtime） | `cargo test -p service sandbox` |
+| `service` | 后端选择、降级、会话复用、TTL 回收（stub runtime）；`sandbox_audit`：OCSF 归一化 / 脱敏 / 截断 / 去重 / `AGENT_EVENTS` 白名单 / `AgentEvent` 映射（21 passed） | `cargo test -p service sandbox` |
 | `sandbox-openshell` | 假 gateway 请求形状；`#[ignore]` 真集群 | `cargo test -p sandbox-openshell` |
 | 端到端 | 建箱 → 一次 step → 平台工具 → 中断 → resume | `cargo test -p sandbox-openshell -- --ignored` |
 | lint | 门禁 | `cargo clippy --workspace --all-targets` |
@@ -681,8 +846,31 @@ crates/agent-core/tests/fixtures/
 
 **里程碑**：P1~P3 =「代码可切后端」；B-Ⅰ =「危险操作已隔离」；B3'~B5' =「agent 循环在沙箱跑通」；B6' =「审批与审计闭环」。
 
-**进展（2026-11-24）**：**S0（模式收口）、P1（契约扩展）、P2（vendored proto + tonic 客户端）、P3（service 接线）、B-Ⅰ（sandbox_exec / file_read / file_write 工具）、P5（OCSF 审计 → OTel + sys_oper_log）、B1'（agent-core 抽取）、B2'（agent-runner + step 协议）、B3'（内部 LLM 端点 + llm_call_record 计量）已完成**。
-验证：`cargo test -p sandbox-openshell`（13 passed）、`-p sandbox`（14 passed）、`-p sandbox-cube`（10 passed）、`-p service sandbox`（16 passed）、`-p api sandbox`（5 passed）、`-p workflow`（19 passed，重构后零漂移）、`-p agent-core`（18 passed）、`-p agent-runner`（13 passed）、`-p service llm_call_record`（1 passed）、`-p api internal_llm`（6 passed）；`cargo clippy` 无 deny 级问题，新增文件 0 告警。
+**进展（2026-11-25，v2.1）**：**S0（模式收口）、P1（契约扩展）、P2（vendored proto + tonic 客户端）、P3（service 接线）、B-Ⅰ（沙箱工具）、P5（OCSF 审计）、B1'（agent-core 抽取）、B2'（agent-runner）、B3'（内部 LLM + 计量）、B4'（镜像/策略/compose/token）、B5'（SandboxAgentRunner）、B6'（统一中断契约 + 配额语义 + 审计落库）已完成**；B4' 的 K8s 跟进项（Helm 说明、`host` glob、`allowed_ips`、排障拆分）同批补齐。
+
+验证：`cargo test -p sandbox-openshell`（13 passed）、`-p sandbox`（14 passed）、`-p sandbox-cube`（10 passed）、`-p service sandbox`（**21 passed**，含 `AGENT_EVENTS` 白名单与 `AgentEvent` 映射）、`-p api sandbox`（5 passed）、`-p workflow --lib`（**38 passed**：原有 19 + `sandbox_agent` 19）、`-p agent-core`（18 passed）、`-p agent-runner`（**14 passed**，含 `before_final` 中断 + resume）、`-p service llm_call_record`（1 passed）、`-p api internal_llm`（6 passed）；`cargo clippy -p workflow -p service --all-targets` 在 `sandbox_agent.rs` / `sandbox_audit.rs` 上 0 告警（其余为存量告警）。
+
+B6' 交付与验证边界：
+
+| 项 | 状态 |
+|---|---|
+| 中断契约统一（顶层 `kind=agent_approval_required` + `data.kind`，M1a `agent.rs` 同步） | 已落地 + 单测 |
+| 非法中断（非对象 / 缺 `kind`）→ `Failed`，不再静默 `{}` | 已落地 + 2 条单测 |
+| 配额：`limit = min(node.max_iterations, agent_max_steps)`、恢复步 clamp、达标 `Completed` | 已落地 + 3 条单测 |
+| token 累计（`state.tokens`） | 已落地 + 单测 |
+| `agent_step` / `agent_limit` / `agent_approval`（申请 + 结论）审计 | 已落地 + 单测；DB 写入为后台任务，失败只 WARN |
+| 真实 K8s / Docker 端到端（建箱 → step → 审批 → resume） | **未在本机执行**：按 `apps/agent-sandbox/README.md` §5 在 Linux + K8s/Docker 环境验收 |
+
+B4' 交付与验证边界：
+
+| 项 | 状态 |
+|---|---|
+| `apps/agent-sandbox/Dockerfile`（多阶段、非 root、`/workspace`、`HEALTHCHECK probe`、`CMD sleep infinity`） | 已提交 |
+| `apps/agent-sandbox/policies/agent.yaml`（`version: 1` + filesystem/landlock/process/network_policies） | 已提交，字段对齐上游《Policy Schema Reference》 |
+| `apps/agent-sandbox/README.md`（构建 / gateway / 策略 / 平台配置 / 验收 / 排障） | 已提交 |
+| 根 `.dockerignore` + `docker-compose.yml`（`openshell-gateway` + `--profile build agent-runner`） | 已提交 |
+| `AGENT_TOKEN` 注入链路（`SANDBOX_AGENT_TOKEN` → `prepare_session_env` → `SandboxSpec.env`） | 已落地并单测 |
+| 镜像构建 / 建箱 / 一次 LLM 调用 | **未在本机执行**（本机无 docker / Linux 宿主）：按 README §5 在 Linux + Docker 环境验收 |
 
 ---
 
@@ -696,17 +884,29 @@ crates/agent-core/tests/fixtures/
 | 4 | `llm_call_record` 缺失写入 | 沙箱调模型无账可查 | B3' 内补，失败只 WARN |
 | 5 | 双实现漂移（若未来出现非 Rust runner） | 协议不一致 | golden fixtures + 协议版本号 |
 | 6 | `pause/resume` 语义降级 | 长任务丢内存态 | 单步形态不依赖 pause；空闲直接 kill |
-| 7 | 策略 YAML 未版本化 | 出网白名单漂移 | 策略进 Git，随镜像 tag 一起发布 |
-| 8 | 沙箱 token 粒度 | 无法按沙箱撤销 | 起步租户级 API Key；B5' 升级为每沙箱短时 JWT（需评审记录，对齐上游文档 §9.2） |
+| 7 | 策略 YAML 未版本化 | 出网白名单漂移 | **B4' 已缓解**：`apps/agent-sandbox/policies/agent.yaml` 进 Git，随镜像 tag 发布；变更走 `openshell policy set`，审计留痕 |
+| 8 | 沙箱 token 粒度 | 无法按沙箱撤销 | 起步租户级 API Key（B4' 注入链路已落地：`SANDBOX_AGENT_TOKEN` → `SandboxSpec.env`）；后续升级每沙箱短时 JWT（需评审记录，对齐上游文档 §9.2） |
 | 9 | gateway 侧 `docker.sock` 特权 | 宿主被逃逸 | gateway 独立宿主/节点池；业务容器不挂 socket（上游文档 §9.6） |
+| 10 | K8s：ClusterIP 命中 SSRF 内网拦截 | 沙箱内 LLM 403，Agent 不可用 | 策略 endpoint 加 `allowed_ips`（service CIDR）+ `host: "**.svc.cluster.local"`；README §6 已把「host 不匹配」与「SSRF 拦截」拆成两行排障；精确网段待实测收窄（跟踪 `TODO.md` #52） |
+| 11 | 步数上限由 `Failed` 改 `Completed` | 依赖「失败即告警」的外部监控口径变化 | v2.1 发布说明标注；`agent_limit` 审计事件可用于告警替代（跟踪 `TODO.md` #53） |
 
-**待确认**：
+**已定决策（v2.1）**：
 
-1. 生产宿主是 K8s 还是单机 Docker（决定 P0 交付 Helm 还是 compose）？
-2. 沙箱 token 起步用「租户级 API Key」是否可接受（无法按沙箱撤销）？
-3. `sandbox_exec` 的工具名与参数是否需要与前端 Skill 编辑器联动（白名单 UI）？
-4. 是否允许 `agent-runner` 使用 `clap`（新增一个 workspace 依赖的编译面）？若不允，可手写 `std::env` 解析。
-5. B-Ⅰ 与 B-Ⅱ 是否同版本发布，还是 B-Ⅰ 单独一个 release？
+| # | 决策 | 结论 |
+|---|---|---|
+| D1 | 中断载荷形状 | 统一 §11：顶层 `kind=agent_approval_required` + `data.kind`；M1a（`agent.rs`）与 M1b（`sandbox_agent.rs`）同形，保留 `data` 嵌套以兼容历史中断 |
+| D2 | 生产宿主 | **K8s / Helm 为生产形态**；`docker-compose.yml` 仅开发（README §2.1 给出 values / TLS / CA / supervisor 差异） |
+| D3 | 沙箱 token 粒度 | 起步租户级 API Key（`sandbox:llm` scope）可接受；撤销粒度 = 租户，靠 TTL + `release_session` 收口；后续再评「每沙箱短时 JWT」 |
+| D4 | `clap` | 允许（`agent-runner` 已使用，属既有依赖） |
+
+**待确认**（其中第 3 项与交付边界已登记跟踪：根目录 `TODO.md` #51–#53）：
+
+1. `sandbox_exec` 的工具名与参数是否需要与前端 Skill 编辑器联动（白名单 UI）？
+2. B-Ⅰ 与 B-Ⅱ 是否同版本发布，还是 B-Ⅰ 单独一个 release？
+3. `allowed_ips` 在目标集群的精确 service CIDR、是否还需要按 namespace 收窄（需集群实测，跟踪 `TODO.md` #52）。
+
+> 交付 / 验证边界：代码与本机单测已闭环；**建箱 → step → 审批 → resume 的端到端验收**（`TODO.md` #51）与
+> **v2.1 行为变更的发布说明**（`TODO.md` #53）需在 Linux + Docker/K8s 与发版流程中完成。
 
 ---
 
@@ -719,10 +919,12 @@ crates/agent-core/tests/fixtures/
 | `crates/agent-core/Cargo.toml` / `src/{lib,prompt,action,protocol}.rs` | 纯逻辑 crate |
 | `crates/agent-core/tests/fixtures/*.json` | 共享 golden 用例 |
 | `crates/agent-runner/Cargo.toml` / `src/{main,llm,tools,limits}.rs` | 沙箱内二进制 |
-| `apps/agent-sandbox/Dockerfile` | 多阶段构建 |
-| `apps/agent-sandbox/policies/agent.yaml` | 出网/文件策略（版本化） |
+| `apps/agent-sandbox/Dockerfile` | 多阶段构建（rust builder → debian-slim，非 root 10001，`/workspace`，`HEALTHCHECK probe`，`CMD sleep infinity`） |
+| `apps/agent-sandbox/policies/agent.yaml` | 版本化策略（`filesystem_policy` / `landlock` / `process` / `network_policies`），gateway 侧应用 |
+| `apps/agent-sandbox/README.md` | 构建 / gateway / 策略应用 / 平台配置 / 验收清单 / 排障 |
+| `.dockerignore`（根） | 限制构建上下文（只保留 Cargo workspace） |
 | `crates/api/src/internal_llm_routes.rs` | 内部 LLM 端点（OpenAI 兼容 + 计量） |
-| `crates/workflow/src/sandbox_agent.rs` | `SandboxAgentRunner`（step 循环 + 映射） |
+| `crates/workflow/src/sandbox_agent.rs` | `SandboxAgentRunner`（step 循环 + `SandboxIo::prepare` token 注入 + 映射） |
 | `crates/service/src/sandbox_audit.rs` | OCSF → `sys_oper_log`（上游文档 P5 内容） |
 | `crates/api/src/sandbox_audit_routes.rs` | 审计接收端点（服务间鉴权） |
 | 本文档 | — |
@@ -735,13 +937,20 @@ crates/agent-core/tests/fixtures/
 | `crates/sandbox/src/lib.rs` | 导出新类型字段 |
 | `apps/backend/src-tauri/Cargo.toml` | `[workspace.dependencies]` 增 `agent-core`、`sandbox-openshell`，以及 `tonic` / `tonic-prost` / `prost` / `prost-types` / `tonic-prost-build` / `protoc-bin-vendored`（无 git 依赖） |
 | `crates/llm-openai/src/lib.rs` | `mod wire;` → `pub mod wire;`（供内部端点复用） |
-| `crates/service/Cargo.toml` / `src/sandbox_service.rs` | `SandboxMode`（含 `in_process` 默认）+ 模式选择 + `agent_in_sandbox` 开关 |
+| `crates/service/Cargo.toml` / `src/sandbox_service.rs` | `SandboxMode`（含 `in_process` 默认）+ 模式选择；B4' 新增 `prepare_session_env` / `session_env`，建箱时写 `SandboxSpec.env` |
 | `crates/service/src/lib.rs` | `pub mod sandbox_audit;` |
 | `crates/api/src/lib.rs` | 合并内部路由（不进 `protected_routes`）；挂审计端点；保留期清理任务 |
-| `crates/workflow/Cargo.toml` / `src/agent.rs` | 依赖 `agent-core`；`call_llm` 改调抽取后的纯函数；新增沙箱工具 |
-| `crates/workflow/src/{lib.rs,service.rs}` | 导出 `SandboxAgentRunner`；`process_service_task` 按开关选 runner |
-| `apps/backend/.env.example.toml` | `[sandbox]` 增 `backend` / `openshell_*` / `agent_*` / `audit_*`（扁平标量） |
-| `docker-compose.yml` | 新增 `openshell-gateway` 服务 |
+| `crates/workflow/Cargo.toml` / `src/agent.rs` | 依赖 `agent-core`；`call_llm` 改调抽取后的纯函数；新增沙箱工具；抽取 `execute_platform_tool`（平台 Agent 与沙箱 step 循环共用） |
+| `crates/workflow/src/{lib.rs,service.rs}` | 导出 `SandboxAgentRunner`；`TenantWorkflowRuntime.sandbox_runner`；`process_service_task` 按开关选 runner |
+| `apps/backend/.env.example.toml` | `[sandbox]` 增 `backend` / `openshell_*` / `agent_*`（含 `agent_token` / `agent_audit_steps`）/ `audit_*`（扁平标量）；v2.1 补 K8s vs compose 的 gateway URL / CA 注释 |
+| `crates/service/src/sandbox_audit.rs` | v2.1：`AGENT_EVENTS` 白名单（`agent_step` / `agent_approval` / `agent_limit`）、`AgentEvent` 构造器 + `record_agent()`、`client_info` 增 `node=` / `step=` / `agent=<runner>` |
+| `crates/workflow/src/sandbox_agent.rs` | v2.1：`interrupt_outcome()` 统一 §11 契约 + 非法中断报错、`limit=min(node.max_iterations, max_steps)`、达标 `Completed`、恢复步 clamp、`state.tokens`、`SandboxIo::audit()`（`ServiceSandboxIo` 后台写 `sys_oper_log`） |
+| `crates/workflow/src/agent.rs` | v2.1：M1a 中断载荷顶层 `kind` 统一为 `agent_approval_required`（保留 `data.kind`） |
+| `crates/workflow/src/{service.rs,workflow_service.rs}` | v2.1：`agent_approval` 审计 —— 申请（`process_service_task` 中断落库后）/ 结论（`complete_user_task` 审批完成后） |
+| `crates/agent-runner/src/runner.rs` | v2.1：补 `before_final` 中断 + resume 单测 |
+| `apps/agent-sandbox/policies/agent.yaml` | v2.1：`host: "**.svc.cluster.local"`（glob）+ `allowed_ips`（service CIDR），并给 compose 示例 |
+| `apps/agent-sandbox/README.md` | v2.1：新增 §2.1 Helm（values / TLS / CA / supervisor）、§3 glob 与 `allowed_ips`、§4.1 步数与审计语义、§5/§6 验收与排障（拆 host 不匹配 / SSRF 两类 403） |
+| `docker-compose.yml` | 新增 `openshell-gateway`（quay 镜像 + docker.sock + same-path supervisor）与 `agent-runner`（`--profile build`）；v2.1 标注**仅开发**（生产走 Helm） |
 | `otel-collector-config.yaml` | 按需追加 `file` / `otlphttp` exporter |
 | `docs/知识库模块/README.md` | 文档索引新增一行 |
 | `README.md` | 构建前置（`protoc` 若需要）/ 离线构建说明 |
@@ -771,6 +980,9 @@ crates/agent-core/tests/fixtures/
 | 2026-11-24 | v1.6 | **B1' 落地**：新增 `crates/agent-core`（`prompt` / `action`，零 IO），`workflow` 改为复用同一份提示词与动作解析实现并删除本地副本；`cargo test -p workflow` 19 passed 零漂移、`-p agent-core` 12 passed |
 | 2026-11-24 | v1.7 | **B2' 落地**：`agent-core` 新增 `protocol`（`assets-agent-step/v1`）；新增 `crates/agent-runner`（单步状态机 + 本地工具 + CLI `step`/`probe`，假 LLM 测试覆盖 final/tool/interrupt/approval/越界）；`agent-core` 18 passed、`agent-runner` 13 passed、clippy 0 告警 |
 | 2026-11-24 | v1.8 | **B3' 落地**：新增 `POST /internal/llm/v1/chat/completions`（OpenAI 兼容、非流式、`sandbox:llm` scope）与 `service::llm_call_record`（成功/失败均计量，失败只 WARN）；`total_cost` 暂留 0；`api internal_llm` 6 passed、`service llm_call_record` 1 passed |
+| 2026-11-24 | v1.9 | **B5' 落地**：新增 `workflow/src/sandbox_agent.rs`（`SandboxIo` 抽象 + `ServiceSandboxIo` + `SandboxAgentRunner` step 循环，`final/tool/interrupt/error` → `AgentOutcome`，审批恢复从 `agent_interrupt.data.observations/step` 续跑，`checkpoint_id` 用合成值 `sandbox:<thread>:<step>`）；`TenantWorkflowRuntime.sandbox_runner` + `process_service_task` 按 `enabled()`（`SANDBOX_AGENT_IN_SANDBOX` + `mode=openshell`）选 runner，不满足时 WARN 一次并回退 M1a；`agent::execute_platform_tool` 抽为平台工具共用入口；`[sandbox]` 新增 `agent_*` 6 个键；`workflow` 29 passed（新增 10）、clippy 0 告警 |
+| 2026-11-25 | v2.0 | **B4' 落地**：新增 `apps/agent-sandbox/{Dockerfile,policies/agent.yaml,README.md}` 与根 `.dockerignore`；`docker-compose.yml` 增 `openshell-gateway`（quay 镜像 + docker.sock + same-path supervisor）与 `agent-runner`（build profile）。策略 YAML 对齐上游 schema（`filesystem_policy` / `landlock` / `process` / `network_policies`），明确「策略从 gateway 侧生效、`policy_yaml` 仍 Unsupported」；`AGENT_TOKEN` 注入链路落地（`SANDBOX_AGENT_TOKEN` → `SandboxIo::prepare` → `sandbox_service::prepare_session_env` → `SandboxSpec.env`，缺失只 WARN）；`[sandbox]` 新增 `agent_token`，`openshell_command` 改为 `sleep,infinity`（`serve` 未实现）；`workflow` 31 passed、`service sandbox` 17 passed |
+| 2026-11-25 | v2.1 | **B6' 落地 + B4'-K8s 跟进**：① **统一中断契约**（M1a `agent.rs` 与 M1b `sandbox_agent.rs` 顶层 `kind=agent_approval_required`，细节在 `data`；非法中断 → `Failed` 而非静默 `{}`）；② **配额语义**（`limit=min(node.max_iterations, agent_max_steps)`、恢复步 clamp、达标返回 `Completed` 而非 `Failed`——避免 `fail_service_task(retry=1)` 反复建箱；`state.tokens` 累计 `StepOutput.usage`）；③ **审计落库**（`AGENT_EVENTS` 白名单 + `AgentEvent`/`record_agent`，`agent_step`（可关）/`agent_approval`（申请 + 结论）/`agent_limit`，只写 tool 名/状态/耗时/token/审批意见，不写 arguments/提示词/LLM 原文）；④ **proto 复核**（`host` 支持 glob、`allowed_ips` 为空触发 SSRF 内网拦截）落地为 `policies/agent.yaml` + README §2.1 Helm/§3/§6 排障拆分；⑤ 决策 D1~D4 记录（统一中断形状 / 生产 = K8s-Helm / 租户级 API Key 可接受 / `clap` 允许）。验证：`workflow --lib` 38、`service sandbox` 21、`agent-runner` 14、`agent-core` 18 passed；`sandbox_agent.rs` / `sandbox_audit.rs` clippy 0 告警；⑥ 遗留验证项（E2E 全链路 / `allowed_ips` 精确网段 / v2.1 发布说明）登记为根目录 `TODO.md` #51–#53 |
 
 ---
 

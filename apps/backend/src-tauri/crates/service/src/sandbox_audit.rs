@@ -10,12 +10,16 @@
 //! 表结构与上游文档有一处差异：`sys_oper_log.target_id` 是 `BIGINT`，
 //! 无法承载 `wf:<id>` 这类业务 scope，因此 scope 写入 `client_info`
 //! （`scope=...`），`target_id` 保持 `NULL`。
+//!
+//! 除 gateway 推送的 OCSF 事件外，本模块还负责**平台 Agent 侧事件**
+//! （[`AGENT_EVENTS`]）：`agent_step` / `agent_approval` / `agent_limit`。
+//! 这些事件由 [`AgentEvent`] 构造，**不包含** tool arguments、提示词与 LLM 原文。
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
 use chrono::{DateTime, TimeZone, Utc};
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::PgPool;
 
 /// `oper_module` 固定值
@@ -24,6 +28,10 @@ pub const OPER_MODULE: &str = "sandbox";
 pub const MAX_CONTENT_BYTES: usize = 8 * 1024;
 /// 单批最多处理条数
 pub const MAX_BATCH: usize = 200;
+/// 平台 Agent 侧事件类型（`unmapped.event`），`classify` 直接沿用、不做语义猜测
+pub const AGENT_EVENTS: [&str; 3] = ["agent_step", "agent_approval", "agent_limit"];
+/// 审批意见最多保留字符数（超出截断，避免写爆 `oper_content`）
+pub const MAX_COMMENT_CHARS: usize = 200;
 /// 应用层去重集合容量上限
 const DEDUPE_CAPACITY: usize = 8192;
 
@@ -89,9 +97,17 @@ pub fn to_row(event: &Value) -> Option<AuditRow> {
 }
 
 /// 归一化事件类型：`policy_denied` / `config_change` / `process_start` /
-/// `session_open` / `session_stop` / `security_event`
+/// `session_open` / `session_stop` / `agent_step` / `agent_approval` /
+/// `agent_limit` / `security_event`
 #[must_use]
 pub fn classify(event: &Value) -> String {
+    // 平台 Agent 侧事件自带类型，直接沿用（否则会被下面的关键字规则误判）
+    if let Some(name) = lookup_str(event, &["unmapped", "event"])
+        && AGENT_EVENTS.contains(&name)
+    {
+        return name.to_string();
+    }
+
     let text = [
         lookup_str(event, &["class_name"]),
         lookup_str(event, &["activity_name"]),
@@ -203,9 +219,19 @@ fn extract_scope(event: &Value) -> Option<String> {
 }
 
 fn client_info(event: &Value) -> String {
-    let mut parts = vec!["agent=openshell".to_string()];
+    // gateway 事件缺省标 `openshell`；平台侧事件（`agent_step` 等）显式写 `runner`
+    let runner = lookup_str(event, &["unmapped", "runner"]).unwrap_or("openshell");
+    let mut parts = vec![format!("agent={runner}")];
     if let Some(sandbox) = extract_sandbox(event) {
         parts.push(format!("sandbox={sandbox}"));
+    }
+    if let Some(node) = lookup_str(event, &["unmapped", "node"]) {
+        parts.push(format!("node={node}"));
+    }
+    if let Some(step) = lookup_text(event, &["unmapped", "step"])
+        .or_else(|| lookup_text(event, &["labels", "step"]))
+    {
+        parts.push(format!("step={step}"));
     }
     if let Some(generation) = lookup_text(event, &["unmapped", "generation"])
         .or_else(|| lookup_text(event, &["labels", "generation"]))
@@ -216,6 +242,145 @@ fn client_info(event: &Value) -> String {
         parts.push(format!("scope={scope}"));
     }
     parts.join(", ")
+}
+
+/// 平台 Agent 侧审计事件（`agent_step` / `agent_approval` / `agent_limit`）
+///
+/// 只为「可审计且不含敏感内容」的字段建模：**没有** tool arguments、提示词、
+/// LLM 输出原文的入口，从类型上避免误写。
+#[derive(Debug, Clone, Default)]
+pub struct AgentEvent {
+    /// 事件类型（取 [`AGENT_EVENTS`] 之一）
+    pub kind: String,
+    /// 业务 scope（`wf:<execution_id>`，与 gateway 事件的 `session_id` 对齐）
+    pub scope: String,
+    /// 显式事件 uid（缺省按 kind+scope+step+status+毫秒生成）
+    pub uid: Option<String>,
+    /// 业务用户（未知时留 `None`，不伪造）
+    pub user_id: Option<i64>,
+    /// 执行位置：`sandbox` / `platform`
+    pub runner: Option<String>,
+    /// 工作流节点 id
+    pub node: Option<String>,
+    /// 第几步（从 0 开始）
+    pub step: Option<u32>,
+    /// 工具名（仅 `before_tool` 审批与 tool 步）
+    pub tool: Option<String>,
+    /// 状态：`final` / `tool` / `interrupt` / `error` / `requested` /
+    /// `approved` / `rejected` / `pending` / `exceeded`
+    pub status: Option<String>,
+    /// 中断类型（`before_tool` / `before_final`）
+    pub detail: Option<String>,
+    /// 单步耗时（毫秒）
+    pub duration_ms: Option<u64>,
+    /// 单步 token 用量 `(input, output)`
+    pub tokens: Option<(i64, i64)>,
+    /// 审批结论
+    pub approved: Option<bool>,
+    /// 审批意见（截断到 [`MAX_COMMENT_CHARS`]）
+    pub comment: Option<String>,
+    /// 步数上限（仅 `agent_limit`）
+    pub limit: Option<u32>,
+}
+
+impl AgentEvent {
+    /// 构造最小事件（`kind` + `scope`）
+    #[must_use]
+    pub fn new(kind: impl Into<String>, scope: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            scope: scope.into(),
+            ..Self::default()
+        }
+    }
+
+    /// 转成可交给 [`record`] 的 OCSF 形态
+    #[must_use]
+    pub fn build(&self) -> Value {
+        let now = Utc::now().timestamp_millis();
+        let uid = self.uid.clone().unwrap_or_else(|| {
+            let mut seed = format!("{}:{}", self.kind, self.scope);
+            if let Some(step) = self.step {
+                seed.push_str(&format!(":{step}"));
+            }
+            if let Some(status) = &self.status {
+                seed.push_str(&format!(":{status}"));
+            }
+            format!("{seed}:{now}")
+        });
+
+        let mut unmapped = serde_json::Map::new();
+        unmapped.insert("event".to_string(), json!(self.kind));
+        if let Some(runner) = &self.runner {
+            unmapped.insert("runner".to_string(), json!(runner));
+        }
+        if let Some(node) = &self.node {
+            unmapped.insert("node".to_string(), json!(node));
+        }
+        if let Some(step) = self.step {
+            unmapped.insert("step".to_string(), json!(step));
+        }
+        if let Some(tool) = &self.tool {
+            unmapped.insert("tool".to_string(), json!(tool));
+        }
+        if let Some(detail) = &self.detail {
+            unmapped.insert("detail".to_string(), json!(detail));
+        }
+        if let Some(duration_ms) = self.duration_ms {
+            unmapped.insert("duration_ms".to_string(), json!(duration_ms));
+        }
+        if let Some((input, output)) = self.tokens {
+            unmapped.insert(
+                "tokens".to_string(),
+                json!({"input": input, "output": output}),
+            );
+        }
+        if let Some(approved) = self.approved {
+            unmapped.insert("approved".to_string(), json!(approved));
+        }
+        if let Some(comment) = &self.comment {
+            unmapped.insert(
+                "comment".to_string(),
+                json!(truncate_chars(&sanitize(comment), MAX_COMMENT_CHARS)),
+            );
+        }
+        if let Some(limit) = self.limit {
+            unmapped.insert("limit".to_string(), json!(limit));
+        }
+
+        let mut labels = serde_json::Map::new();
+        labels.insert("session_id".to_string(), json!(self.scope));
+        if let Some(user_id) = self.user_id {
+            labels.insert("user_id".to_string(), json!(user_id));
+        }
+
+        let mut event = serde_json::Map::new();
+        event.insert("event_uid".to_string(), json!(uid));
+        event.insert("time".to_string(), json!(now));
+        event.insert("class_name".to_string(), json!("Agent Activity"));
+        event.insert("activity_name".to_string(), json!(self.kind));
+        if let Some(status) = &self.status {
+            event.insert("status".to_string(), json!(status));
+        }
+        event.insert("labels".to_string(), Value::Object(labels));
+        event.insert("unmapped".to_string(), Value::Object(unmapped));
+        Value::Object(event)
+    }
+}
+
+/// 写入一条平台 Agent 侧事件（失败只 WARN，不影响主链路）
+pub async fn record_agent(pool: &PgPool, event: &Value) -> RecordOutcome {
+    record(pool, std::slice::from_ref(event)).await
+}
+
+/// 按字符截断（不切坏 UTF-8）
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max).collect();
+    out.push('…');
+    out
 }
 
 fn extract_time(event: &Value) -> DateTime<Utc> {
@@ -495,6 +660,91 @@ mod tests {
         assert!(row.ip.is_none());
         assert!(row.event_uid.is_none());
         assert_eq!(row.oper_type, "security_event");
+    }
+
+    #[test]
+    fn classify_preserves_agent_event_kinds() {
+        for kind in AGENT_EVENTS {
+            assert_eq!(classify(&json!({"unmapped": {"event": kind}})), kind);
+        }
+        // 非白名单事件仍走语义规则
+        assert_eq!(
+            classify(&json!({"unmapped": {"event": "network_denied"}})),
+            "policy_denied"
+        );
+    }
+
+    #[test]
+    fn agent_event_maps_scope_user_and_metrics() {
+        let mut event = AgentEvent::new("agent_step", "wf:9");
+        event.runner = Some("sandbox".to_string());
+        event.user_id = Some(7);
+        event.node = Some("agent_1".to_string());
+        event.step = Some(2);
+        event.tool = Some("sandbox_exec".to_string());
+        event.status = Some("tool".to_string());
+        event.duration_ms = Some(1200);
+        event.tokens = Some((11, 5));
+
+        let value = event.build();
+        let row = to_row(&value).expect("应映射成功");
+        assert_eq!(row.oper_type, "agent_step");
+        assert_eq!(row.user_id, Some(7));
+        assert!(row.event_uid.is_some());
+
+        let info = row.client_info.expect("client_info");
+        assert!(info.contains("agent=sandbox"), "{info}");
+        assert!(info.contains("node=agent_1"), "{info}");
+        assert!(info.contains("step=2"), "{info}");
+        assert!(info.contains("scope=wf:9"), "{info}");
+
+        assert!(
+            row.oper_content.contains("\"tokens\""),
+            "{}",
+            row.oper_content
+        );
+        // 审计内容不含 tool arguments（类型上就没有该字段）
+        assert!(
+            !row.oper_content.contains("arguments"),
+            "{}",
+            row.oper_content
+        );
+    }
+
+    #[test]
+    fn agent_approval_comment_is_sanitized_and_truncated() {
+        let mut event = AgentEvent::new("agent_approval", "wf:9");
+        event.status = Some("approved".to_string());
+        event.approved = Some(true);
+        event.detail = Some("before_tool".to_string());
+        event.tool = Some("sandbox_exec".to_string());
+        event.comment = Some(format!("/workspace/app/secret.txt {}", "同".repeat(300)));
+
+        let value = event.build();
+        assert_eq!(classify(&value), "agent_approval");
+        let comment = value["unmapped"]["comment"]
+            .as_str()
+            .expect("comment 应保留");
+        assert!(comment.starts_with("<path>"), "{comment}");
+        assert!(!comment.contains("/workspace/app/secret.txt"), "{comment}");
+        assert_eq!(comment.chars().count(), MAX_COMMENT_CHARS + 1);
+        assert!(comment.ends_with('…'), "{comment}");
+    }
+
+    #[test]
+    fn agent_event_uid_is_unique_per_step_and_status() {
+        let mut first = AgentEvent::new("agent_step", "wf:9");
+        first.step = Some(1);
+        first.status = Some("tool".to_string());
+        let mut second = first.clone();
+        second.step = Some(2);
+
+        assert_ne!(first.build()["event_uid"], second.build()["event_uid"]);
+        assert_eq!(
+            first.build()["labels"]["session_id"],
+            json!("wf:9"),
+            "scope 用于与 gateway 事件串联"
+        );
     }
 }
 

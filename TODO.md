@@ -204,3 +204,34 @@
 - [x] **50.** 设计文档 v0.2（§5.2 多客户端 / 多实例语义）+ `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + 本条目
   - 待内核 Phase 2–5 完成后，另立《trustgraph 图集群设计方案》再接线集群节点
 
+## 🧪 OpenShell 沙箱 Agent 遗留验证项（B6'/B4'，设计见 `docs/知识库模块/OpenShell沙箱Agent落地设计（Rust版）.md` §17）
+
+> 代码已交付、单测全绿（`workflow --lib` 38 / `service sandbox` 21 / `agent-runner` 14 / `agent-core` 18）。
+> 下列 3 项依赖 **Linux + Docker/K8s 真机** 或 **发版流程**，开发机无法闭环：先登记，后续逐项回填状态。
+> 关闭时把结论同步到设计文档 §17「待确认」与 §19 变更记录，并保持本节 `[x]` + 日期。
+
+### 端到端验收：建箱 → step → 审批 → resume
+
+- [ ] **51.** 按 `apps/agent-sandbox/README.md` §5 在目标环境跑通全链路（`mode = "openshell"` 且 `agent_in_sandbox = true`）
+  - 用例 1（本地工具）：`kind=tool` 在沙箱内由 `agent-runner` 执行 → 平台读 `/workspace/out/step.json` → `Completed`
+  - 用例 2（审批续跑）：`before_final` 触发 `kind=interrupt` → 变量 `agent_interrupt` 落库 → 审批通过 → 下次调用按 `data.step + 1` 续跑到 `final`（不重复执行已批准的工具）
+  - 用例 3（步数上限）：`agent_max_steps = 2` + 不收敛任务 → `Completed`（`answer = "Agent 达到最大步数 2，已停止。"`），**不是** `Failed`
+  - 通过标准：`sys_oper_log` 有 `agent_step`×N、`agent_approval(status=requested)`、`agent_approval(status=approved)`，用例 3 另有 `agent_limit(status=exceeded, limit=2)`；两行审批 `client_info` 的 `scope` 相同（`wf:<execution_id>`）且 `oper_content` **不含** tool arguments / 提示词 / LLM 原文；`state.steps ≤ limit`
+  - 环境前提：镜像已推 registry 且可拉取、gateway 可达、`agent_token` 的 scope 含 `sandbox:llm`、`allowed_ips` 已按集群收窄（见 #52）
+  - 关闭条件：附一次完整执行记录（实例 ID + 上述审计行的 SQL 查询结果 + 最终输出 JSON）
+
+### 策略网段收窄：`allowed_ips`
+
+- [ ] **52.** 把 `apps/agent-sandbox/policies/agent.yaml` 的占位网段 `10.0.0.0/8` + `172.16.0.0/12` 收窄为目标集群实际 service CIDR
+  - 取值：`kubectl -n <ns> get svc <assets-server-svc> -o jsonpath='{.spec.clusterIP}'`，或集群 `--service-cluster-ip-range`
+  - 判定：收窄后沙箱内 `agent-runner` 调 `/internal/llm/v1/chat/completions` 仍 200；其它内网地址仍 403 `policy denied`（loopback / link-local 始终拒绝，与本字段无关）
+  - 需同步更新：README §3 的取值命令与 §6 排障两行（host 不匹配 / SSRF 内网拦截）；compose 覆盖仍用 `172.16.0.0/12`
+  - 备注：`allowed_ips` 是**策略侧**字段（`openshell policy set` 生效），平台代码无需改动
+
+### 发布说明与告警口径
+
+- [ ] **53.** v2.1 行为变更写入发布说明（仓库暂无 `CHANGELOG` 文件，随 release notes 输出）：**达到步数上限由 `Failed` 改为 `Completed`**
+  - 影响 1：原「`max_steps` 失败」告警不再触发；旧行为还会经 `service.rs::fail_service_task(retry=1)` 重建沙箱、重复计费
+  - 影响 2：仍需监控时，改为对 `sys_oper_log` 中 `agent_limit`（`status=exceeded`）计数告警；`agent_audit_steps = false` 不影响该事件
+  - 落点：release notes + 运维告警规则；完成时回填本条 `[x]` 与发布日期
+

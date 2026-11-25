@@ -285,6 +285,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn before_final_policy_returns_interrupt_and_resume_completes() {
+        let base_url = spawn_llm(r#"{"action":"final","answer":"draft"}"#).await;
+        let mut step = step_input(
+            &base_url,
+            "before_final",
+            &["knowledge_search"],
+            &temp_workspace(),
+        );
+
+        let output = run_step(step.clone()).await.expect("应成功");
+        assert_eq!(output.kind, StepKind::Interrupt);
+        let interrupt = output.interrupt.expect("interrupt");
+        assert_eq!(interrupt["kind"], "before_final");
+        assert_eq!(interrupt["answer"], "draft");
+
+        // 恢复：平台把 `interrupt.data` + `approved` 作为 approval 传回，不再调用 LLM
+        step.approval = Some(json!({"approved": true, "data": {"answer": "draft"}}));
+        let resumed = run_step(step).await.expect("应成功");
+        assert_eq!(resumed.kind, StepKind::Final);
+        assert_eq!(resumed.final_output.expect("final")["answer"], "draft");
+    }
+
+    #[tokio::test]
     async fn local_tool_executes_in_workspace() {
         let workspace = temp_workspace();
         let base_url = spawn_llm(

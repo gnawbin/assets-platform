@@ -27,6 +27,7 @@ pub mod bpmn;
 pub mod persistence;
 pub mod projection;
 // 沙箱执行节点：供 ServiceTask worker 复用（只依赖 sandbox 契约）
+pub mod sandbox_agent;
 pub mod sandbox_node;
 pub mod service;
 pub mod types;
@@ -38,6 +39,7 @@ pub use types::ApprovalDecisionResult;
 pub use assignee::{engine_assignee, resolve_approval_groups, ApprovalNodeConfig};
 pub use bpmn::{BpmnCompiler, CompiledBpmn};
 pub use persistence::{PostgresCheckpointer, PostgresWorkflowPersistence};
+pub use sandbox_agent::SandboxAgentRunner;
 pub use sandbox_node::{SandboxNodeConfig, SandboxNodeOutput};
 pub use service::{TenantWorkflowRuntime, WorkflowManager};
 pub use workflow_service::WorkflowService;

@@ -58,7 +58,7 @@ impl AgentConfig {
         serde_json::from_value(value.clone()).unwrap_or_else(|_| Self::default())
     }
 
-    fn tool_names(&self) -> Vec<String> {
+    pub(crate) fn tool_names(&self) -> Vec<String> {
         let names: Vec<String> = self
             .tools
             .as_deref()
@@ -75,11 +75,11 @@ impl AgentConfig {
         }
     }
 
-    fn interrupt_policy(&self) -> &str {
+    pub(crate) fn interrupt_policy(&self) -> &str {
         self.interrupt_policy.as_deref().unwrap_or("before_tool")
     }
 
-    fn max_iterations(&self) -> u32 {
+    pub(crate) fn max_iterations(&self) -> u32 {
         self.max_iterations.unwrap_or(6).clamp(1, 30)
     }
 
@@ -237,13 +237,10 @@ impl AgentGraphRunner {
                 invocation.config.timeout().as_secs()
             )),
             Ok(Err(GraphError::Interrupted(interrupted))) => {
+                // §11 契约：顶层 `kind=agent_approval_required`，中断细节（含 `kind`）在 `data`
                 let payload = match &interrupted.interrupt {
                     adk_graph::interrupt::Interrupt::Dynamic { message, data } => json!({
-                        "kind": data
-                            .as_ref()
-                            .and_then(|value| value.get("kind"))
-                            .and_then(Value::as_str)
-                            .unwrap_or("dynamic"),
+                        "kind": "agent_approval_required",
                         "message": message,
                         "data": data,
                         "thread_id": interrupted.thread_id,
@@ -252,7 +249,7 @@ impl AgentGraphRunner {
                         "step": interrupted.step,
                     }),
                     other => json!({
-                        "kind": "static",
+                        "kind": "agent_approval_required",
                         "message": other.to_string(),
                         "thread_id": interrupted.thread_id,
                         "checkpoint_id": interrupted.checkpoint_id,
@@ -461,51 +458,6 @@ impl AgentGraphRunner {
 
     async fn execute_tool(&self, ctx: &ToolContext, tool: &str, arguments: &Value) -> Result<Value, String> {
         match tool {
-            "knowledge_search" => {
-                let question = arguments
-                    .get("question")
-                    .or_else(|| arguments.get("query"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if question.is_empty() {
-                    return Err("knowledge_search 缺少 question 参数".to_string());
-                }
-                let tree_node_id = arguments.get("tree_node_id").and_then(|value| {
-                    value
-                        .as_i64()
-                        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-                });
-                let top_k = arguments
-                    .get("top_k")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(5)
-                    .clamp(1, 20) as i32;
-
-                let params = RetrieveParams {
-                    question,
-                    bind_tree_node_id: tree_node_id,
-                    top_k,
-                    max_tokens: 2000,
-                    okf_type_filter: None,
-                    min_similarity: 0.0,
-                };
-                let chunks = RAGRetriever::retrieve(&params).await?;
-                let results: Vec<Value> = chunks
-                    .into_iter()
-                    .map(|chunk| {
-                        json!({
-                            "title": chunk.title,
-                            "text": chunk.chunk_text,
-                            "similarity": chunk.similarity,
-                            "asset_id": chunk.asset_id.to_string(),
-                        })
-                    })
-                    .collect();
-                Ok(json!({"results": results, "count": results.len()}))
-            }
-            "current_time" => Ok(json!({"now": chrono::Utc::now().to_rfc3339()})),
             TOOL_SANDBOX_EXEC => {
                 ensure_sandbox_enabled()?;
                 let (command, argv, cwd, timeout_secs) = parse_exec_arguments(arguments)?;
@@ -547,8 +499,63 @@ impl AgentGraphRunner {
                 service::sandbox_service::upload_file(ctx.session_key(), path.clone(), data).await?;
                 Ok(json!({"path": path, "size": size, "written": true}))
             }
-            other => Err(format!("不支持的工具: {other}")),
+            other => execute_platform_tool(other, arguments).await,
         }
+    }
+}
+
+/// 平台工具执行（`knowledge_search` / `current_time`）
+///
+/// 平台侧 Agent 与沙箱 step 循环共用：沙箱 runner 对平台工具只回传意图，
+/// 由平台在这里真正执行（RAG 依赖 DB / 向量库，不能进沙箱）。
+pub(crate) async fn execute_platform_tool(tool: &str, arguments: &Value) -> Result<Value, String> {
+    match tool {
+        "knowledge_search" => {
+            let question = arguments
+                .get("question")
+                .or_else(|| arguments.get("query"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if question.is_empty() {
+                return Err("knowledge_search 缺少 question 参数".to_string());
+            }
+            let tree_node_id = arguments.get("tree_node_id").and_then(|value| {
+                value
+                    .as_i64()
+                    .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+            });
+            let top_k = arguments
+                .get("top_k")
+                .and_then(Value::as_i64)
+                .unwrap_or(5)
+                .clamp(1, 20) as i32;
+
+            let params = RetrieveParams {
+                question,
+                bind_tree_node_id: tree_node_id,
+                top_k,
+                max_tokens: 2000,
+                okf_type_filter: None,
+                min_similarity: 0.0,
+            };
+            let chunks = RAGRetriever::retrieve(&params).await?;
+            let results: Vec<Value> = chunks
+                .into_iter()
+                .map(|chunk| {
+                    json!({
+                        "title": chunk.title,
+                        "text": chunk.chunk_text,
+                        "similarity": chunk.similarity,
+                        "asset_id": chunk.asset_id.to_string(),
+                    })
+                })
+                .collect();
+            Ok(json!({"results": results, "count": results.len()}))
+        }
+        "current_time" => Ok(json!({"now": chrono::Utc::now().to_rfc3339()})),
+        other => Err(format!("不支持的工具: {other}")),
     }
 }
 

@@ -1,0 +1,68 @@
+# OpenShell 沙箱策略：agent-runner 工作负载（设计文档 §9 / 风险 #7）
+#
+# 版本化：与 `apps/agent-sandbox` 镜像同仓、同 tag 一起发布；改这里必须走评审。
+# 应用方式（任选其一，字段语义见 OpenShell《Policy Schema Reference》）：
+#   1) 建箱时：openshell sandbox create --policy ./apps/agent-sandbox/policies/agent.yaml ...
+#   2) 全局：  openshell policy set --global --policy ./apps/agent-sandbox/policies/agent.yaml
+# 平台侧 `SandboxSpec.policy_yaml` 仍返回 Unsupported（proto 的 policy 是结构化字段），
+# 因此策略只能从 gateway 侧生效：见 `apps/agent-sandbox/README.md`。
+#
+# 约束：未知字段 / 重复键会被 OpenShell 拒绝；文件上限 4 MiB。
+version: 1
+
+filesystem_policy:
+  # 工作目录（镜像内 /workspace）自动读写：step.json 的输入输出都在这里
+  include_workdir: true
+  # 只读的系统路径（DNS / 动态库 / CA）
+  read_only:
+    - /bin
+    - /usr
+    - /lib
+    - /etc
+    - /proc
+    - /dev/urandom
+    - /var/log
+  # 可写的临时路径
+  read_write:
+    - /tmp
+    - /dev/null
+
+landlock:
+  # best_effort：策略能生效就生效；内核无 Landlock ABI v3 时由 supervisor 拒绝启动
+  compatibility: best_effort
+
+process:
+  # 与 Dockerfile 的 USER 保持一致（10001:10001）
+  run_as_user: "10001"
+  run_as_group: "10001"
+
+network_policies:
+  # 唯一的出网目标：平台内部 LLM 端点（OpenAI 兼容，POST /internal/llm/v1/chat/completions）
+  # host 支持 glob（`.` 为分隔符）：`*` 只匹配一个 label，`**` 可跨 label，
+  # 因此 `**.svc.cluster.local` 覆盖任意 namespace 下的平台 Service。
+  platform_llm:
+    endpoints:
+      - host: "**.svc.cluster.local"
+        port: 3001
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+        # 必填：host 解析到集群内网 IP（ClusterIP 10.x / 172.x）时，空列表会走默认
+        # SSRF 内网拦截 → 沙箱内 LLM 调用 403 policy denied（proto `allowed_ips`）。
+        # 取值 = 平台 Service ClusterIP 所在网段；部署时按实际集群收窄：
+        #   kubectl -n <ns> get svc <assets-server-svc> -o jsonpath='{.spec.clusterIP}'
+        # 注：loopback / link-local 始终被拒，与本字段无关。
+        allowed_ips:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+    # 只有 agent-runner 自身的请求被放行；`sandbox_exec` 起的 sh/curl/python 一律默认拒绝
+    binaries:
+      - path: /usr/local/bin/agent-runner
+#
+# Docker Compose（仅开发）改用服务名直连，示例（替换上面的 endpoints）：
+#   - host: assets-server
+#     port: 3001
+#     protocol: rest
+#     enforcement: enforce
+#     access: read-write
+#     allowed_ips: ["172.16.0.0/12"]   # compose bridge 网段，实测确认

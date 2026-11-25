@@ -39,6 +39,64 @@ fn row_time(row: &PgRow, column: &str) -> Option<chrono::DateTime<chrono::Utc>> 
         .flatten()
 }
 
+/// 记录 `agent_approval`（审批结论）审计事件
+///
+/// 决策在平台侧做出（与 Agent 在哪执行无关），因此 `runner=platform`；
+/// 只记 kind / tool / 结论 / 截断后的意见，**不写** tool arguments 与 LLM 原文。
+async fn audit_agent_decision(
+    execution_id: &str,
+    node_id: &str,
+    user_id: i64,
+    interrupt: &Value,
+    decision: Option<bool>,
+    comment: Option<&str>,
+) {
+    let data = interrupt.get("data").filter(|value| value.is_object());
+    let step = interrupt
+        .get("step")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            data.and_then(|data| data.get("step"))
+                .and_then(Value::as_u64)
+        })
+        .map(|value| u32::try_from(value).unwrap_or(u32::MAX));
+
+    let mut event =
+        service::sandbox_audit::AgentEvent::new("agent_approval", format!("wf:{execution_id}"));
+    event.runner = Some("platform".to_string());
+    event.user_id = Some(user_id);
+    event.node = Some(node_id.to_string());
+    event.status = Some(
+        match decision {
+            Some(true) => "approved",
+            Some(false) => "rejected",
+            None => "pending",
+        }
+        .to_string(),
+    );
+    event.approved = decision;
+    event.comment = comment.map(ToString::to_string);
+    event.step = step;
+    event.detail = data
+        .and_then(|data| data.get("kind"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    event.tool = data
+        .and_then(|data| data.get("tool"))
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+
+    let scope = format!("wf:{execution_id}");
+    let Ok(pool) = pool() else {
+        tracing::warn!(%scope, "Agent 审批结论审计跳过：写库连接不可用");
+        return;
+    };
+    let outcome = service::sandbox_audit::record_agent(&pool, &event.build()).await;
+    if outcome.inserted == 0 {
+        tracing::warn!(?outcome, %scope, "Agent 审批结论审计未写入");
+    }
+}
+
 fn variables_from_input(input_data: Option<Value>) -> HashMap<String, Value> {
     let mut variables = HashMap::new();
     match input_data {
@@ -919,11 +977,18 @@ impl WorkflowService {
         .await
         .map_err(|e| format!("查询审批任务所属执行记录失败: {e}"))?;
 
-        let snapshot = runtime
+        let instance = runtime
             .engine
             .get_instance_details(task.instance_id)
             .await
-            .ok()
+            .ok();
+        // Agent 审批中断（普通人工审批节点没有该变量 → 不写 Agent 审计）
+        let agent_interrupt = instance
+            .as_ref()
+            .and_then(|instance| instance.variables.get("agent_interrupt").cloned())
+            .filter(|value| !value.is_null());
+        let snapshot = instance
+            .as_ref()
             .and_then(|instance| ExecutionSnapshot::from_variables(&instance.variables));
 
         let mut decision = ApprovalDecisionResult {
@@ -1062,6 +1127,17 @@ impl WorkflowService {
                 {
                     tracing::warn!("标记审批拒绝状态失败: {}", error);
                 }
+            }
+            if let Some(interrupt) = agent_interrupt.as_ref() {
+                audit_agent_decision(
+                    &execution_id,
+                    &task.node_id,
+                    user_id,
+                    interrupt,
+                    final_decision,
+                    comment.as_deref(),
+                )
+                .await;
             }
         }
 

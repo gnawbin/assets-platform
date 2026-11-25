@@ -12,3 +12,56 @@ services:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
     restart: unless-stopped
+
+  # OpenShell gateway（仅本机开发 / 单机 Docker；生产走 Helm，见设计文档 §9.2 / apps/agent-sandbox/README.md §2.1）
+  #
+  # 前置（docker 驱动要求，缺一不可）：
+  #   1) 宿主 docker.sock 可读写（本文件已挂载；Linux 需要 docker 组）
+  #   2) supervisor 二进制在**宿主**上，且「宿主路径 == 容器内路径」：
+  #        mkdir -p ~/openshell/supervisor
+  #        docker create --name tmp-supervisor quay.io/ai-openshell/supervisor:latest
+  #        docker cp tmp-supervisor:/openshell-sandbox ~/openshell/supervisor/openshell-sandbox
+  #        docker rm tmp-supervisor && chmod +x ~/openshell/supervisor/openshell-sandbox
+  #        export OPENSHELL_SUPERVISOR_DIR="$HOME/openshell/supervisor"
+  #   3) 工作负载镜像先在宿主构建：docker compose --profile build build agent-runner
+  #
+  # 平台侧配置：SANDBOX_MODE=openshell + SANDBOX_OPENSHELL_GATEWAY_URL=http://127.0.0.1:8080
+  # 策略注意：compose bridge 网段（172.x）同样属于内网 IP，策略 endpoint 必须写
+  #   allowed_ips: ["172.16.0.0/12"]，否则沙箱内 LLM 调用会被 SSRF 拦截成 403 policy denied。
+  openshell-gateway:
+    image: quay.io/ai-openshell/gateway:latest
+    container_name: openshell-gateway
+    restart: unless-stopped
+    # Linux 宿主：docker 组；Docker Desktop 若报错，改成 socket 的 GID（如 "0" 或 "999"）
+    group_add:
+      - docker
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - openshell-state:/var/openshell
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 两侧都写同一个绝对路径，满足 docker 驱动的 same-path 要求
+      - ${OPENSHELL_SUPERVISOR_DIR:-/usr/local/lib/openshell}:${OPENSHELL_SUPERVISOR_DIR:-/usr/local/lib/openshell}:ro
+    environment:
+      OPENSHELL_COMPUTE_DRIVER: docker
+      OPENSHELL_GRPC_ENDPOINT: http://host.openshell.internal:8080
+      OPENSHELL_DOCKER_SUPERVISOR_BIN: ${OPENSHELL_SUPERVISOR_DIR:-/usr/local/lib/openshell}/openshell-sandbox
+      OPENSHELL_DB_URL: sqlite:/var/openshell/openshell.db
+      # 仅绑定 127.0.0.1 时关闭 TLS 可接受；对外暴露必须启用 mTLS（上游文档）
+      OPENSHELL_DISABLE_TLS: "true"
+
+  # 沙箱工作负载镜像（build-only profile，不参与常驻启动）
+  #   docker compose --profile build build agent-runner
+  # 镜像必须落在**宿主** docker（gateway 通过 socket 建箱），因此不要用 `docker compose push`。
+  agent-runner:
+    profiles: ["build"]
+    build:
+      context: .
+      dockerfile: apps/agent-sandbox/Dockerfile
+    image: assets-platform/agent-runner:0.1.0
+    entrypoint: ["agent-runner"]
+    command: ["probe"]
+    restart: "no"
+
+volumes:
+  openshell-state:

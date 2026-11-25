@@ -63,7 +63,7 @@
 | 可观测 | Traces → OTLP；Metrics → Prometheus（`metrics_bind_address`，默认关）；**OCSF 安全事件**三种出口：shorthand 日志 / JSONL 文件 / **OTLP log export（可直送 SIEM）** |
 | Rust SDK | `openshell-sdk`：`ClientConfig::new("<gateway-url>")` → `OpenShellClient::connect()`；支持 server-auth TLS + `ca_cert`、OIDC Bearer；**不支持 mTLS 客户端证书**，也不读 CLI 的 gateway 注册表 |
 | 发布渠道 | **未发布到 crates.io**（实测 `https://crates.io/api/v1/crates/openshell-sdk` → 404），只提供 `git = "https://github.com/NVIDIA/OpenShell", tag = <release-tag>` |
-| 部署 | 系统包（deb/rpm/snap/brew）· 容器 `ghcr.io/nvidia/openshell/gateway` · K8s Helm（`oci://ghcr.io/nvidia/openshell/helm-chart`） |
+| 部署 | 系统包（deb/rpm/snap/brew）· 容器 `quay.io/ai-openshell/gateway`（0.1.x 起从 `ghcr.io/nvidia` 迁到 Quay）· K8s Helm（`oci://quay.io/ai-openshell/helm-chart`） |
 | 容器驱动前置 | 挂 `/var/run/docker.sock`；**supervisor 二进制必须以同一绝对路径 bind-mount**（`~/openshell/supervisor/openshell-sandbox`）；SELinux 宿主加 `--security-opt label=type:container_runtime_t` |
 | 状态 | `Ready` / `Stopped` / `Completed` / `Error(MainProcessFailed…)`；`stop` / `start` **幂等**，保留持久工作区，但**不恢复进程内存与终端历史**，且起新 generation 会作废旧 SSH 会话 |
 | 宿主 OS | 官方安装路径覆盖 **Linux / macOS**（驱动为 Docker/Podman/K8s/MicroVM）；**Windows 不在其列** |
@@ -343,8 +343,8 @@ graph LR
 
 | 场景 | 交付物 | 说明 |
 |------|--------|------|
-| 开发 / 单机 | `docker-compose.yml` 增 `openshell-gateway` 服务 | `ghcr.io/nvidia/openshell/gateway:latest`、`-p 127.0.0.1:8080:8080`、`-v openshell-state:/var/openshell`、`-v /var/run/docker.sock:/var/run/docker.sock`、`OPENSHELL_DB_URL=sqlite:/var/openshell/gateway.db`；**与 assets-server 分容器** |
-| 生产（K8s） | Helm `oci://ghcr.io/nvidia/openshell/helm-chart` | 独立命名空间 / 独立节点池；平台侧只配 URL + token + CA |
+| 开发 / 单机 | `docker-compose.yml` 增 `openshell-gateway` 服务（**B4' 已落地**） | `quay.io/ai-openshell/gateway:latest`、`--group-add docker`、`-p 127.0.0.1:8080:8080`、`-v openshell-state:/var/openshell`、`-v /var/run/docker.sock:/var/run/docker.sock`、supervisor 二进制按「宿主路径 == 容器内路径」挂载、`OPENSHELL_COMPUTE_DRIVER=docker`、`OPENSHELL_GRPC_ENDPOINT=http://host.openshell.internal:8080`、`OPENSHELL_DB_URL=sqlite:/var/openshell/openshell.db`、`OPENSHELL_DISABLE_TLS=true`（仅绑定 127.0.0.1 时）；**与 assets-server 分容器** |
+| 生产（K8s） | Helm `oci://quay.io/ai-openshell/helm-chart` | 独立命名空间 / 独立节点池；平台侧只配 URL + token + CA |
 | 桌面端 | 不部署 | `mode="in_process"`（缺省）；或连内网 gateway（与 Cube 同路径） |
 
 ### 6.5 租户映射

@@ -10,6 +10,7 @@
 //!
 //! **不做的事**：不解析 HTTP、不碰权限判定（留在 `crates/api` 的 `authz`）。
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -52,7 +53,7 @@ impl SessionKey {
 ///
 /// - [`SandboxMode::InProcess`]（缺省）：**同进程，不启用沙盒**，不连接任何外部服务；
 /// - [`SandboxMode::Cube`]：CubeSandbox（需 `SANDBOX_BASE_URL`）；
-/// - [`SandboxMode::OpenShell`]：OpenShell gateway（实现见 P2/P3，当前装配时降级为 Disabled）。
+/// - [`SandboxMode::OpenShell`]：OpenShell gateway（`crates/sandbox-openshell`；缺 gateway 时降级为 Disabled）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SandboxMode {
     /// 同进程（缺省）
@@ -60,7 +61,7 @@ pub enum SandboxMode {
     InProcess,
     /// CubeSandbox
     Cube,
-    /// OpenShell（尚未实现）
+    /// OpenShell（`crates/sandbox-openshell` 客户端）
     OpenShell,
 }
 
@@ -177,6 +178,8 @@ static CONFIG: OnceLock<SandboxConfig> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<dyn SandboxRuntime>> = OnceLock::new();
 static SESSIONS: OnceLock<DashMap<SessionKey, SessionEntry>> = OnceLock::new();
 static LOCKS: OnceLock<DashMap<SessionKey, Arc<Mutex<()>>>> = OnceLock::new();
+/// 会话级注入环境变量（建箱时写进 `SandboxSpec.env`）
+static SESSION_ENV: OnceLock<DashMap<SessionKey, BTreeMap<String, String>>> = OnceLock::new();
 
 /// 全局配置（进程内只读）
 pub fn config() -> &'static SandboxConfig {
@@ -296,6 +299,35 @@ fn touch(key: &SessionKey) {
     if let Some(mut entry) = sessions().get_mut(key) {
         entry.last_used_at = Instant::now();
     }
+}
+
+fn session_env_map() -> &'static DashMap<SessionKey, BTreeMap<String, String>> {
+    SESSION_ENV.get_or_init(DashMap::new)
+}
+
+/// 登记会话要注入沙箱的环境变量（幂等合并；**仅在下一次建箱时生效**）
+///
+/// 用途：`agent_in_sandbox` 需要把短时 `AGENT_TOKEN` 注入沙箱（设计文档 §10.1 / §14），
+/// 沙箱内 `agent-runner` 再从 `step.llm.token_env` 指到同名变量读取。
+///
+/// 已存在的沙箱不会被重建：换 token 后需等 TTL 回收，或显式 `release_session` 后重建。
+pub fn prepare_session_env(key: SessionKey, env: BTreeMap<String, String>) {
+    if env.is_empty() {
+        return;
+    }
+    let mut entry = session_env_map().entry(key).or_default();
+    for (name, value) in env {
+        entry.insert(name, value);
+    }
+}
+
+/// 读取会话已登记的环境变量（诊断 / 单测用）
+#[must_use]
+pub fn session_env(key: &SessionKey) -> BTreeMap<String, String> {
+    session_env_map()
+        .get(key)
+        .map(|entry| entry.clone())
+        .unwrap_or_default()
 }
 
 /// 读取环境变量并 trim（空串视为未设置）
@@ -427,6 +459,8 @@ pub async fn ensure_session(key: SessionKey) -> Result<SandboxHandle, String> {
         template_id: config.template_id.clone(),
         timeout_secs: config.timeout_secs,
         metadata,
+        // 会话级注入（如 `AGENT_TOKEN`）；未登记时为空，行为与之前一致
+        env: session_env(&key),
         ..SandboxSpec::default()
     };
     let handle = runtime
@@ -810,5 +844,35 @@ mod tests {
         let message = to_message(&error);
         assert!(message.contains(error.hint()), "{message}");
         assert!(message.contains("沙箱未启用"), "{message}");
+    }
+
+    #[test]
+    fn session_env_registration_merges_and_stays_isolated() {
+        use std::collections::BTreeMap;
+
+        let key = SessionKey::new("__sandbox_env_test__", 1, "wf:env");
+        let other = SessionKey::new("__sandbox_env_test__", 2, "wf:env");
+        assert!(session_env(&key).is_empty(), "未登记时为空");
+
+        let mut first = BTreeMap::new();
+        first.insert("AGENT_TOKEN".to_string(), "t1".to_string());
+        prepare_session_env(key.clone(), first);
+
+        let mut second = BTreeMap::new();
+        second.insert("AGENT_TOKEN".to_string(), "t2".to_string());
+        second.insert("EXTRA".to_string(), "v".to_string());
+        prepare_session_env(key.clone(), second);
+
+        let env = session_env(&key);
+        assert_eq!(
+            env.get("AGENT_TOKEN").map(String::as_str),
+            Some("t2"),
+            "后登记的值覆盖先前的"
+        );
+        assert_eq!(env.get("EXTRA").map(String::as_str), Some("v"));
+        assert!(session_env(&other).is_empty(), "不同会话之间必须隔离");
+
+        prepare_session_env(key.clone(), BTreeMap::new());
+        assert_eq!(session_env(&key), env, "空集合不清空已登记值");
     }
 }
