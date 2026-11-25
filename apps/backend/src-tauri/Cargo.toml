@@ -85,16 +85,16 @@ toml = "1.2.1+spec-1.1.0"
 # ---- 异步运行时 / 数据库 ----
 async-trait = "0.1.92"
 # OpenShell：vendored .proto + tonic 自建客户端（不依赖 git 依赖，规避大包拉取受限）
-tonic = {version = "0.14.9", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"]}
-tonic-prost = "0.14.9"
-tonic-prost-build = "0.14.9"
-prost = "0.14.6"
-prost-types = "0.14.6"
-protoc-bin-vendored = "3.3.0"
 axum = {version = "0.8.9", features = ["macros", "ws"]}
 dashmap = "6.1.0"
 futures = "0.3.34"
 once_cell = "1.21.4"
+prost = "0.14.6"
+prost-types = "0.14.6"
+protoc-bin-vendored = "3.3.0"
+tonic = {version = "0.14.9", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"]}
+tonic-prost = "0.14.9"
+tonic-prost-build = "0.14.9"
 # OpenAPI / Swagger UI
 #   utoipa-swagger-ui 10.x 依赖 utoipa ^6（两个大版本并存会让 SwaggerUi::url 的
 #   OpenApi 参数类型不匹配），因此两者版本必须成对升级。
@@ -263,7 +263,7 @@ time = {version = "0.3.55", default-features = false, features = ["std"]}
 ffmpeg-sidecar = "2.7.0"
 office_oxide = "0.1.17"
 pdf_oxide = "0.3.78"
-zip = {version = "9.8.1", default-features = false}
+zip = {version = "9.8.2", default-features = false}
 
 # ---- 工作流 / Agent ----
 adk-graph = "2.3.0"
