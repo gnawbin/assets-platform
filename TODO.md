@@ -106,24 +106,132 @@
 ## 🔐 认证与鉴权改造（设计见 `docs/OAuth2.1与API Key统一鉴权设计方案.md`）
 
 ### Phase 0：安全基座（必须先做，1–2 天）
-- [ ] **26.** `JWT_SECRET` 校验**只加在 `api::start_http_server_with()` 入口**（缺失/过短 → 返回 `Err`，仅 HTTP 不启动；**不改** `auth.rs:43`、`user_service.rs:76`、`src/commands/user_commands.rs:116` 的默认值兜底——Tauri 也在用，见设计文档 §16 T-2/§16.3）
-- [ ] **27.** `/api/upload/*`（7 条）、`/api/chat/stream` 纳入 `auth_middleware`（当前在 `lib.rs:121` 于中间件之外 merge，匿名可访问）
-- [ ] **28.** 删除 `auth.rs:149` 的 `set_global_schema()` 调用（**仅删 HTTP 侧**；`GLOBAL_SCHEMA` 保留给 Tauri，`lib.rs:148` 与 `switch_tenant` 命令语义不变，见设计文档 §16 T-3）
-- [ ] **29.** 新增 `utils/src/api_key.rs`（`generate_api_key` / `hash_api_key` / `parse_prefix`）+ `sha2` 依赖
+- [x] **26.** `JWT_SECRET` 校验**只加在 `api::start_http_server_with()` 入口**（缺失/过短 → 返回 `Err`，仅 HTTP 不启动；**不改** `auth.rs:43`、`user_service.rs:76`、`src/commands/user_commands.rs:116` 的默认值兜底——Tauri 也在用，见设计文档 §16 T-2/§16.3）
+  - 已实现：`crates/api/src/lib.rs` 入口处校验（缺失 / < 32 字节 → `Err`），桌面端兜底逻辑零改动。
+- [x] **27.** `/api/upload/*`（7 条）、`/api/chat/stream` 纳入 `auth_middleware`（当前在 `lib.rs:121` 于中间件之外 merge，匿名可访问）
+  - 已实现：两个独立 `Router` 各自 `with_state()` 后挂 `.layer(middleware::from_fn(auth_middleware))`。
+  - `chat_routes` 改为以令牌 `sub` 为准（body `user_id` 不一致时告警并以令牌为准），避免冒用他人身份。
+  - 前端同步带令牌：`uploadService.ts`（8 处 `/api/upload/*` fetch，S3 presigned PUT 不加）、`useChatStream.ts`（SSE），统一走 `utils/authToken.ts`。
+- [x] **28.** 删除 `auth.rs:149` 的 `set_global_schema()` 调用（**仅删 HTTP 侧**；`GLOBAL_SCHEMA` 保留给 Tauri，`lib.rs:148` 与 `switch_tenant` 命令语义不变，见设计文档 §16 T-3）
+  - 已实现：`auth.rs` 中间件不再写 `GLOBAL_SCHEMA`；另补 `database::global_schema_name()`，在 HTTP 的 `login` / `switch_tenant` 调用共享 service 前后保存 / 恢复快照（service 内部会写 `GLOBAL_SCHEMA`，不改其签名）。
+- [x] **29.** 新增 `utils/src/api_key.rs`（`generate_api_key` / `hash_api_key` / `parse_prefix`）+ `sha2` 依赖
+  - 已实现：`ak_<env>_<prefix16>_<secret43>`，入库 `SHA-256` hex；含 base32/格式/前缀解析单测；`sha2` 加入 workspace 依赖与 `utils` crate。
 
 ### Phase 1：API Key + 鉴权执行点（5–8 天）
-- [ ] **30.** DDL：`sys_api_key` + `sys_menu` 权限点补录（12 个新权限点：`system:apikey:*` 4 个、`upload:file:add/list/delete` 3 个、`chat:completion:add`、`system:oauthclient:*` 4 个）
-- [ ] **31.** 路由 → perms 映射补录：105 条路由全覆盖（当前仅 38 条带 `http_path`），中间用 `AUTHZ_MODE=warn` 过渡后再切 `enforce`
-- [ ] **32.** `api/src/authz.rs`：`AuthPrincipal` + `(method, MatchedPath) → perms` 判定 + 60s 权限缓存 + 启动自检（未映射路由告警；**自检在 `start_http_server_with()` 内调用**，不 panic、不影响 Tauri）
-- [ ] **33.** API Key 管理接口（`api/src/api_key_routes.rs`，scopes ⊆ 创建者权限）+ 前端 Key 管理页
+- [x] **30.** DDL：`sys_api_key` + `sys_menu` 权限点补录（12 个新权限点：`system:apikey:*` 4 个、`upload:file:add/list/delete` 3 个、`chat:completion:add`、`system:oauthclient:*` 4 个）
+  - 已实现：`public_migration.sql` 新增 `sys_api_key`（`IF NOT EXISTS` 幂等 DDL + `uk_sys_api_key_hash` / 租户 / 前缀索引）与 44 条 `sys_menu` 权限点（API Key 4 + 页面 1 + OAuth 客户端 4 + 技能 4 + 注册 2 + 上传 3 + 对话 1 + 用户 5 + 角色 3 + 部门 3 + 租户 2 + 知识 3 + 流程 9），id 段 200–278 与既有 1–165 不冲突，`command_name` 全部为 NULL（不污染 Tauri 映射）。
+- [x] **31.** 路由 → perms 映射补录：105 条路由全覆盖（当前仅 38 条带 `http_path`），中间用 `AUTHZ_MODE=warn` 过渡后再切 `enforce`
+  - 已实现：`api/src/authz.rs::ROUTE_PERMS` 覆盖约 140 条路由模板（含 `/api/upload/*`、`/api/chat/stream`、`/api/skills*`、`/api/api-keys*`），DB（`sys_menu.http_method` + `http_path`）优先、代码兜底，60s 缓存。
+  - `AUTHZ_MODE` 默认 `warn`（JWT 仅告警），**Service principal 恒为 enforce**，非法取值回落 `warn`；未登记路由在 enforce 下 403（fail-closed）。
+- [x] **32.** `api/src/authz.rs`：`AuthPrincipal` + `(method, MatchedPath) → perms` 判定 + 60s 权限缓存 + 启动自检（未映射路由告警；**自检在 `start_http_server_with()` 内调用**，不 panic、不影响 Tauri）
+  - 已实现：`AuthPrincipal`（`PrincipalKind::User/Service`）+ `matches_scope` 通配（`*` / `asset:*`）+ 每分钟限流；`audit_route_coverage()` 只输出 `tracing` 日志（`RouteCoverageReport` 统计 code-only / db-only 路由），不 panic。
+  - 服务身份约束：`SERVICE_FORBIDDEN_PREFIXES`（`system:` / `upload:`）+ `SERVICE_FORBIDDEN_ROUTES`（强制 `UserContext` 的资产写接口）一律 403；`ops_routes` 三个写 handler 改为 `Option<Extension<UserContext>>`，使「采集上报」模板可被 API Key 调用（`created_by` 记 NULL）而不是 500。
+  - 单测：`authz` 15 个 + `response` 3 个（403 携带 `scope` 与 `WWW-Authenticate`）。
+- [x] **33.** API Key 管理接口（`api/src/api_key_routes.rs`，scopes ⊆ 创建者权限）+ 前端 Key 管理页
+  - 已实现：`api_key_routes.rs` 4 个 handler（scopes ⊆ 创建者权限、禁止 `system:*` / `upload:*` / 用户角色类高危点、跨租户 404、API Key 自身不可管理 Key）+ `service/src/api_key_service.rs`（创建 / 列表 / 轮换（旧 key ≤24h 过期）/ 吊销 / 校验，30s 校验缓存、60s `last_used_at` 节流、DB 故障 fail-closed）。
+  - 前端：`services/apiKeyService.ts` + `app/settings/api-keys/page.tsx`（一次性明文弹窗 + 复制、scope 模板、有效期 / 限流、轮换 / 吊销、桌面模式提示），`httpAdapter.ts` 补 4 条路由，设置首页加入口。
+
 
 ### Phase 2：OAuth 2.1 授权服务器（5–8 天，外部第三方接入前）
-- [ ] **34.** `/oauth/authorize`（方案 A：Bearer + 同意页）、`/oauth/token`（code + PKCE S256 + refresh 轮换）、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`
+- [x] **34.** `/oauth/authorize`（方案 A：Bearer + 同意页）、`/oauth/token`（code + PKCE S256 + refresh 轮换）、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`
+  - 已实现：`service/src/oauth_service.rs`（授权码 / 令牌 / 内省 / 撤销 / 客户端 CRUD + PKCE 与回调地址校验的纯函数单测 10 个）、`api/src/oauth_routes.rs`（端点 + 客户端管理 + `client_secret_basic` 解析 + 查询参数编码单测）、`api/src/oauth_error.rs`（RFC 6749 §5.2 错误体，与 `ApiResponse` 隔离）。
+  - 方案 A 落地形态：`GET /oauth/authorize` 返回**同意信息 JSON**（client_name / scopes / state / issuer），`POST /oauth/authorize` 提交 `approve` 后返回 `{redirect_to}`（由调用方 302）。不做 HTML 页面与浏览器重定向 —— Bearer 无法随浏览器跳转携带（§7.3 方案 A 的限制）。
+  - PKCE：只支持 `S256`（`plain` 直接拒绝），`code_challenge` 必填；`code_verifier` 校验 43–128 位字符集，比较走常数时间；授权码只存 SHA-256、TTL 60s、一次性，PKCE 失败即作废该 code。
+  - 令牌：`at_` / `rt_` 前缀（与 `ak_` / JWT 分流互不冲突），只存哈希；刷新轮换复用 `family_id` 语义（重放撤销整族）；授权码重放则撤销该 client + user 的全部未撤销令牌；`/oauth/token` 响应带 `Cache-Control: no-store`。
+  - `at_` 接入 `auth.rs`：`PrincipalKind::OAuth`，主体 `u:<id>@client:<client_id>`，**不注入** `UserContext` / `Claims`，因此用户态接口与 `system:*` / `upload:*` 由 `authz` 一律 403（非用户主体始终 enforce）。
+  - 缺省不挂载（§16 T-7）：需 `OAUTH_ENABLED=true`（或 `OAUTH_ALLOW_INSECURE_HTTP=true`）才注册 `/oauth/authorize`、`/oauth/token`、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server`；`/api/oauth-clients*` 管理接口始终挂载（`system:oauthclient:*` + 租户隔离 + scope ⊆ 创建者权限）。
+  - DDL：`sys_oauth_client` / `sys_oauth_code` / `sys_oauth_token`（`public_migration.sql`，幂等；`family_id UUID` 读写用 `$n::uuid` / `family_id::text`，因 sqlx 未启用 `uuid` feature）；`sys_menu` 205–208 补 `http_method` / `http_path`，新增页面 id 49（`/settings/oauth-clients`）。
+  - 前端：`services/oauthClientService.ts` + `app/settings/oauth-clients/page.tsx`（一次性密钥弹窗、scope 模板、启用/禁用、删除），`httpAdapter.ts` 登记 4 条路由，设置首页加入口。
+  - 清理：`oauth_service::cleanup_expired_grants()` 供定时任务调用（授权码保留 24h、令牌过期后保留 30d），不在请求路径上自动执行。
 
-### 🔒 Tauri 模式隔离回归（每阶段收尾必跑，设计文档 §16 / §13.4）
+
+### Phase 2.2：方案 B（会话 Cookie）+ 传输护栏 + JWT 加固
+- [x] **39.** `sys_user_session` + `/oauth/authorize` 浏览器流程（httpOnly 会话 Cookie + 双提交 CSRF + HTML 同意页 + 302）、`/api/auth/session`、登录/登出 Cookie 桥接
+  - 已实现：`public_migration.sql` 新增 `sys_user_session`（幂等；只存 `SHA-256`；令牌 `ss_<43>`、CSRF `cs_<43>`）；
+    `service/src/session_service.rs`（`create_session` / `find_session`（`last_seen_at` 5 分钟节流）/ `revoke_session` / `revoke_all_user_sessions` / `cleanup_expired_sessions`）；
+    `api/src/oauth_session.rs`（Cookie 序列化与解析、`x-www-form-urlencoded` 解析、HTML 转义、同意页 / 错误页渲染，含 XSS 与协议解析单测）；
+    `api/src/oauth_browser.rs`（同一 URL 分流方案 A JSON / 方案 B HTML+302；`html_response` 带 CSP / `X-Frame-Options` / `no-store`；`issue_session_cookies` 供登录调用）。
+  - 端点：`/oauth/authorize` 从受保护路由移到公开路由（Bearer 在 handler 内校验；API Key / `at_` 一律 `access_denied`），新增 `GET /api/auth/session`、`POST /api/auth/session/logout`；
+    `POST /api/auth/login` 追加 `Set-Cookie`（失败只记 WARN，JWT 登录不受影响），`POST /api/auth/logout` 撤销会话并清 Cookie。
+  - 会话失效：改密 / 删除用户 → `revoke_all_user_sessions`；授权缓存在用户资料更新、分配用户角色、分配角色菜单、改密、删除用户后立即失效（§6.8）。
+- [x] **40.** 传输与运维护栏：`OAUTH_TRUSTED_CIDRS` 来源白名单（fail-closed）、安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）、`GET /healthz`、过期数据定时清理
+  - 已实现：`api/src/security.rs`（CIDR 解析与匹配 IPv4/IPv6、`ip_allowed` fail-closed、`trusted_cidr_guard` 中间件、`security_headers` 中间件、`TRUST_PROXY_HEADERS` 才采信转发头；CIDR 与安全头单测 7 个）；
+    `api/src/health.rs`（`SELECT 1` + 2s 超时，正常 200 / 数据库不可达 503，附 `insecure_transport`，§8.2 补偿控制 5）；
+    `api/src/lib.rs` 启动时 `spawn_cleanup_task()`（60s 后首次，之后每 `OAUTH_CLEANUP_INTERVAL_SECS`，默认 1 小时）清理授权码 / 令牌 / 会话；`axum::serve` 改为 `into_make_service_with_connect_info` 以取得 TCP 对端地址。
+- [x] **41.** JWT 加固：签发 `iss` / `aud` 并在资源请求与续期两处校验，提供 `JWT_STRICT_ISS_AUD` 平滑迁移开关
+  - 已实现：`service/src/user_service.rs` 的 `Claims` 增加 `iss` / `aud`（历史令牌缺省 `None`）、`check_scope()`（纯函数，4 个单测）/ `check_token_scope()`；
+    `api/src/auth.rs::verify_token()` 与 `refresh_tokens()` 均校验；默认「存在即校验」，`JWT_STRICT_ISS_AUD=true` 时强制存在（迁移步骤见设计文档 §7.9）。
+
+
 
 - [ ] **35.** 清空 `JWT_SECRET` 启动 → 桌面端登录/资产列表/上传全部正常，仅 HTTP 不可用
 - [ ] **36.** 桌面端切换租户 → 数据随租户变化；再用 HTTP 以另一租户身份请求后回桌面查询 → 数据不受影响（HTTP 不再写 `GLOBAL_SCHEMA`）
 - [ ] **37.** 不设置任何新环境变量（`AUTHZ_MODE` / `API_KEY_*` / `OAUTH_*`）→ 桌面端全功能可用
 - [ ] **38.** 新增权限点未污染 `sys_menu.command_name`；Tauri `invoke` 错误提示与改造前一致
+
+## 🔑 OIDC 单点登录（SSO）接入（设计见 `docs/OIDC单点登录（SSO）接入设计方案.md`）
+
+> 定位：本系统作为 **RP** 接入企业 IdP（Keycloak / Entra ID / Okta），**不做** OP 侧签发 `id_token`；与 `OAUTH_ENABLED` 完全独立。
+
+### Phase A：核心链路（3–5 天）
+- [ ] **42.** DDL：`public.sys_user_identity`（`issuer` + `subject` 唯一）+ `public.sys_oidc_login_state`（state 只存 SHA-256、TTL 10 分钟、一次性），追加到 `public_migration.sql`（幂等，不改既有表）
+- [ ] **43.** `service/src/oidc_service.rs`：discovery + JWKS 缓存（`DashMap` + TTL + 未知 `kid` 限频刷新）、`token_endpoint` 换码（`reqwest` 0.13.5 + rustls，工作区已有）、`validate_id_token`（纯函数：`alg`/签名/`iss`/`aud`/`azp`/`exp`/`iat`/`nbf`/`nonce`，时钟偏移默认 60s）、`cleanup_login_states`
+- [ ] **44.** `api/src/oidc_routes.rs`：`GET /api/auth/oidc/login`（生成 state/nonce/PKCE S256 → 302）、`GET /api/auth/oidc/callback`（换码 → 验 `id_token` → 查绑定 → `ensure_user_active` → 签发 JWT 对 + 复用 `issue_session_cookies`）、`GET /api/auth/oidc/providers`
+  - `create_router` 按 `OIDC_ENABLED` 条件挂载（缺省 404）；`authz.rs::PUBLIC_ROUTES_DECL` 同步 3 条，否则 `cargo test -p api authz` 拦截
+  - 错误体沿用 `ApiResponse {code,message}`（自有登录接口，**不套** `oauth_error` 的 `{error,error_description}`）
+- [ ] **45.** 身份绑定闭环：未绑定 → 403 `oidc_not_linked`（fail-closed）；`OIDC_AUTO_LINK_BY_EMAIL` / `OIDC_JIT_ENABLED` 默认均关；解绑 / 禁用 → `revoke_all_user_sessions` + 撤销刷新令牌族
+
+### Phase B：管理界面与登出（2–3 天）
+- [ ] **46.** 用户详情页「外部身份」绑定 / 解绑（复用 `system:user:edit`，不新增权限点）+ `POST /api/auth/oidc/logout`（RP-Initiated Logout，可选 `OIDC_END_SESSION_ENDPOINT`）
+
+### Phase C：桌面端与前端入口（2 天）
+- [ ] **47.** Tauri loopback 回调（RFC 8252 §7.3，匹配时忽略端口，单独函数 + 注释）、`apps/web` 登录页「企业账号登录」入口、`app/auth/oidc/callback/page.tsx`、`httpAdapter.ts` 登记公开路由、`/healthz` 增加 `oidc` 状态
+
+## 🧵 trustgraph 集群消息总线（Pulsar）客户端基建（设计见 `docs/知识库模块/trustgraph集群消息总线（Pulsar）客户端基建设计方案.md`）
+
+> 定位：只做客户端基建，**不接任何业务、不碰 gateway**；`trustgraph-lite` 保持零 IO（一行不改）。
+
+### P0：契约层（0.75 天）
+- [x] **48.** 新增 `crates/mq`（`default = ["memory"]`；P0 先占位 `pulsar = []`，P1 改为 `["dep:pulsar"]`）：`Envelope`（含 `partition_key`）/ `TopicName` / `MqError`（含 `AlreadySubscribed` / `SubscriptionConflict` / `Closed`）/ `MqConfig::from_env()`（含 `SubscriptionScope` / `instance_id` / `subscription_name()`）/ `init()` / `try_bus()` / `from_config()` / `Bus::close` / `MqStats` / `memory` 实现 / `retry` 退避 + 根 `Cargo.toml` 登记
+  - 验收：`cargo test -p mq` 通过；`cargo tree -p mq` 不含 `pulsar` / `prost v0.13`；`subscription_name` 的 `instance` / `shared` 两分支单测通过
+
+### P1：Pulsar 驱动（1.25 天）
+- [ ] **49.** `crates/mq/src/pulsar.rs`：`PulsarBus`（token 认证 / producer 池 + single-flight / 订阅注册表 / KeyShared / DLQ / `initial_position` / `read_compacted` / `block_queue_if_full` / `Bus::close` 优雅退出）+ `examples/{publish,subscribe}` + `tests/pulsar_e2e`（`PULSAR_TEST_URL` 门控，含多客户端用例）+ `docker-compose.yml` 增 `pulsar`（profile `mq`）
+  - 依赖形态：`pulsar = {version = "6.9.1", default-features = false, features = ["tokio-rustls-runtime-ring", "compression", "telemetry"]}`（禁 `native-tls` / `async-std` / `auth-oauth2` / `admin-api`）
+  - 验收：`shared` 两 Bus 处理计数之和 = N；`instance` 两 Bus 各收 N；两 Bus producer 名不冲突
+
+### P2：文档与索引（0.5 天）
+- [x] **50.** 设计文档 v0.2（§5.2 多客户端 / 多实例语义）+ `docs/知识库模块/README.md` 索引 + 内核文档非目标补充引用 + 本条目
+  - 待内核 Phase 2–5 完成后，另立《trustgraph 图集群设计方案》再接线集群节点
+
+## 🧪 OpenShell 沙箱 Agent 遗留验证项（B6'/B4'，设计见 `docs/知识库模块/OpenShell沙箱Agent落地设计（Rust版）.md` §17）
+
+> 代码已交付、单测全绿（`workflow --lib` 38 / `service sandbox` 21 / `agent-runner` 14 / `agent-core` 18）。
+> 下列 3 项依赖 **Linux + Docker/K8s 真机** 或 **发版流程**，开发机无法闭环：先登记，后续逐项回填状态。
+> 关闭时把结论同步到设计文档 §17「待确认」与 §19 变更记录，并保持本节 `[x]` + 日期。
+
+### 端到端验收：建箱 → step → 审批 → resume
+
+- [ ] **51.** 按 `apps/agent-sandbox/README.md` §5 在目标环境跑通全链路（`mode = "openshell"` 且 `agent_in_sandbox = true`）
+  - 用例 1（本地工具）：`kind=tool` 在沙箱内由 `agent-runner` 执行 → 平台读 `/workspace/out/step.json` → `Completed`
+  - 用例 2（审批续跑）：`before_final` 触发 `kind=interrupt` → 变量 `agent_interrupt` 落库 → 审批通过 → 下次调用按 `data.step + 1` 续跑到 `final`（不重复执行已批准的工具）
+  - 用例 3（步数上限）：`agent_max_steps = 2` + 不收敛任务 → `Completed`（`answer = "Agent 达到最大步数 2，已停止。"`），**不是** `Failed`
+  - 通过标准：`sys_oper_log` 有 `agent_step`×N、`agent_approval(status=requested)`、`agent_approval(status=approved)`，用例 3 另有 `agent_limit(status=exceeded, limit=2)`；两行审批 `client_info` 的 `scope` 相同（`wf:<execution_id>`）且 `oper_content` **不含** tool arguments / 提示词 / LLM 原文；`state.steps ≤ limit`
+  - 环境前提：镜像已推 registry 且可拉取、gateway 可达、`agent_token` 的 scope 含 `sandbox:llm`、`allowed_ips` 已按集群收窄（见 #52）
+  - 关闭条件：附一次完整执行记录（实例 ID + 上述审计行的 SQL 查询结果 + 最终输出 JSON）
+
+### 策略网段收窄：`allowed_ips`
+
+- [ ] **52.** 把 `apps/agent-sandbox/policies/agent.yaml` 的占位网段 `10.0.0.0/8` + `172.16.0.0/12` 收窄为目标集群实际 service CIDR
+  - 取值：`kubectl -n <ns> get svc <assets-server-svc> -o jsonpath='{.spec.clusterIP}'`，或集群 `--service-cluster-ip-range`
+  - 判定：收窄后沙箱内 `agent-runner` 调 `/internal/llm/v1/chat/completions` 仍 200；其它内网地址仍 403 `policy denied`（loopback / link-local 始终拒绝，与本字段无关）
+  - 需同步更新：README §3 的取值命令与 §6 排障两行（host 不匹配 / SSRF 内网拦截）；compose 覆盖仍用 `172.16.0.0/12`
+  - 备注：`allowed_ips` 是**策略侧**字段（`openshell policy set` 生效），平台代码无需改动
+
+### 发布说明与告警口径
+
+- [ ] **53.** v2.1 行为变更写入发布说明（仓库暂无 `CHANGELOG` 文件，随 release notes 输出）：**达到步数上限由 `Failed` 改为 `Completed`**
+  - 影响 1：原「`max_steps` 失败」告警不再触发；旧行为还会经 `service.rs::fail_service_task(retry=1)` 重建沙箱、重复计费
+  - 影响 2：仍需监控时，改为对 `sys_oper_log` 中 `agent_limit`（`status=exceeded`）计数告警；`agent_audit_steps = false` 不影响该事件
+  - 落点：release notes + 运维告警规则；完成时回填本条 `[x]` 与发布日期
 

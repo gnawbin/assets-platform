@@ -154,7 +154,7 @@ pub struct AssignUserRolesRequest {
     tag = "角色",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "角色 ID 列表", body = ApiResponse<Vec<i64>>),
+        (status = 200, description = "角色 ID 列表（字符串，避免雪花 ID 精度丢失）", body = ApiResponse<Vec<String>>),
         (status = 400, description = "参数错误", body = ApiError),
         (status = 401, description = "未认证", body = ApiError),
         (status = 500, description = "服务端错误", body = ApiError),
@@ -162,13 +162,16 @@ pub struct AssignUserRolesRequest {
 )]
 pub async fn get_user_role_ids(
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<Vec<i64>>>, ApiError> {
+) -> Result<Json<ApiResponse<Vec<String>>>, ApiError> {
     let user_id: i64 = id
         .parse()
         .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
 
     match service::role_service::get_user_role_ids(user_id).await {
-        Ok(role_ids) => Ok(Json(ApiResponse::success(role_ids))),
+        // 雪花 ID 超出 JS 安全整数范围，统一按字符串返回，避免前端精度丢失
+        Ok(role_ids) => Ok(Json(ApiResponse::success(
+            role_ids.iter().map(|id| id.to_string()).collect(),
+        ))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -196,7 +199,11 @@ pub async fn assign_user_roles(
         .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
 
     match service::role_service::assign_user_roles(user_id, req.role_ids).await {
-        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Ok(_) => {
+            // 用户权限并集变了：立即清掉其授权快照，避免 60s 内仍按旧权限放行（§6.8）
+            auth::invalidate_user_authority(user_id);
+            Ok(Json(ApiResponse::success(())))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -218,7 +225,7 @@ pub struct AssignRoleMenusRequest {
     tag = "角色",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "菜单 ID 列表", body = ApiResponse<Vec<i64>>),
+        (status = 200, description = "菜单 ID 列表（字符串，避免雪花 ID 精度丢失）", body = ApiResponse<Vec<String>>),
         (status = 400, description = "参数错误", body = ApiError),
         (status = 401, description = "未认证", body = ApiError),
         (status = 500, description = "服务端错误", body = ApiError),
@@ -226,13 +233,16 @@ pub struct AssignRoleMenusRequest {
 )]
 pub async fn get_role_menu_ids(
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<Vec<i64>>>, ApiError> {
+) -> Result<Json<ApiResponse<Vec<String>>>, ApiError> {
     let role_id: i64 = id
         .parse()
         .map_err(|_| ApiError::bad_request("无效的角色ID"))?;
 
     match service::role_service::get_role_menu_ids(role_id).await {
-        Ok(menu_ids) => Ok(Json(ApiResponse::success(menu_ids))),
+        // 雪花 ID 超出 JS 安全整数范围，统一按字符串返回，避免前端精度丢失
+        Ok(menu_ids) => Ok(Json(ApiResponse::success(
+            menu_ids.iter().map(|id| id.to_string()).collect(),
+        ))),
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -260,7 +270,11 @@ pub async fn assign_role_menus(
         .map_err(|_| ApiError::bad_request("无效的角色ID"))?;
 
     match service::role_service::assign_role_menus(role_id, req.menu_ids).await {
-        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Ok(_) => {
+            // 该角色下的所有用户权限都会变化：整表清空授权快照（低频管理操作）
+            auth::clear_user_authority_cache();
+            Ok(Json(ApiResponse::success(())))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }

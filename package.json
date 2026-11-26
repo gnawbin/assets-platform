@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev:web dev:server",
     "dev:web": "turbo run dev --filter=@assets/web...",
     "dev:backend": "turbo run dev --filter=@assets/backend...",
     "build": "turbo run build",

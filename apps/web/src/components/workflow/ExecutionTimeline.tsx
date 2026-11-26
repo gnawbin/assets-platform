@@ -61,6 +61,7 @@ const ExecutionStatusColor: Record<string, string> = {
     failed: 'red',
     running: 'blue',
     waiting: 'yellow',
+    rejected: 'red',
     cancelled: 'gray',
 };
 
@@ -138,8 +139,9 @@ interface ExecutionTimelineProps {
 const executionStatusLabel = (status: string): string =>
     status === 'success' ? '成功' :
         status === 'failed' ? '失败' :
-            status === 'running' ? '运行中' :
-                status === 'waiting' ? '待审批' : '已取消';
+            status === 'rejected' ? '已拒绝' :
+                status === 'running' ? '运行中' :
+                    status === 'waiting' ? '待审批' : '已取消';
 
 export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ executionId }) => {
     const [execution, setExecution] = useState<WorkflowExecution | null>(null);
@@ -148,6 +150,7 @@ export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ exec
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [actionMessage, setActionMessage] = useState<string | null>(null);
 
     const refresh = React.useCallback(async () => {
         const data = await getExecution(executionId);
@@ -175,11 +178,19 @@ export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ exec
     const handleDecide = async (task: PendingWorkflowTask, approved: boolean) => {
         setSubmitting(true);
         setActionError(null);
+        setActionMessage(null);
         try {
-            await completeUserTask({
+            const result = await completeUserTask({
                 taskId: task.task_id,
                 variables: { approved, comment: comment.trim() || undefined },
             });
+            if (result.status === 'pending') {
+                setActionMessage(
+                    `已提交，等待其他审批人（${result.approved_count}/${result.member_count}）`
+                );
+            } else if (result.status === 'rejected') {
+                setActionMessage('审批未通过，流程已终止');
+            }
             setComment('');
             await refresh();
         } catch (error) {
@@ -244,9 +255,17 @@ export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ exec
                                                 节点 {task.node_id}
                                             </Text>
                                             <Badge size="sm" variant="light" color={task.assignee ? 'blue' : 'gray'}>
-                                                {task.assignee || '未指定审批人'}
+                                                {task.assignee_name || task.assignee || '未指定审批人'}
                                             </Badge>
                                         </Group>
+                                        {task.approval_type && task.approval_type !== 'single' && (
+                                            <Text size="xs" c="dimmed">
+                                                {task.approval_type === 'all' ? '会签' : '或签'}
+                                                {' · '}
+                                                已审批 {task.approved_count ?? 0}/
+                                                {task.member_count ?? 1}
+                                            </Text>
+                                        )}
                                         {Boolean(task.interrupt_payload) && (
                                             <div>
                                                 <Text size="xs" c="dimmed">中断载荷</Text>
@@ -267,6 +286,7 @@ export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ exec
                                                 size="xs"
                                                 color="green"
                                                 loading={submitting}
+                                                disabled={task.has_voted === true}
                                                 onClick={() => handleDecide(task, true)}
                                             >
                                                 通过
@@ -276,6 +296,7 @@ export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ exec
                                                 color="red"
                                                 variant="light"
                                                 loading={submitting}
+                                                disabled={task.has_voted === true}
                                                 onClick={() => handleDecide(task, false)}
                                             >
                                                 驳回
@@ -288,6 +309,11 @@ export const ExecutionDetailTimeline: React.FC<ExecutionTimelineProps> = ({ exec
                         {actionError && (
                             <Alert color="red" variant="light" p="xs">
                                 <Text size="xs">{actionError}</Text>
+                            </Alert>
+                        )}
+                        {actionMessage && (
+                            <Alert color="blue" variant="light" p="xs">
+                                <Text size="xs">{actionMessage}</Text>
                             </Alert>
                         )}
                     </Stack>

@@ -40,6 +40,11 @@ graph TB
 | 架构梳理与重新设计方案 | [知识库模块架构梳理与重新设计方案.md](./知识库模块架构梳理与重新设计方案.md) | 整体架构、数据库设计、实施路线图 |
 | 多LLM厂商兼容设计 | [多LLM厂商兼容设计方案.md](./多LLM厂商兼容设计方案.md) | 适配器模式、密钥安全、负载均衡、用量统计 |
 | LLM协议适配crate设计 | [LLM协议适配crate设计方案.md](./LLM协议适配crate设计方案.md) | 双协议拆分：llm 契约 + llm-openai + llm-anthropic、真流式、工具调用 |
+| trustgraph-lite 信任图谱内核 | [trustgraph-lite轻量级信任图谱内核设计方案.md](./trustgraph-lite轻量级信任图谱内核设计方案.md) | 纯内存图内核、信任传播、快照导出，与 knowledge_relation 的边界 |
+| trustgraph 集群消息总线（Pulsar）客户端基建 | [trustgraph集群消息总线（Pulsar）客户端基建设计方案.md](./trustgraph集群消息总线（Pulsar）客户端基建设计方案.md) | `mq` crate 契约、`pulsar 6.9.1`（rustls-ring）选型、单 crate 双 feature（memory 默认 / pulsar 可选）、信封与配置、多客户端语义（`instance` / `shared`），本轮零接线 |
+| CubeSandbox 沙箱 crate 整合 | [CubeSandbox沙箱crate整合设计方案.md](./CubeSandbox沙箱crate整合设计方案.md) | 控制面 CubeAPI / 数据面 CubeProxy 拆解、沙箱生命周期与执行链路、会话亲和与降级策略 |
+| OpenShell 沙箱整合可行性 | [OpenShell沙箱整合可行性分析（嵌入vs独立部署）.md](./OpenShell沙箱整合可行性分析（嵌入vs独立部署）.md) | 嵌入式 vs 独立部署辨析、集成模式 M1~M8、外部材料核验、Agent 默认沙箱内（M1b）与 OCSF 审计双通道、契约映射与部署拓扑 |
+| OpenShell 沙箱 Agent 落地（Rust） | [OpenShell沙箱Agent落地设计（Rust版）.md](./OpenShell沙箱Agent落地设计（Rust版）.md) | Agent 进沙箱的 Rust 落地：`agent-core` + `agent-runner` 双 crate、step 协议 v1、内部 OpenAI 兼容 LLM 端点与计量补齐、工具分工（RAG 留平台）、B-Ⅰ/B-Ⅱ 两形态实施顺序；**默认 `in_process`（同进程、不启用沙盒）**，沙盒为配置可选 |
 | RAG多轮问答设计 | [智能问答系统（RAG多轮对话）设计方案.md](./智能问答系统（RAG多轮对话）设计方案.md) | RAG检索、会话管理、溯源引用、前端交互 |
 | 多模态问答设计 | [智能问答多模态（文件与视频上传）设计方案.md](./智能问答多模态（文件与视频上传）设计方案.md) | 聊天页文件/视频上传、视觉 LLM 理解、doc-parser 解析接入 |
 

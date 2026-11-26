@@ -7,10 +7,14 @@ Kubernetes 的资源归一化成 `ResourceRecord`，交给后续的对账器、�
 
 - Docker 只调 `/_ping`、`/version`、`/info`、`list_containers`、`list_images`、
   `list_networks`、`list_volumes`、`list_nodes`、`list_services`、`list_tasks`；
-- Kubernetes 只调 `ApiserverVersion` 与 `get` / `list`；
-- 不 exec、不起停、不删除、不改配置；
+  日志 / 性能另加两条 GET：`GET /containers/{id}/logs`、`GET /containers/{id}/stats`；
+- Kubernetes 只调 `ApiserverVersion` 与 `get` / `list`；日志 / 性能另加
+  `GET .../pods/{pod}/log` 与 `metrics.k8s.io/v1beta1` 的 PodMetrics（需 metrics-server）；
+- 不 exec、不起停、不删除、不改配置（容器终端属写操作，见独立的 `ops-exec` crate）；
 - 不直连 K8s 节点的 `docker.sock`；
-- `ConfigMap` / `Secret` 只保留键名与类型，**绝不读取 Data 内容**。
+- `ConfigMap` / `Secret` 只保留键名与类型，**绝不读取 Data 内容**；
+- 日志正文只随响应返回，**不落库、不进 tracing**；性能数值在本 crate 内换算完成，
+  前端不再二次计算。
 
 ## 特性开关
 
@@ -18,16 +22,16 @@ Kubernetes 的资源归一化成 `ResourceRecord`，交给后续的对账器、�
 
 | feature  | 内容 | 依赖 |
 | -------- | ---- | ---- |
-| `docker` | 单机 Docker + Swarm（Node / Service / Task） | `bollard`、`time` |
-| `k8s`    | Kubernetes（APIServer 只读） | `kube`、`k8s-openapi`、`base64` |
+| `docker` | 单机 Docker + Swarm（Node / Service / Task）+ 容器日志 / 性能 | `bollard`、`time`、`futures` |
+| `k8s`    | Kubernetes（APIServer 只读）+ Pod 日志 / 指标 | `kube`、`k8s-openapi`、`base64`、`futures` |
 
 ```bash
 cargo check -p ops --features docker,k8s
 cargo test  -p ops --features docker,k8s
 ```
 
-> `k8s-openapi` 目前按 `v1_32` 编译。若目标集群低于 1.32，请同步调整根
-> `Cargo.toml` 中 `k8s-openapi` 的 feature。
+> `k8s-openapi` 目前按 `v1_33` 编译（0.29 只提供 `v1_33` ~ `v1_37`）。若目标集群
+> 低于 1.33，请同步调整根 `Cargo.toml` 中 `k8s-openapi` 的 feature。
 
 ## 快速上手
 
@@ -80,6 +84,36 @@ async fn main() -> ops::OpsResult<()> {
     Ok(())
 }
 ```
+
+## 容器日志与性能
+
+两类能力都是 GET 语义，读多少返回多少，不落库：
+
+```rust
+use ops::{ContainerLogsRequest, PodLogsRequest};
+
+// Docker：最近 200 行；累计超过 512 KiB 立即停止并置 truncated=true
+let logs = docker
+    .container_logs("web-1", &ContainerLogsRequest::default())
+    .await?;
+println!("{} 行 / {} 字节，截断={}", logs.lines.len(), logs.bytes, logs.truncated);
+
+// Docker 性能：one_shot（cpu_percent 常为 None）/ 两样本（自己算 delta，CPU% 精确）
+let stats = docker.container_stats("web-1", false).await?;
+println!("CPU={:?}% 内存={}B", stats.cpu_percent, stats.mem_used_bytes);
+
+// K8s：pods/log；previous=true 取上次崩溃的容器日志（CrashLoopBackOff 场景）
+let mut request = PodLogsRequest::new("default", "web-7d9f-abc");
+request.container = Some("web".to_string());
+request.previous = true;
+let pod_logs = k8s.pod_logs(&request).await?;
+
+// K8s 指标：metrics-server（未安装时给出带 `kubectl top` 自检建议的错误）
+let metrics = k8s.pod_metrics("default", "web-7d9f-abc").await?;
+```
+
+> Docker 侧 `docker logs --previous` 在当前 bollard（0.21）没有对应参数，
+> `previous=true` 只在 K8s 侧可用；需要崩溃前日志时请走 K8s 或 `docker logs --previous` 人工排查。
 
 `ConnectionConfig` 提供一组构造函数，端点会按 provider / 认证方式自动补 scheme：
 
@@ -154,11 +188,13 @@ cargo run -p ops --example ops_probe --features k8s
 K8s 侧校验合成的 kubeconfig 可被 `kube::config::Kubeconfig` 解析、错误分类与状态映射。
 
 ```bash
-cargo test -p ops                       # 27 个用例（model / error / 注册表基线）
-cargo test -p ops --features docker     # 33 个用例
-cargo test -p ops --features k8s        # 34 个用例
-cargo test -p ops --features docker,k8s # 40 个用例（feature 叠加）
+cargo test -p ops                       # 39 个用例（model / error / 注册表基线）
+cargo test -p ops --features docker     # 61 个用例（+22：Docker 连接器、日志分帧、stats、cgroup 换算）
+cargo test -p ops --features k8s        # 53 个用例（+14：kubeconfig 合成、状态映射、Pod 日志参数、quantity 解析）
+cargo test -p ops --features docker,k8s # 75 个用例（feature 叠加）
 ```
+
+> 数量随 feature 叠加增长而非简单相加：`model` / `error` / 注册表基线在每个 feature 组合下都会跑一遍。
 
 ## 后续迭代（不属于本 crate）
 

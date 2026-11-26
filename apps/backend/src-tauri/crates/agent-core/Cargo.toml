@@ -1,0 +1,14 @@
+[package]
+edition = "2024"
+name = "agent-core"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# 纯逻辑 crate：提示词拼装 + LLM 动作解析（零 IO / 零数据库 / 零 HTTP）。
+# 由 `workflow`（平台侧 Agent）与 `agent-runner`（沙箱侧 runner）共用，
+# 保证动作协议只有一份实现。
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,37 @@
+# 运维采集：容器性能（metrics.k8s.io/v1beta1）
+#
+# 前置条件：集群已安装 metrics-server。
+# 最低 K8s 版本：1.24（metrics-server 需支持 v1beta1）
+# 自检：
+#   kubectl top pods -n prod
+#   kubectl auth can-i get pods.metrics.k8s.io -n prod --as=system:serviceaccount:ops-platform:ops-metrics
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-metrics
+  namespace: ops-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ops-metrics
+  namespace: prod
+rules:
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ops-metrics
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ops-metrics
+subjects:
+  - kind: ServiceAccount
+    name: ops-metrics
+    namespace: ops-platform

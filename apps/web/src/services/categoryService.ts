@@ -49,38 +49,38 @@ export function getCategories() {
     return api.get<Category[]>('get_categories');
 }
 
-/** 新增分类 */
+/**
+ * 新增分类
+ *
+ * 后端 `POST /api/categories` 直接反序列化 `CreateCategoryRequest`
+ * （`category_name` / `asset_type` / `parent_id` / `sort` / `description`），
+ * 不再包一层 `category`。`parent_id` 为雪花 ID 字符串，顶级分类传 null。
+ */
 export function insertCategory(params: InsertCategoryParams) {
-    return api.post<string>('insert_category', {
-        category: {
-            id: "0",
-            category_name: params.categoryName,
-            asset_type: params.assetType,
-            parent_id: params.parentId === "0" ? null : params.parentId,
-            sort: params.sort,
-            description: params.description,
-            created_by: null,
-            updated_by: null,
-            deleted: 0,
-        },
+    return api.post<Category>('insert_category', {
+        category_name: params.categoryName,
+        asset_type: params.assetType,
+        parent_id: isRootParent(params.parentId) ? null : params.parentId,
+        sort: params.sort,
+        description: params.description,
     });
 }
 
-/** 更新分类 */
+/** 更新分类（id 进路径，其余字段 snake_case） */
 export function updateCategory(params: UpdateCategoryParams) {
-    return api.put<string>('update_category', {
-        category: {
-            id: params.id,
-            category_name: params.categoryName,
-            asset_type: params.assetType,
-            parent_id: params.parentId === "0" ? null : params.parentId,
-            sort: params.sort,
-            description: params.description,
-            created_by: null,
-            updated_by: null,
-            deleted: 0,
-        },
+    return api.put<Category>('update_category', {
+        id: params.id,
+        category_name: params.categoryName,
+        asset_type: params.assetType,
+        parent_id: isRootParent(params.parentId) ? null : params.parentId,
+        sort: params.sort,
+        description: params.description,
     });
+}
+
+/** 顶级分类的 parentId 约定为 "0" / 空串（旧命令参数约定） */
+function isRootParent(parentId: string | null | undefined): boolean {
+    return !parentId || parentId === '0';
 }
 
 /** 删除分类（软删除） */

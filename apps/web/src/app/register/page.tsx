@@ -19,7 +19,7 @@ import {
     Anchor,
 } from '@mantine/core';
 import { IconAlertCircle, IconUserPlus } from '@tabler/icons-react';
-import { api } from '@/utils/api';
+import { register as submitRegistration } from '@/services/registerService';
 
 const RegisterPage: React.FC = () => {
     const router = useRouter();
@@ -46,18 +46,17 @@ const RegisterPage: React.FC = () => {
         setError(null);
 
         try {
-            // Tauri 后端要求参数为驼峰命名，直接构造 payload
-            const payload: Record<string, unknown> = {
+            // 后端 RegisterRequest 为扁平 snake_case（real_name / department_name / company_name）
+            await submitRegistration({
                 username: username.trim(),
                 password,
-                realName: realName.trim(),
+                real_name: realName.trim(),
                 email: email.trim() || undefined,
                 phone: phone.trim() || undefined,
-                departmentName: departmentName.trim() || undefined,
-                companyName: companyName.trim() || undefined,
+                department_name: departmentName.trim() || undefined,
+                company_name: companyName.trim() || undefined,
                 reason: reason.trim() || undefined,
-            };
-            await api.post('register', payload);
+            });
             // 注册成功，跳转到登录页
             router.push('/login?registered=true');
         } catch (err) {

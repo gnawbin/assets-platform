@@ -1,23 +1,34 @@
 /**
- * API 适配器统一导出
+ * API 适配器统一导出（**HTTP 单通道**）
  *
- * 提供运行时动态切换适配器的能力：
- * - 构建时通过环境变量 NEXT_PUBLIC_API_ADAPTER 设置默认值
- * - 运行时通过 setAdapter() 动态切换
- * - 自动检测 Tauri 环境并选择合适的适配器
+ * 前端已从「Tauri IPC + HTTP 双通道」切换为纯 HTTP 单通道：
+ * 桌面版与 Web 版的业务请求全部走 `fetch`（`httpAdapter`），
+ * 不再存在 `invoke()` 调用点，也不再支持运行时切换适配器。
  *
- * 桌面版和 Web 版可以共存，共享同一套前端代码。
+ * 保留 `getAdapterType()` 是为了兼容既有页面的能力判断
+ * （如 API Key / OAuth 客户端管理页只在 HTTP 通道可用），恒返回 `'http'`。
  */
 
 export type { IApiAdapter, ApiConfig } from './types';
-export { tauriAdapter } from './tauriAdapter';
-export { httpAdapter } from './httpAdapter';
 export {
-    setAdapter,
-    getAdapter,
-    getAdapterType,
-    resetAdapter,
-} from './manager';
-export type { AdapterType } from './manager';
+    httpAdapter,
+    extractServerMessage,
+    refreshAccessToken,
+    clearAuthSession,
+    revokeRefreshTokenOnServer,
+    COMMAND_ROUTE_MAP,
+    UNEXPOSED_BACKEND_COMMANDS,
+} from './httpAdapter';
+
+/** 适配器类型（历史类型别名，只剩一种取值） */
+export type AdapterType = 'http';
+
+/** 兼容旧调用点：恒返回 `'http'`（前端已无 Tauri 通道） */
+export function getAdapterType(): AdapterType {
+    return 'http';
+}
+
+/** 兼容旧调用点：返回唯一的 HTTP 适配器 */
+export { httpAdapter as getAdapter } from './httpAdapter';
 
 

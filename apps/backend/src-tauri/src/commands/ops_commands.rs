@@ -2,6 +2,12 @@
 //!
 //! 对应 service::ops_service 的 11 个入口；本层只做参数解析与委托，零业务逻辑。
 
+use service::container_exec_service::{
+    self, OpsTerminalSessionTicket, TerminalTarget,
+};
+use service::container_probe_service::{
+    self, OpsContainerLogsView, OpsContainerStatsView, OpsPodLogsView, OpsPodMetricsView,
+};
 use service::ops_service::{
     self, OpsCollectResult, OpsConnectionInput, OpsConnectionView, OpsHealthView,
     OpsProviderOption, OpsResourceLinkView,
@@ -87,6 +93,130 @@ pub async fn get_ops_links(
         _ => None,
     };
     ops_service::list_links(connection_id).await
+}
+
+// ======================== 容器日志 / 性能 / 终端 ========================
+
+/// Docker 容器日志
+#[tauri::command]
+pub async fn get_ops_container_logs(
+    connectionId: String,
+    container: String,
+    lines: Option<u32>,
+    timestamps: Option<bool>,
+) -> Result<OpsContainerLogsView, String> {
+    container_probe_service::container_logs(
+        parse_id(&connectionId, "连接")?,
+        &container,
+        lines,
+        timestamps.unwrap_or(false),
+    )
+    .await
+    .map_err(|err| err.into_message())
+}
+
+/// Docker 容器性能
+#[tauri::command]
+pub async fn get_ops_container_stats(
+    connectionId: String,
+    container: String,
+    twoSamples: Option<bool>,
+) -> Result<OpsContainerStatsView, String> {
+    container_probe_service::container_stats(
+        parse_id(&connectionId, "连接")?,
+        &container,
+        twoSamples.unwrap_or(false),
+    )
+    .await
+    .map_err(|err| err.into_message())
+}
+
+/// K8s Pod 日志
+#[tauri::command]
+pub async fn get_ops_pod_logs(
+    connectionId: String,
+    namespace: String,
+    pod: String,
+    container: Option<String>,
+    previous: Option<bool>,
+    lines: Option<u32>,
+    timestamps: Option<bool>,
+) -> Result<OpsPodLogsView, String> {
+    container_probe_service::pod_logs(
+        parse_id(&connectionId, "连接")?,
+        &namespace,
+        &pod,
+        container.as_deref(),
+        previous.unwrap_or(false),
+        lines,
+        timestamps.unwrap_or(false),
+    )
+    .await
+    .map_err(|err| err.into_message())
+}
+
+/// K8s Pod 指标
+#[tauri::command]
+pub async fn get_ops_pod_metrics(
+    connectionId: String,
+    namespace: String,
+    pod: String,
+) -> Result<OpsPodMetricsView, String> {
+    container_probe_service::pod_metrics(
+        parse_id(&connectionId, "连接")?,
+        &namespace,
+        &pod,
+    )
+    .await
+    .map_err(|err| err.into_message())
+}
+
+/// 打开容器终端会话（票据用于随后的 WS 升级）
+#[tauri::command]
+pub async fn open_ops_terminal_session(
+    connectionId: String,
+    target: TerminalTarget,
+    shell: Option<String>,
+    cols: Option<u32>,
+    rows: Option<u32>,
+    currentUserId: Option<String>,
+) -> Result<OpsTerminalSessionTicket, String> {
+    let user_id = currentUserId
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(0);
+    let session_id = container_exec_service::open_session(
+        user_id,
+        parse_id(&connectionId, "连接")?,
+        &target,
+        shell.as_deref(),
+        cols.unwrap_or(120).clamp(1, 1000),
+        rows.unwrap_or(32).clamp(1, 1000),
+        None,
+    )
+    .await?;
+    // Tauri 通道不承载 WS 票据，票据只在本地 HTTP 模式签发；这里返回空票据让调用方走 HTTP
+    Ok(OpsTerminalSessionTicket {
+        session_id: session_id.to_string(),
+        ticket: String::new(),
+        expires_in: 0,
+    })
+}
+
+/// 关闭容器终端会话（幂等）
+#[tauri::command]
+pub async fn close_ops_terminal_session(
+    sessionId: String,
+    currentUserId: Option<String>,
+) -> Result<(), String> {
+    let user_id = currentUserId
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(0);
+    container_exec_service::close_session(
+        parse_id(&sessionId, "会话")?,
+        user_id,
+        "client requested close",
+    )
+    .await
 }
 
 /// 把观测资源归档到已有资产

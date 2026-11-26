@@ -1,0 +1,36 @@
+# 运维采集：容器日志（GET pods/log）
+#
+# 最低 K8s 版本：1.24
+# 自检：
+#   kubectl auth can-i get pods/log -n prod --as=system:serviceaccount:ops-platform:ops-logs
+# 注意：只授权 pods/log 子资源，不授予 pods 的 delete/patch。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-logs
+  namespace: ops-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ops-logs
+  namespace: prod
+rules:
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ops-logs
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ops-logs
+subjects:
+  - kind: ServiceAccount
+    name: ops-logs
+    namespace: ops-platform

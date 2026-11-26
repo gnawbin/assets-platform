@@ -3,21 +3,45 @@
 //! 提供 RESTful API 服务，与 Tauri 桌面应用同时运行。
 //! 使用 axum 框架，支持 OpenAPI/Swagger 文档。
 
+pub mod api_key_routes;
 pub mod asset_routes;
 pub mod auth;
+pub mod authz;
 pub mod category_routes;
 pub mod chat_routes;
+pub mod container_routes;
+pub mod conversation_routes;
 pub mod department_routes;
+pub mod health;
 pub mod knowledge_routes;
+pub mod knowledge_asset_routes;
+pub mod task_routes;
+pub mod task_sink;
+pub mod llm_routes;
+pub mod numbering_routes;
+pub mod oauth_browser;
+pub mod oauth_error;
+pub mod oauth_routes;
+pub mod oauth_session;
 pub mod ops_routes;
 pub mod process_routes;
 pub mod register_routes;
 pub mod response;
 pub mod role_routes;
+pub mod sandbox_routes;
+// 沙箱审计内部接收端点（服务间鉴权；不挂 protected_routes）
+pub mod sandbox_audit_routes;
+// 沙箱内部 LLM 端点（OpenAI 兼容；服务间鉴权）
+pub mod internal_llm_routes;
+pub mod security;
 pub mod skill_routes;
+// 运维终端（SSH）：REST + WebSocket，票据单独一个模块
+pub mod ssh_routes;
+pub mod ssh_ticket;
 pub mod tenant_routes;
 pub mod upload_routes;
 pub mod user_routes;
+pub mod workflow_routes;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -47,17 +71,114 @@ pub async fn start_http_server(
     start_http_server_with(pool, llm_router, None).await
 }
 
+/// 校验 HTTP 启动所必需的 `JWT_SECRET`
+///
+/// 规则（设计文档 §16 T-2 / §16.3）：
+/// - 未配置（或为空串）→ `Err`
+/// - 少于 32 字节（256 bit）→ `Err`
+///
+/// 抽成纯函数便于单测，且**不 panic**：调用方（`start_http_server_with`）把
+/// `Err` 直接透传给 `bootstrap`，桌面端不受影响。
+fn check_jwt_secret(secret: Option<&str>) -> anyhow::Result<()> {
+    let Some(secret) = secret.filter(|s| !s.is_empty()) else {
+        return Err(anyhow::anyhow!(
+            "HTTP API 未启动：JWT_SECRET 未配置（Tauri 桌面模式不受影响，仍使用内置默认值）"
+        ));
+    };
+    if secret.len() < 32 {
+        return Err(anyhow::anyhow!(
+            "HTTP API 未启动：JWT_SECRET 长度需 ≥ 32 字节（当前 {} 字节）",
+            secret.len()
+        ));
+    }
+    Ok(())
+}
+
+/// 绑定监听端口，失败时给出可操作的错误信息
+///
+/// 单独抽出来是为了让「端口被占用」的提示可以被单测覆盖，
+/// 且保证 `start_http_server_with` 只在**绑定成功之后**才打印启动日志。
+async fn bind_listener(addr: SocketAddr) -> anyhow::Result<tokio::net::TcpListener> {
+    match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => Ok(listener),
+        Err(err) => Err(anyhow::anyhow!("{}", bind_error_message(addr, &err))),
+    }
+}
+
+/// 端口占用时附上排查命令，其余 IO 错误保持原样（纯函数，便于单测）
+///
+/// 特别注意提示里那句「改 `.env.toml` 的 `[api] port`」：`bootstrap::config`
+/// 会把 TOML 的每个键无条件 `set_var`，因此 `API_PORT=3002 pnpm dev:server`
+/// 这类环境变量覆盖**不生效**，必须改配置文件（或用 `ASSETS_CONFIG_DIR`
+/// 指向另一份改过端口的 `.env.toml`）。
+fn bind_error_message(addr: SocketAddr, err: &std::io::Error) -> String {
+    if err.kind() == std::io::ErrorKind::AddrInUse {
+        format!(
+            "绑定 TCP 监听地址 {} 失败: 端口已被占用（{}），很可能已有实例在运行。\
+             排查：`ss -ltnp | grep :{port}` 或 `lsof -i :{port}`；\
+             停止残留实例：`pkill -f target/debug/assets-server`。\
+             如需换端口，请修改 .env.toml 的 [api] port（该键会覆盖同名环境变量 API_PORT），\
+             或设置 ASSETS_CONFIG_DIR 指向另一份 .env.toml",
+            addr,
+            err,
+            port = addr.port()
+        )
+    } else {
+        format!("绑定 TCP 监听地址 {} 失败: {}", addr, err)
+    }
+}
+
 /// 启动 HTTP API 服务（可注入额外路由）
 ///
-/// `extra_routes` 在顶层 `merge`，与上传 / SSE 路由一样位于 `auth_middleware` 之外，
-/// 供 `crates/apidoc` 注入 `/swagger-ui` 与 `/api-docs/openapi.json`。
+/// `extra_routes` 在顶层 `merge`，与 `/swagger-ui`、`/api-docs/openapi.json` 一样
+/// 位于 `auth_middleware` 之外，供 `crates/apidoc` 注入文档路由。
 /// 之所以用「注入」而不是让 `api` 依赖 `apidoc`，是为了避免
 /// `apidoc → api` 的反向依赖成环。
+///
+/// 上传（`/api/upload/*`）与 SSE（`/api/chat/stream`）**已纳入** `auth_middleware`：
+/// 它们各自持有独立的 `State`，无法与受保护路由共用同一个 `Router`，
+/// 因此在各自 `with_state()` 之后单独挂 `.layer(middleware::from_fn(auth_middleware))`。
 pub async fn start_http_server_with(
     pool: sqlx::PgPool,
     llm_router: Option<std::sync::Arc<service::llm_gateway_service::LLMRouter>>,
     extra_routes: Option<Router>,
 ) -> anyhow::Result<()> {
+    // ===== HTTP 启动前置条件：JWT_SECRET 必须存在且足够强 =====
+    //
+    // 只在 HTTP 启动路径校验（设计文档 §16 T-2 / §16.3）：
+    // - `JWT_SECRET` 在 Tauri 桌面模式也在用（登录签发 / get_current_user 解码），
+    //   那三处保留「缺失时回落内置默认值」的兜底，**不做进程级 fail-fast**；
+    // - 这里返回 `Err` 只会让 HTTP 服务不启动（由 `bootstrap::serve_http` 记录错误日志），
+    //   Tauri 窗口与全部 `invoke` 命令照常工作。
+    let jwt_secret = std::env::var("JWT_SECRET").ok();
+    check_jwt_secret(jwt_secret.as_deref())?;
+
+    // ===== 鉴权自检（设计文档 §6.3 手段 3）=====
+    // 只读代码兜底表与 DB 映射，**不 panic、不 block 启动**（§16 T-2）：
+    // 未登记权限点的路由在 enforce 模式下会 403，这里提前把差异打出来。
+    let authz_mode = authz::AuthzMode::current();
+    let coverage = authz::audit_route_coverage().await;
+    coverage.log(authz_mode);
+
+    // OAuth 2.1 传输护栏（§8.2）：启用 AS 且 issuer 为 http 时打印 WARN 横幅
+    oauth_routes::warn_if_insecure_transport();
+
+    // ===== 后台清理任务（§7.7）：过期授权码 / 刷新令牌 / 浏览器会话 =====
+    // 每小时跑一次，失败只记日志（不 panic、不影响服务）。
+    spawn_cleanup_task();
+
+    // ===== 沙箱空闲回收（设计文档 §6.2）：未启用时内部直接返回 =====
+    service::sandbox_service::spawn_idle_reaper();
+
+    // ===== 沙箱审计保留期清理（每日一次；失败只 WARN）=====
+    spawn_sandbox_audit_cleanup();
+
+    // ===== SSH 会话空闲回收（方案 §4.3）：进程内只启动一次 =====
+    service::ssh_service::spawn_idle_reaper();
+
+    // ===== 容器终端会话空闲回收（仅 OPS_CONTAINER_EXEC_ENABLED=true 时生效）=====
+    service::container_exec_service::spawn_idle_reaper();
+
     let port: u16 = std::env::var("API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
@@ -93,6 +214,45 @@ pub async fn start_http_server_with(
         ])
         .allow_headers(Any);
 
+    // 构建路由（上传 / SSE / 注入路由的装配见 build_router）
+    let app = build_router(pool, llm_router, extra_routes)
+        .await?
+        .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        // 安全响应头（HSTS / nosniff / X-Frame-Options / Referrer-Policy）挂最外层
+        .layer(middleware::from_fn(security::security_headers));
+
+    // 先绑定再打印：端口被占用时不能出现「启动于 …」的假成功日志（曾导致排查时
+    // 误以为服务已起来，实际是旧实例占着端口）。
+    let listener = bind_listener(addr).await?;
+    info!("HTTP API 服务启动于 http://{}", addr);
+    // `into_make_service_with_connect_info`：让 handler / 中间件能取到 TCP 对端地址，
+    // `OAUTH_TRUSTED_CIDRS` 白名单在未配置 `TRUST_PROXY_HEADERS` 时依赖它。
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
+
+    Ok(())
+}
+
+/// 构建 HTTP 路由器（桌面 / 网关共用）
+///
+/// 只做「路由装配」：不含 CORS / Trace / 安全响应头 / 监听，调用方按需叠加：
+/// - 桌面形态：`start_http_server_with` 叠加三层中间件后自己 bind
+/// - 网关形态：`crates/gateway` 先 merge 网关自有路由（`/livez`、`/readyz`、
+///   `/api/events` 等）再叠加自己的中间件与监听
+///
+/// 上传（`/api/upload/*`）与 SSE（`/api/chat/stream`）子路由在此装配：两者各自
+/// 持有独立 `State`，必须在各自 `with_state()` 之后单独挂 auth / authz 中间件。
+pub async fn build_router(
+    pool: sqlx::PgPool,
+    llm_router: Option<std::sync::Arc<service::llm_gateway_service::LLMRouter>>,
+    extra_routes: Option<Router>,
+) -> anyhow::Result<Router> {
     // 初始化大文件上传路由（S3 客户端初始化需要 async 上下文）
     let upload_router = {
         let s3_config = storage::s3::S3Config::from_env().unwrap_or_default();
@@ -119,42 +279,136 @@ pub async fn start_http_server_with(
                 post(upload_routes::complete_upload),
             )
             .route("/api/upload/{id}", delete(upload_routes::abort_upload))
+            // 文件版本历史：占位符用 `{fileGroupId}`（命令参数名），extractParams 才能剥离
+            .route(
+                "/api/upload/versions/{fileGroupId}",
+                get(upload_routes::get_version_history),
+            )
             .with_state(state)
+            // 上传接口必须登录（改造前匿名可调用：在 auth_middleware 之外 merge）
+            .layer(middleware::from_fn(authz::authz_middleware))
+            .layer(middleware::from_fn(auth_middleware))
     };
 
-    // 初始化智能问答 SSE 流式路由（LLM Router 全局共享）
-    let chat_router = {
-        let llm_router = llm_router
-            .ok_or_else(|| anyhow::anyhow!("LLM Router 未初始化，无法注册 /api/chat/stream"))?;
-        let state = std::sync::Arc::new(chat_routes::ChatRouterState { llm_router });
-        Router::new()
+    // 初始化智能问答路由（SSE 流式对话 + 会话管理，LLM Router 全局共享）
+    let (chat_router, conversation_router, internal_llm_router) = {
+        let llm_router = llm_router.ok_or_else(|| {
+            anyhow::anyhow!(
+                "LLM Router 未初始化，无法注册 /api/chat/stream 与 /api/conversations*"
+            )
+        })?;
+
+        let chat_state = std::sync::Arc::new(chat_routes::ChatRouterState {
+            llm_router: llm_router.clone(),
+        });
+        let chat_router = Router::new()
             .route("/api/chat/stream", post(chat_routes::chat_stream))
-            .with_state(state)
+            .with_state(chat_state)
+            // SSE 对话必须登录（改造前匿名可调用：在 auth_middleware 之外 merge）
+            .layer(middleware::from_fn(authz::authz_middleware))
+            .layer(middleware::from_fn(auth_middleware));
+
+        // 会话管理：路径占位符沿用命令参数名 {convId}，前端 extractParams 才能剥离
+        let conversation_state =
+            std::sync::Arc::new(conversation_routes::ConversationRouterState {
+                llm_router: llm_router.clone(),
+            });
+        let conversation_router = Router::new()
+            .route(
+                "/api/conversations",
+                get(conversation_routes::list_conversations)
+                    .post(conversation_routes::create_conversation),
+            )
+            .route(
+                "/api/conversations/{convId}/messages",
+                get(conversation_routes::list_messages).post(conversation_routes::send_message),
+            )
+            .route(
+                "/api/conversations/{convId}/title",
+                put(conversation_routes::update_title),
+            )
+            .route(
+                "/api/conversations/{convId}",
+                delete(conversation_routes::delete_conversation),
+            )
+            .with_state(conversation_state)
+            // 会话数据按令牌 sub 隔离，必须登录
+            .layer(middleware::from_fn(authz::authz_middleware))
+            .layer(middleware::from_fn(auth_middleware));
+
+        // 内部 LLM 端点（沙箱 runner 专用）：只挂认证，handler 内校验服务身份 + scope
+        let internal_llm_state = std::sync::Arc::new(internal_llm_routes::InternalLlmState {
+            llm: llm_router.clone(),
+            pool: pool.clone(),
+        });
+        let internal_llm_router = Router::new()
+            .route(
+                "/internal/llm/v1/chat/completions",
+                post(internal_llm_routes::chat_completions),
+            )
+            .with_state(internal_llm_state)
+            .layer(middleware::from_fn(auth_middleware));
+
+        (chat_router, conversation_router, internal_llm_router)
     };
 
-    // 构建路由（外部注入的路由与上传 / SSE 一样在顶层合并，不经过 auth_middleware）
+    // 运维终端（SSH）：开会话（REST）与终端通道（WS）共用票据状态。
+    // WS 由一次性票据鉴权，**不能**复用 auth_middleware（浏览器 WS 带不了 Authorization 头），
+    // 因此两者分成两个子 router：只有 REST 那一个叠 auth / authz 中间件。
+    let ssh_state = std::sync::Arc::new(ssh_routes::SshRouterState {
+        tickets: ssh_ticket::store(),
+    });
+    let ssh_open_router = Router::new()
+        .route("/api/ops/ssh/sessions", post(ssh_routes::open_session))
+        .with_state(ssh_state.clone())
+        .layer(middleware::from_fn(authz::authz_middleware))
+        .layer(middleware::from_fn(auth_middleware));
+    let ssh_ws_router = Router::new()
+        .route(
+            "/api/ops/ssh/sessions/{sessionId}/ws",
+            get(ssh_routes::session_ws),
+        )
+        .with_state(ssh_state);
+
+    // 容器终端：开会话（REST）与终端通道（WS）共用票据状态。
+    // 与 SSH 同构：只有 REST 那个子 router 叠 auth / authz 中间件。
+    let container_state = std::sync::Arc::new(container_routes::ContainerRouterState {
+        tickets: ssh_ticket::store(),
+    });
+    let container_open_router = Router::new()
+        .route(
+            "/api/ops/terminal/sessions",
+            post(container_routes::open_session),
+        )
+        .with_state(container_state.clone())
+        .layer(middleware::from_fn(authz::authz_middleware))
+        .layer(middleware::from_fn(auth_middleware));
+    let container_ws_router = Router::new()
+        .route(
+            "/api/ops/terminal/sessions/{sessionId}/ws",
+            get(container_routes::session_ws),
+        )
+        .with_state(container_state);
+
+    // 合并所有路由（外部注入的路由在顶层合并，不经过 auth_middleware —— 仅用于 Swagger / OpenAPI 文档）
     let has_extra_routes = extra_routes.is_some();
-    let mut app = create_router(pool).merge(upload_router).merge(chat_router);
+    let mut app = create_router(pool)
+        .merge(upload_router)
+        .merge(chat_router)
+        .merge(conversation_router)
+        .merge(internal_llm_router)
+        .merge(ssh_open_router)
+        .merge(ssh_ws_router)
+        .merge(container_open_router)
+        .merge(container_ws_router);
+
     if let Some(extra) = extra_routes {
         app = app.merge(extra);
     }
-    let app = app.layer(cors).layer(TraceLayer::new_for_http());
-
-    info!("HTTP API 服务启动于 http://{}", addr);
     if has_extra_routes {
         info!("OpenAPI 文档已挂载：/swagger-ui、/api-docs/openapi.json");
     }
-
-    // 启动 HTTP 服务
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| anyhow::anyhow!("绑定 TCP 监听地址 {} 失败: {}", addr, e))?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|e| anyhow::anyhow!("HTTP 服务运行出错: {}", e))?;
-
-    Ok(())
+    Ok(app)
 }
 
 /// 创建路由
@@ -163,11 +417,28 @@ fn create_router(pool: sqlx::PgPool) -> Router {
 
     // 公开路由（无需认证）
     let public_routes = Router::new()
+        .route("/healthz", get(health::healthz))
         .route("/api/auth/login", post(user_routes::login))
         .route("/api/auth/register", post(register_routes::register))
         // 刷新 / 登出：访问令牌可能已过期，必须公开（靠 refresh token 自身校验）
         .route("/api/auth/refresh", post(user_routes::refresh))
         .route("/api/auth/logout", post(user_routes::logout));
+
+    // 公开路由 + OAuth 客户端端点（缺省不挂载，§16 T-7 缺省即安全）
+    let public_routes = if oauth_routes::is_enabled() {
+        info!(
+            "OAuth 2.1 端点已启用：/oauth/authorize（方案 A JSON / 方案 B 浏览器）、/oauth/token、\
+             /oauth/introspect、/oauth/revoke、/api/auth/session、\
+             /.well-known/oauth-authorization-server"
+        );
+        public_routes
+            .merge(oauth_routes::public_oauth_routes())
+            // 授权端点必须公开：方案 B 靠会话 Cookie，方案 A 在 handler 内部自行校验 Bearer
+            .merge(oauth_browser::browser_routes())
+    } else {
+        public_routes
+    };
+
 
     // 需要认证的路由
     let protected_routes = Router::new()
@@ -219,6 +490,39 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route(
             "/api/assets/intangible/{id}",
             delete(asset_routes::delete_intangible_asset),
+        )
+        // 工作流
+        .route(
+            "/api/workflows",
+            get(workflow_routes::list_workflows).post(workflow_routes::save_workflow),
+        )
+        .route(
+            "/api/workflows/execute",
+            post(workflow_routes::execute_workflow),
+        )
+        .route(
+            "/api/workflows/executions",
+            get(workflow_routes::list_executions),
+        )
+        .route(
+            "/api/workflows/executions/{executionId}",
+            get(workflow_routes::get_execution),
+        )
+        .route(
+            "/api/workflows/executions/{executionId}/cancel",
+            post(workflow_routes::cancel_execution),
+        )
+        .route(
+            "/api/workflows/pending-tasks",
+            get(workflow_routes::list_pending_tasks),
+        )
+        .route(
+            "/api/workflows/tasks/{taskId}/complete",
+            post(workflow_routes::complete_user_task),
+        )
+        .route(
+            "/api/workflows/{id}",
+            get(workflow_routes::get_workflow).delete(workflow_routes::delete_workflow),
         )
         // 部门
         .route("/api/departments", get(department_routes::get_departments))
@@ -308,6 +612,82 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             "/api/knowledge/{id}",
             delete(knowledge_routes::delete_knowledge),
         )
+        // OKF 知识资产（新表 knowledge_asset）
+        // 注：路径占位符沿用命令参数名（{treeNodeId} / {id} / {assetId}），
+        // 前端 extractParams 才能把参数从 body 里剥离。
+        // `/api/knowledge/asset` 为静态段，与上面的 `/api/knowledge/{id}` 共存（matchit 静态优先）。
+        .route(
+            "/api/knowledge/asset",
+            get(knowledge_asset_routes::list_assets).post(knowledge_asset_routes::create_asset),
+        )
+        .route(
+            "/api/knowledge/asset/by-tree-node/{treeNodeId}",
+            get(knowledge_asset_routes::get_by_tree_node),
+        )
+        .route(
+            "/api/knowledge/asset/{id}",
+            get(knowledge_asset_routes::get_asset)
+                .put(knowledge_asset_routes::update_asset)
+                .delete(knowledge_asset_routes::delete_asset),
+        )
+        .route(
+            "/api/knowledge/asset/{assetId}/attach",
+            post(knowledge_asset_routes::attach_file),
+        )
+        // 异步任务（P3）：解析入队 + 进度查询
+        // 入队只做校验 + push，真正的解析在 worker 里执行（见 crates/task-queue）
+        .route("/api/tasks/parse", post(task_routes::push_parse))
+        .route("/api/tasks", get(task_routes::list_tasks))
+        .route("/api/tasks/{taskId}", get(task_routes::get_task_status))
+        // LLM 厂商 / 模型 / 用户偏好
+        // 注：`fetch-models` 的占位符用 `{providerId}`（命令参数名），
+        // 其余路径占位符 `{id}` 对应命令的 `id`，前端 extractParams 才能剥离。
+        // 用户偏好两条只要求登录（个人配置，不设权限点），在 authz::AUTH_ONLY_ROUTES 登记。
+        .route(
+            "/api/llm/providers",
+            get(llm_routes::list_providers).post(llm_routes::create_provider),
+        )
+        .route(
+            "/api/llm/providers/{id}",
+            get(llm_routes::get_provider)
+                .put(llm_routes::update_provider)
+                .delete(llm_routes::delete_provider),
+        )
+        .route(
+            "/api/llm/providers/{providerId}/fetch-models",
+            post(llm_routes::fetch_models),
+        )
+        .route(
+            "/api/llm/models",
+            get(llm_routes::list_models).post(llm_routes::create_model),
+        )
+        .route(
+            "/api/llm/models/{id}",
+            put(llm_routes::update_model).delete(llm_routes::delete_model),
+        )
+        .route(
+            "/api/llm/user-setting",
+            get(llm_routes::get_user_setting).post(llm_routes::save_user_setting),
+        )
+        // 单据编号规则
+        // 注：`save_numbering_rule(id, input)` / `reset_numbering_sequence(bizType, resetKey)`
+        // 的请求体形状必须与 Tauri 命令参数逐字一致（前端 extractParams 只剥路径参数）。
+        .route(
+            "/api/numbering/rules",
+            get(numbering_routes::get_rules),
+        )
+        .route(
+            "/api/numbering/rules",
+            post(numbering_routes::save_rule),
+        )
+        .route(
+            "/api/numbering/rules/{bizType}",
+            get(numbering_routes::get_rule),
+        )
+        .route(
+            "/api/numbering/rules/{bizType}/reset",
+            post(numbering_routes::reset_sequence),
+        )
         // 菜单
         .route("/api/menus/tree", get(role_routes::get_all_menus_tree))
         .route("/api/menus/user", get(role_routes::get_user_menus))
@@ -393,6 +773,113 @@ fn create_router(pool: sqlx::PgPool) -> Router {
         .route("/api/ops/connections/{id}/collect", post(ops_routes::collect_now))
         .route("/api/ops/links", get(ops_routes::list_links))
         .route("/api/ops/links/{linkId}/bind", post(ops_routes::bind_link))
+        // 容器日志 / 性能（只读）；终端开会话与 WS 需要票据状态，在 build_router 里单独装配
+        .route(
+            "/api/ops/connections/{connectionId}/containers/{container}/logs",
+            get(container_routes::container_logs),
+        )
+        .route(
+            "/api/ops/connections/{connectionId}/containers/{container}/stats",
+            get(container_routes::container_stats),
+        )
+        .route(
+            "/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/logs",
+            get(container_routes::pod_logs),
+        )
+        .route(
+            "/api/ops/connections/{connectionId}/namespaces/{namespace}/pods/{pod}/metrics",
+            get(container_routes::pod_metrics),
+        )
+        // 运维终端（SSH）：除「开会话」与 WS 之外的 6 条 REST
+        // 注：「开会话」与 WS 需要票据状态，在 build_router 里单独装配
+        .route(
+            "/api/ops/ssh/targets",
+            get(ssh_routes::list_targets).post(ssh_routes::create_target),
+        )
+        .route(
+            "/api/ops/ssh/targets/test",
+            post(ssh_routes::probe_draft),
+        )
+        .route(
+            "/api/ops/ssh/targets/{id}",
+            get(ssh_routes::get_target)
+                .put(ssh_routes::update_target)
+                .delete(ssh_routes::delete_target),
+        )
+        .route(
+            "/api/ops/ssh/targets/{id}/probe",
+            post(ssh_routes::probe_target),
+        )
+        .route("/api/ops/ssh/sessions", get(ssh_routes::list_sessions))
+        .route(
+            "/api/ops/ssh/sessions/{sessionId}",
+            delete(ssh_routes::close_session),
+        )
+        // API Key 管理（Phase 1：只允许 JWT 管理员，API Key 自身禁止管理 API Key）
+        .route(
+            "/api/api-keys",
+            get(api_key_routes::list_api_keys).post(api_key_routes::create_api_key),
+        )
+        .route(
+            "/api/api-keys/{id}/rotate",
+            post(api_key_routes::rotate_api_key),
+        )
+        .route(
+            "/api/api-keys/{id}",
+            delete(api_key_routes::revoke_api_key),
+        )
+        // OAuth 客户端管理（Phase 2：只允许用户 JWT，权限点 system:oauthclient:*）
+        .route(
+            "/api/oauth-clients",
+            get(oauth_routes::list_oauth_clients).post(oauth_routes::create_oauth_client),
+        )
+        .route(
+            "/api/oauth-clients/{id}",
+            put(oauth_routes::update_oauth_client).delete(oauth_routes::delete_oauth_client),
+        )
+        // AI Agent 沙箱（默认 mode=in_process：统一返回 503；mode=cube|openshell 时走对应后端）
+        .route("/api/sandbox/health", get(sandbox_routes::health))
+        .route(
+            "/api/sandbox/sessions",
+            post(sandbox_routes::create_session),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}",
+            get(sandbox_routes::get_session).delete(sandbox_routes::delete_session),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/exec",
+            post(sandbox_routes::exec_code),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/command",
+            post(sandbox_routes::run_command),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/files",
+            post(sandbox_routes::upload_file).get(sandbox_routes::download_file),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/files/list",
+            get(sandbox_routes::list_files),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/pause",
+            post(sandbox_routes::pause),
+        )
+        .route(
+            "/api/sandbox/sessions/{scope}/resume",
+            post(sandbox_routes::resume),
+        );
+
+    // OAuth 2.1 授权端点（`/oauth/authorize`）已移到公开路由：
+    // 方案 B（浏览器）靠会话 Cookie，方案 A（内部应用）在 handler 内自行校验 Bearer，
+    // 两种调用方共享同一 URL，因此不能再挂在 `auth_middleware` 之后。
+
+    // L2 功能权限判定（内层：先认证再鉴权；`.layer` 后加的在外层）
+
+    let protected_routes = protected_routes
+        .layer(middleware::from_fn(authz::authz_middleware))
         .layer(middleware::from_fn(auth_middleware));
 
     // Skill 路由（使用独立的 SkillRouterState）
@@ -400,15 +887,122 @@ fn create_router(pool: sqlx::PgPool) -> Router {
     let skill_router_state = Arc::new(skill_routes::SkillRouterState {
         registry: skill_registry,
     });
-    let skill_routes = skill_routes::skill_routes().with_state(skill_router_state);
+    let skill_routes = skill_routes::skill_routes()
+        .with_state(skill_router_state)
+        // 改造前 Skill 接口不经过任何中间件（匿名可调用），Phase 1 一并纳入认证 + 鉴权
+        .layer(middleware::from_fn(authz::authz_middleware))
+        .layer(middleware::from_fn(auth_middleware));
+
+    // 沙箱审计内部端点：只挂认证（API Key），handler 内校验服务身份 + scope；
+    // 不挂 authz（服务身份没有 UserContext，会被一律 403）。
+    let audit_routes = Router::new()
+        .route(
+            "/internal/sandbox/audit",
+            post(sandbox_audit_routes::ingest),
+        )
+        .layer(middleware::from_fn(auth_middleware));
 
     // 合并所有路由（大文件上传路由在 start_http_server 中通过 .merge() 添加）
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .merge(skill_routes)
+        .merge(audit_routes)
         .with_state(state)
 }
+
+/// 过期数据清理间隔（秒）：默认 1 小时，可用 `OAUTH_CLEANUP_INTERVAL_SECS` 覆盖
+const CLEANUP_INTERVAL_DEFAULT_SECS: u64 = 3600;
+
+/// 读取清理间隔（0 / 非法值回落默认）
+fn cleanup_interval_secs() -> u64 {
+    std::env::var("OAUTH_CLEANUP_INTERVAL_SECS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(CLEANUP_INTERVAL_DEFAULT_SECS)
+}
+
+/// 执行一次过期数据清理（设计文档 §7.7：授权码 / 刷新令牌 / 浏览器会话）
+///
+/// 拆成公开函数供网关 leader 循环调用（实现方案附录 D.8）：多实例部署时只有
+/// leader 真正执行，避免 N 个实例重复扫表；任何一步失败都只记 WARN，不影响可用性。
+pub async fn cleanup_once() {
+    match service::oauth_service::cleanup_expired_grants().await {
+        Ok((codes, tokens)) => {
+            info!("OAuth 过期数据清理完成: 授权码 {} 条, 令牌 {} 条", codes, tokens);
+        }
+        Err(e) => tracing::warn!("OAuth 过期数据清理失败: {}", e),
+    }
+    match service::session_service::cleanup_expired_sessions().await {
+        Ok(removed) => {
+            if removed > 0 {
+                info!("浏览器会话清理完成: {} 条", removed);
+            }
+        }
+        Err(e) => tracing::warn!("浏览器会话清理失败: {}", e),
+    }
+}
+
+/// 启动后台清理任务（桌面 / 单实例形态）
+///
+/// 首次执行延迟 60s，之后每 `OAUTH_CLEANUP_INTERVAL_SECS` 秒调用一次
+/// [`cleanup_once`]；网关多实例形态不调用它，改由 leader 循环驱动。
+fn spawn_cleanup_task() {
+    let interval = cleanup_interval_secs();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        loop {
+            cleanup_once().await;
+            tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        }
+    });
+}
+
+/// 沙箱审计保留期清理间隔（秒）：每日一次
+const SANDBOX_AUDIT_CLEANUP_INTERVAL_SECS: u64 = 24 * 3600;
+
+/// `SANDBOX_AUDIT_RETENTION_DAYS`（缺省 180，最小 1）
+fn sandbox_audit_retention_days() -> u64 {
+    std::env::var("SANDBOX_AUDIT_RETENTION_DAYS")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .filter(|days| *days > 0)
+        .unwrap_or(180)
+}
+
+/// 启动沙箱审计保留期清理任务（进程内只启动一次）
+///
+/// 写库失败只记 WARN；数据库尚未就绪时跳过本轮，下一轮再试。
+fn spawn_sandbox_audit_cleanup() {
+    let retention_days = sandbox_audit_retention_days();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        loop {
+            match database::get_pool() {
+                Ok(pool) => {
+                    match service::sandbox_audit::cleanup(&pool, retention_days).await {
+                        Ok(0) => tracing::debug!("沙箱审计清理：无需删除"),
+                        Ok(removed) => tracing::info!(
+                            removed,
+                            retention_days,
+                            "沙箱审计过期记录已清理"
+                        ),
+                        Err(error) => tracing::warn!("沙箱审计清理失败: {error}"),
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("沙箱审计清理跳过（数据库未就绪）: {error}");
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(
+                SANDBOX_AUDIT_CLEANUP_INTERVAL_SECS,
+            ))
+            .await;
+        }
+    });
+}
+
 
 /// 优雅关闭信号处理
 async fn shutdown_signal() {
@@ -436,3 +1030,74 @@ async fn shutdown_signal() {
 
     info!("收到关闭信号，HTTP 服务正在关闭...");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== RT-1 / RT-2：HTTP 启动前置条件（设计文档 §16.3）=====
+
+    #[test]
+    fn jwt_secret_missing_only_blocks_http() {
+        // 未配置：返回 Err（不是 panic），调用方据此只放弃启动 HTTP
+        let err = check_jwt_secret(None).expect_err("未配置 JWT_SECRET 时必须返回 Err");
+        assert!(err.to_string().contains("JWT_SECRET 未配置"));
+    }
+
+    #[test]
+    fn jwt_secret_empty_string_is_treated_as_missing() {
+        // 空串等价于未配置（.env.toml 里写成 "" 的情况）
+        assert!(check_jwt_secret(Some("")).is_err());
+    }
+
+    #[test]
+    fn jwt_secret_too_short_is_rejected() {
+        // 26 字节：低于 256 bit
+        let err = check_jwt_secret(Some("01234567890123456789012345"))
+            .expect_err("长度不足 32 字节必须返回 Err");
+        assert!(err.to_string().contains("长度需"));
+        // 31 字节同样拒绝
+        assert!(check_jwt_secret(Some(&"a".repeat(31))).is_err());
+    }
+
+    #[test]
+    fn jwt_secret_boundary_and_default_are_accepted() {
+        // 恰好 32 字节：通过
+        assert!(check_jwt_secret(Some(&"a".repeat(32))).is_ok());
+        // 内置默认值（Tauri 桌面模式使用的兜底值）也必须通过，保证本地 HTTP 可用
+        assert!(check_jwt_secret(Some("assets-platform-default-secret-key")).is_ok());
+    }
+
+    // ===== 端口占用提示（避免「启动于 …」假成功日志 + 给出可操作排查步骤）=====
+
+    #[test]
+    fn bind_error_message_addrinuse_is_actionable() {
+        let addr: SocketAddr = "0.0.0.0:3001".parse().expect("合法地址");
+        let err = std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            "Address already in use (os error 98)",
+        );
+        let msg = bind_error_message(addr, &err);
+        // 保留原错误上下文，便于和系统报错对照
+        assert!(msg.contains("Address already in use"), "{}", msg);
+        // 明确「端口被占用」而不是含糊的「启动失败」
+        assert!(msg.contains("端口已被占用"), "{}", msg);
+        // 给出定位与清理命令、以及换端口的正确做法（改 TOML，而非环境变量）
+        assert!(msg.contains("ss -ltnp | grep :3001"), "{}", msg);
+        assert!(msg.contains("pkill -f target/debug/assets-server"), "{}", msg);
+        assert!(msg.contains("[api] port"), "{}", msg);
+        assert!(msg.contains("ASSETS_CONFIG_DIR"), "{}", msg);
+    }
+
+    #[test]
+    fn bind_error_message_other_errors_keep_original() {
+        let addr: SocketAddr = "127.0.0.1:3001".parse().expect("合法地址");
+        // 非端口占用（例如无权限绑定特权端口）：不应误报「端口已被占用」
+        let err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "permission denied");
+        let msg = bind_error_message(addr, &err);
+        assert!(msg.contains("绑定 TCP 监听地址 127.0.0.1:3001 失败"), "{}", msg);
+        assert!(msg.contains("permission denied"), "{}", msg);
+        assert!(!msg.contains("端口已被占用"), "{}", msg);
+    }
+}
+

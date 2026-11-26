@@ -10,9 +10,9 @@ workspace = true
 # 默认全关：不让 bollard / kube / lancedb 拖慢 Tauri 主构建，按需在调用方开启。
 default = []
 # Docker 单机 + Swarm 采集（bollard：http=TCP 2375、pipe=本地 socket、ssl=2376 mTLS）
-docker = ["dep:bollard", "dep:time"]
+docker = ["dep:bollard", "dep:time", "dep:futures"]
 # Kubernetes 采集（kube-rs：只走 APIServer，绝不直连节点 docker.sock）
-k8s = ["dep:base64", "dep:k8s-openapi", "dep:kube"]
+k8s = ["dep:base64", "dep:k8s-openapi", "dep:kube", "dep:futures"]
 # 说明：Redis / Valkey、PostgreSQL+pgvector、LanceDB 的驱动依赖**不在本 crate**，
 # 它们各自归属 crates/vector-redis、crates/vector-pgvector、crates/vector-lance；
 # 本 crate 只保留与协议无关的模型（Provider / AuthKind / ResourceRecord）与只读采集抽象。
@@ -21,12 +21,14 @@ k8s = ["dep:base64", "dep:k8s-openapi", "dep:kube"]
 [dependencies]
 async-trait.workspace = true
 bollard = {workspace = true, optional = true}
+# 日志 / 性能接口需要 StreamExt::next（docker / k8s 两个 feature 都会用到）
+futures = {workspace = true, optional = true}
 k8s-openapi = {workspace = true, optional = true}
 kube = {workspace = true, optional = true}
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = {workspace = true, features = ["io-util"]}
+tokio = {workspace = true, features = ["io-util", "time"]}
 tracing.workspace = true
 
 # Docker 采集：把 bollard 的 RFC3339 时间转成 epoch 毫秒

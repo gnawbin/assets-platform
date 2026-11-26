@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Layout from '@/components/Layout';
 import AssetSelect from '@/components/AssetSelect';
 import {
@@ -46,6 +47,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function OpsResourcesPage() {
+    const router = useRouter();
     const [links, setLinks] = useState<OpsResourceLinkView[]>([]);
     const [connections, setConnections] = useState<OpsConnectionView[]>([]);
     const [loading, setLoading] = useState(true);
@@ -75,6 +77,16 @@ export default function OpsResourcesPage() {
     useEffect(() => {
         loadData();
     }, [loadData]);
+
+    /** 深链到「容器运维」页并打开对应 Tab（uid 含 ://，必须由 URLSearchParams 编码） */
+    const openContainerDetail = (row: OpsResourceLinkView, tab: 'logs' | 'stats' | 'terminal') => {
+        if (row.resource_kind !== 'container' && row.resource_kind !== 'pod') return;
+        const params = new URLSearchParams();
+        params.set('connectionId', row.connection_id);
+        params.set('uid', row.resource_uid);
+        params.set('tab', tab);
+        router.push(`/ops/containers?${params.toString()}`);
+    };
 
     const kindOptions = useMemo(() => {
         const kinds = Array.from(new Set(links.map((item) => item.resource_kind))).sort();
@@ -187,11 +199,22 @@ export default function OpsResourcesPage() {
                                             <Table.Td><Text size="xs">{row.last_seen_at ? new Date(row.last_seen_at).toLocaleString() : "—"}</Text></Table.Td>
                                             <Table.Td><Text size="xs">{row.connection_name ?? row.connection_id}</Text></Table.Td>
                                             <Table.Td>
-                                                {row.asset_id ? (
-                                                    <Badge color="green" variant="light">{row.asset_no ?? row.asset_id}</Badge>
-                                                ) : (
-                                                    <Button size="compact-xs" variant="light" leftSection={<IconArchive size={14} />} onClick={() => { setBindTarget(row); setBindAssetId(null); }}>绑定资产</Button>
-                                                )}
+                                                <Group gap={4} wrap="nowrap">
+                                                    {row.asset_id ? (
+                                                        <Badge color="green" variant="light">{row.asset_no ?? row.asset_id}</Badge>
+                                                    ) : (
+                                                        <Button size="compact-xs" variant="light" leftSection={<IconArchive size={14} />} onClick={() => { setBindTarget(row); setBindAssetId(null); }}>绑定资产</Button>
+                                                    )}
+                                                    {(row.resource_kind === 'container' || row.resource_kind === 'pod') && (
+                                                        <>
+                                                            <Button size="compact-xs" variant="subtle" onClick={() => openContainerDetail(row, 'logs')}>日志</Button>
+                                                            <Button size="compact-xs" variant="subtle" onClick={() => openContainerDetail(row, 'stats')}>性能</Button>
+                                                            {connections.find((item) => item.id === row.connection_id)?.exec_enabled && (
+                                                                <Button size="compact-xs" variant="subtle" color="teal" onClick={() => openContainerDetail(row, 'terminal')}>终端</Button>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </Group>
                                             </Table.Td>
                                         </Table.Tr>
                                     ))}

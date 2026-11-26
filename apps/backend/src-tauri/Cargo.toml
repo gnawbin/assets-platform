@@ -36,7 +36,9 @@ bootstrap = {path = "crates/bootstrap"}
 # OpenAPI 规范汇总 + Swagger UI：依赖 api（只读其 handler 标注），api 不反向依赖它
 apidoc = {path = "crates/apidoc"}
 database = {path = "crates/database"}
+# 业务网关（多实例 HTTP + SSE，PostgreSQL 单一依赖）：入口 bin assets-gateway
 engine = {path = "crates/engine"}
+gateway = {path = "crates/gateway"}
 
 ast = {path = "crates/ast"}
 iso = {path = "crates/iso"}
@@ -45,9 +47,26 @@ llm = {path = "crates/llm"}
 llm-anthropic = {path = "crates/llm-anthropic"}
 llm-openai = {path = "crates/llm-openai"}
 ops = {path = "crates/ops"}
+# 容器终端（exec）：独立的写操作 crate，Docker + K8s backend
+ops-exec = {path = "crates/ops-exec"}
 parser = {path = "crates/parser"}
+# 远程终端传输：只放 SSH 协议与字节流（零 HTTP / 零数据库），
+# 会话编排、审计与 WebSocket 桥接在 service / api 层
+remote-shell = {path = "crates/remote-shell"}
 service = {path = "crates/service"}
+# 轻量级信任/知识图谱内核：纯内存、零 IO；service 负责从 knowledge_relation 构建图后传入
+trustgraph-lite = {path = "crates/trustgraph-lite"}
+# 消息总线客户端基建：trait + 内存实现 + 可选 Pulsar 驱动（默认不引入 pulsar）
+mq = {path = "crates/mq"}
 storage = {path = "crates/storage"}
+# AI Agent 沙箱：crates/sandbox 只放 trait 与数据类型（零 HTTP），
+# CubeAPI / CubeProxy 的实现在 crates/sandbox-cube（独持 reqwest）
+sandbox = {path = "crates/sandbox"}
+sandbox-cube = {path = "crates/sandbox-cube"}
+# OpenShell 客户端（gateway 独立部署；proto 已 vendor 进 crate，无 git 依赖）
+sandbox-openshell = {path = "crates/sandbox-openshell"}
+# Agent 纯逻辑（提示词 + 动作解析）：workflow 与沙箱侧 agent-runner 共用
+agent-core = {path = "crates/agent-core"}
 utils = {path = "crates/utils"}
 # 向量数据存储：crates/vector 只放 trait 与数据类型，三个实现各自持有驱动、互不依赖
 vector = {path = "crates/vector"}
@@ -56,6 +75,9 @@ vector-pgvector = {path = "crates/vector-pgvector"}
 vector-redis = {path = "crates/vector-redis"}
 vfs = {path = "crates/vfs"}
 workflow = {path = "crates/workflow"}
+# 异步任务队列（apalis）：视频 / 音频 / 文档解析等耗时任务。
+# P0 只交付骨架与 docs/apalis异步任务队列开发文档.md，依赖在 P1 打开。
+task-queue = {path = "crates/task-queue"}
 
 # ---- 序列化 ----
 chrono = {version = "0.4.45", default-features = false, features = ["serde"]}
@@ -65,10 +87,17 @@ toml = "1.2.1+spec-1.1.0"
 
 # ---- 异步运行时 / 数据库 ----
 async-trait = "0.1.92"
-axum = {version = "0.8.9", features = ["macros"]}
+# OpenShell：vendored .proto + tonic 自建客户端（不依赖 git 依赖，规避大包拉取受限）
+axum = {version = "0.8.9", features = ["macros", "ws"]}
 dashmap = "6.1.0"
 futures = "0.3.34"
 once_cell = "1.21.4"
+prost = "0.14.6"
+prost-types = "0.14.6"
+protoc-bin-vendored = "3.3.0"
+tonic = {version = "0.14.9", default-features = false, features = ["channel", "codegen", "tls-ring", "tls-webpki-roots"]}
+tonic-prost = "0.14.9"
+tonic-prost-build = "0.14.9"
 # OpenAPI / Swagger UI
 #   utoipa-swagger-ui 10.x 依赖 utoipa ^6（两个大版本并存会让 SwaggerUi::url 的
 #   OpenApi 参数类型不匹配），因此两者版本必须成对升级。
@@ -80,13 +109,16 @@ utoipa = {version = "6.0.0", features = ["axum_extras", "chrono", "decimal"]}
 # 离线构建时改成 features = ["axum", "vendored"]。
 utoipa-swagger-ui = {version = "10.0.2", features = ["axum"]}
 # stream：SSE 流式对话需要 Response::bytes_stream()（llm-openai / llm-anthropic 共用）
+# query：cube sandbox 的 /sandboxes?metadata=..&state=..&limit=.. 等查询参数需要
+#        RequestBuilder::query（reqwest 0.13 起该方法在 "query" feature 之后）
 reqwest = {version = "0.13.5", default-features = false, features = [
   "json",
+  "query",
   "rustls",
   "stream",
 ]}
 rust_decimal = "1.43.0"
-sqlx = {version = "0.9.0", default-features = false, features = [
+sqlx = {version = "0.9.1", default-features = false, features = [
   "postgres",
   "runtime-tokio",
   "tls-rustls",
@@ -108,7 +140,8 @@ tokio = {version = "1.54.1", default-features = false, features = [
 parking_lot = "0.13.0"
 rayon = "1.12.0"
 tokio-util = {version = "0.7.20", features = ["full"]}
-tower-http = {version = "0.7.1", features = ["cors", "trace"]}
+# compression-gzip：网关可选响应压缩（GATEWAY_GZIP=1；CompressionLayer 默认排除 SSE）
+tower-http = {version = "0.7.1", features = ["cors", "trace", "compression-gzip"]}
 # ──────────────────────────────────────────────────────────────────────────────
 # 向量数据存储（crates/vector-redis、crates/vector-pgvector、crates/vector-lance）
 #   版本与 features 只在此处定义一次；三个实现 crate 各自持有自己的驱动，
@@ -116,7 +149,7 @@ tower-http = {version = "0.7.1", features = ["cors", "trace"]}
 # ──────────────────────────────────────────────────────────────────────────────
 # RESP 客户端：tokio-comp = 异步连接，connection-manager = 多路复用 + 自动重连，
 # tokio-rustls-comp = 让 aio::tokio 实现 connect_tcp_tls（仅开 tls-rustls-* 会缺 impl）
-redis = {version = "1.8.1", default-features = false, features = [
+redis = {version = "1.8.2", default-features = false, features = [
   "tokio-comp",
   "connection-manager",
   "tokio-rustls-comp",
@@ -133,7 +166,7 @@ rustls = {version = "0.23", default-features = false, features = [
 # 因此开启它的构建成本是确定的（只有 vector-lance 依赖它）。
 lancedb = {version = "0.41.0", default-features = false}
 # LanceDB schema 反射用；版本必须与 lancedb 内部 arrow 同源（58）
-arrow-schema = {version = "58", default-features = false}
+arrow-schema = {version = "60.2.0", default-features = false}
 # ──────────────────────────────────────────────────────────────────────────────
 # Search & File Walking
 # ──────────────────────────────────────────────────────────────────────────────
@@ -150,9 +183,21 @@ aes-gcm = "0.11.1"
 argon2 = "0.6.0"
 base64 = "0.23.1"
 getrandom = {version = "0.4.3", features = ["std"]}
-jsonwebtoken = {version = "11.1.0", default-features = false, features = ["aws_lc_rs"]}
-rand = {version = "0.10.3", features = ["std_rng"]}
-uuid = {version = "1.29.0", features = ["v4"]}
+jsonwebtoken = {version = "12.0.0", default-features = false, features = ["aws_lc_rs"]}
+rand = {version = "^0.10", features = ["std_rng"]}
+sha2 = "0.11.1"
+uuid = {version = "1.29.3", features = ["v4"]}
+
+# ---- SSH 终端 ----
+# ring：与全仓共源的 CryptoProvider（避免 aws-lc-rs 引入 cmake / nasm 构建）；
+# default-features = false 会同时关掉 rsa 与 flate2，因此必须显式补回：
+#   flate2 → 服务端开压缩时协商 zlib，否则部分 OpenSSH 会因 MAC 协商失败断开；
+#   rsa    → RSA 主机密钥与 RSA 私钥登录（pkcs1 / ssh-key 两个后端都要）。
+russh = {version = "0.65.4", default-features = false, features = [
+  "ring",
+  "flate2",
+  "rsa",
+]}
 
 # ---- 日志 / 追踪 ----
 opentelemetry = {version = "0.33.1", features = ["trace", "metrics", "logs"]}
@@ -184,7 +229,7 @@ winapi = {version = "0.3", features = [
 
 # ---- 对象存储 ----
 aws-credential-types = "1.3.1"
-aws-sdk-s3 = {version = "1.156.0", default-features = false, features = ["rustls"]}
+aws-sdk-s3 = {version = "1.161.0", default-features = false, features = ["rustls"]}
 aws-smithy-async = {version = "1.3.1", features = ["rt-tokio"]}
 
 # ---- 运维采集（Docker / Swarm / Kubernetes，全部只读）----
@@ -196,22 +241,22 @@ bollard = {version = "0.21.1", default-features = false, features = [
   "ssl",
   "time",
 ]}
-# kube 4.2 的 kube-client 依赖 serde-saphyr 0.0.29（要求 smallvec <1.16），
-# 与 pdf_oxide 要求的 smallvec ^1.16 冲突；kube 3.0 仍用 serde_yaml，故锁 3.0.0。
+# kube 5.1 的 kube-client 要求 k8s-openapi 0.29；serde-saphyr 2.x 已把 smallvec 放宽到
+# >=1.6.1,<2，不再与 pdf_oxide 的 smallvec ^1.16 冲突（旧版 0.0.29 要求 <1.16）。
 # 加密 provider 统一走 ring（bollard 的 ssl 内部也是 rustls/ring），避免双 provider 歧义。
-kube = {version = "4.2.0", default-features = false, features = [
+kube = {version = "5.1.0", default-features = false, features = [
   "client",
   "config",
   "rustls-tls",
   "ring",
 ]}
-# k8s-openapi 0.28 提供 v1_32 ~ v1_36，且 kube 要求「恰好一个」版本 feature。
-# 注意：kube-client 4.2.0 依赖 k8s-openapi ^0.28；这里若写 0.27 会解析出双版本，
-# 0.28 那份没有 v1_* feature，build script 会直接 panic。升级时两处必须同版本。
-# 目标集群版本未知时取 v1_32 以获得较宽兼容性；确认集群版本后改这一行即可。
-k8s-openapi = {version = "0.28.0", default-features = false, features = [
+# k8s-openapi 0.29 只提供 v1_33 ~ v1_37，且 kube 要求「恰好一个」版本 feature。
+# 注意：kube 5.1 / kube-client 5.1 依赖 k8s-openapi 0.29；两处必须同版本，
+# 否则会解析出双版本，缺 v1_* feature 的那份会让 build script 直接 panic。
+# 目标集群版本未知时取最早的 v1_33 以获得较宽兼容性；确认集群版本后改这一行即可。
+k8s-openapi = {version = "0.29.0", default-features = false, features = [
   "std",
-  "v1_32",
+  "v1_33",
 ]}
 # bollard 的 BollardDate 只有开启 time/chrono 特性时才不是 String；统一用 time，
 # 避免为了把 RFC3339 转成 epoch 毫秒而给 ops 引入 chrono 的 clock 特性。
@@ -219,9 +264,9 @@ time = {version = "0.3.55", default-features = false, features = ["std"]}
 
 # ---- 文档解析 ----
 ffmpeg-sidecar = "2.7.0"
-office_oxide = "0.1.16"
-pdf_oxide = "0.3.77"
-zip = {version = "9.1.3", default-features = false}
+office_oxide = "0.1.17"
+pdf_oxide = "0.3.78"
+zip = {version = "9.8.2", default-features = false}
 
 # ---- 工作流 / Agent ----
 adk-graph = "2.3.0"
@@ -230,13 +275,29 @@ bpmn-parser = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af
 engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
 llama-cpp-v3 = "0.1.8"
 
+# ---- 异步任务队列（apalis）----
+# 只选 PostgreSQL 后端：与 gateway「单一 PG 依赖，不引 Redis」策略一致，
+# 且 apalis-postgres 依赖 sqlx ^0.9，与工作区的 sqlx 0.9.1 同版本（不会解析出两份）。
+apalis = "1.2.0"
+# migrate：启动时建 apalis schema；tokio-comp：sqlx tokio 运行时（不可省）；
+# task-tracking：看板需要细粒度 worker/task 明细。
+apalis-postgres = {version = "1.2.0", default-features = false, features = [
+  "migrate",
+  "tokio-comp",
+  "task-tracking",
+]}
+# 定时维护任务（票据收敛 + 队列指标）：六段表达式（秒 分 时 日 月 周）
+apalis-cron = "1.2.0"
+# cron 表达式解析（apalis-cron 的调度器直接消费 `cron::Schedule`）
+cron = "0.17"
+
 # ---- Tauri ----
 opus = "0.4.0"
-tauri = {version = "2.12.5", default-features = false, features = ["wry"]}
-tauri-build = {version = "2.7.4", default-features = false}
+tauri = {version = "2.12.7", default-features = false, features = ["wry"]}
+tauri-build = {version = "2.7.6", default-features = false}
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-fs = "2.7.1"
-tauri-plugin-opener = {version = "2.7.2", default-features = false}
+tauri-plugin-opener = {version = "2.7.3", default-features = false}
 tauri-plugin-process = "2.4.0"
 tauri-plugin-shell = "2.6.0"
 tauri-plugin-updater = "2.14.1"
@@ -276,7 +337,7 @@ winreg = "0.56.0"
 # ──────────────────────────────────────────────────────────────────────────────
 heapless = "0.9"
 phf = {version = "0.14", features = ["macros"]}
-smallvec = {version = "1.16.4", features = [
+smallvec = {version = "1.16.6", features = [
   "serde",
   "write",
   "union",
@@ -286,7 +347,7 @@ smallvec = {version = "1.16.4", features = [
 # ──────────────────────────────────────────────────────────────────────────────
 # Hashing
 # ──────────────────────────────────────────────────────────────────────────────
-xxhash-rust = {version = "0.8.19", features = ["xxh64", "xxh32"]}
+xxhash-rust = {version = "0.8.21", features = ["xxh64", "xxh32"]}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CLI & Configuration
@@ -304,8 +365,8 @@ similar = "3.2.0"
 # ──────────────────────────────────────────────────────────────────────────────
 # AST & Tree-Sitter
 # ──────────────────────────────────────────────────────────────────────────────
-ast-grep-core = {version = "0.51.0", default-features = false, features = ["tree-sitter"]}
-tree-sitter = "0.27.1"
+ast-grep-core = {version = "0.51.3", default-features = false, features = ["tree-sitter"]}
+tree-sitter = "0.27.2"
 tree-sitter-bash = "0.25"
 tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
@@ -369,6 +430,8 @@ engine.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
+# 沙箱命令层的返回类型（SandboxHandle / ExecResult / FileEntry / HealthInfo）
+sandbox.workspace = true
 service.workspace = true
 storage.workspace = true
 utils.workspace = true

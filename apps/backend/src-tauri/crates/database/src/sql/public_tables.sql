@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS public.sys_department (
     tenant_id BIGINT NOT NULL REFERENCES public.sys_tenant (id),
     department_name VARCHAR(255) NOT NULL,
     parent_id BIGINT,
+    leader_id BIGINT,
     description TEXT,
     created_by BIGINT,
     created_at TIMESTAMP
@@ -205,6 +206,8 @@ COMMENT ON COLUMN public.sys_department.tenant_id IS '所属组织ID';
 COMMENT ON COLUMN public.sys_department.department_name IS '部门名称';
 
 COMMENT ON COLUMN public.sys_department.parent_id IS '父部门ID';
+
+COMMENT ON COLUMN public.sys_department.leader_id IS '部门负责人用户ID';
 
 COMMENT ON COLUMN public.sys_department.description IS '部门描述';
 

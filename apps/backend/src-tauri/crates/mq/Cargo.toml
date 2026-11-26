@@ -1,0 +1,24 @@
+[package]
+edition = "2024"
+name = "mq"
+version = "0.1.0"
+description = "消息总线客户端基建（trait + 内存实现 + 可选 Pulsar 驱动）"
+
+[lints]
+workspace = true
+
+# 与业务无关的消息总线契约：
+# - 默认只编译内存实现（tokio::broadcast），不引入 pulsar / prost；
+# - P1 接入驱动时把 pulsar 改为 ["dep:pulsar"]，并在此文件追加 optional 依赖。
+[features]
+default = ["memory"]
+memory = []
+pulsar = []
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

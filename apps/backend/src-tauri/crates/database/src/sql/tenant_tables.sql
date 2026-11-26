@@ -1042,7 +1042,7 @@ COMMENT ON TABLE {schema}.workflow_execution IS 'AI 工作流执行记录';
 
 COMMENT ON COLUMN {schema}.workflow_execution.node_results IS '每个节点的执行详情';
 
-COMMENT ON COLUMN {schema}.workflow_execution.status IS 'running/success/failed/cancelled';
+COMMENT ON COLUMN {schema}.workflow_execution.status IS 'running/waiting/success/failed/rejected/cancelled';
 
 CREATE INDEX IF NOT EXISTS idx_wfe_workflow ON {schema}.workflow_execution(workflow_id, deleted);
 

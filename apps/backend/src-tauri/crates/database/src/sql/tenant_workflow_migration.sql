@@ -86,7 +86,44 @@ CREATE TABLE IF NOT EXISTS {schema}.bpmn_engine_completed (
     data JSONB NOT NULL
 );
 
--- 4. Agent checkpoint（adk-graph Checkpointer）与运行记录
+-- 4. 多用户审批组与投票
+CREATE TABLE IF NOT EXISTS {schema}.workflow_approval_group (
+    id BIGINT PRIMARY KEY,
+    execution_id BIGINT NOT NULL,
+    instance_id UUID NOT NULL,
+    engine_task_id UUID NOT NULL,
+    node_id TEXT NOT NULL,
+    approval_type TEXT NOT NULL,
+    reject_action TEXT NOT NULL DEFAULT 'terminate',
+    members JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_approval_group_task
+ON {schema}.workflow_approval_group(engine_task_id);
+
+CREATE INDEX IF NOT EXISTS idx_approval_group_execution
+ON {schema}.workflow_approval_group(execution_id, node_id);
+
+CREATE TABLE IF NOT EXISTS {schema}.workflow_approval_vote (
+    id BIGINT PRIMARY KEY,
+    group_id BIGINT NOT NULL,
+    engine_task_id UUID NOT NULL,
+    user_id BIGINT NOT NULL,
+    approved BOOLEAN NOT NULL,
+    comment TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_approval_vote_task_user
+ON {schema}.workflow_approval_vote(engine_task_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_approval_vote_group
+ON {schema}.workflow_approval_vote(group_id, created_at);
+
+-- 5. Agent checkpoint（adk-graph Checkpointer）与运行记录
 CREATE TABLE IF NOT EXISTS {schema}.workflow_agent_checkpoint (
     thread_id TEXT NOT NULL,
     checkpoint_id TEXT NOT NULL,

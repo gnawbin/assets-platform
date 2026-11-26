@@ -19,14 +19,17 @@ use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
     ConfigMap, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
 };
+use futures::{AsyncBufReadExt, StreamExt};
 use k8s_openapi::api::networking::v1::Ingress;
-use kube::api::{Api, ListParams};
+use kube::api::{Api, ApiResource, DynamicObject, ListParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
+use kube::core::GroupVersionKind;
 use kube::{Client, Config, Resource};
 use serde::de::DeserializeOwned;
 
 use super::{AuthKind, ConnectionConfig, ConnectionHealth, Connector};
 use crate::error::{FailureClass, OpsError, OpsResult};
+use crate::k8s_probe::{pod_log_params, PodLogs, PodLogsRequest, PodMetrics};
 use crate::model::{
     Provider, ResourceKey, ResourceKind, ResourceRecord, ResourceSnapshot, ResourceStatus,
 };
@@ -69,6 +72,82 @@ impl K8sConnector {
     /// 限定采集的命名空间
     pub fn namespace(&self) -> Option<&str> {
         self.config.namespace.as_deref()
+    }
+
+    /// 读取 Pod 的容器名（终端 / 日志的容器下拉；Pod 不存在时返回可读错误）
+    ///
+    /// 只调用 `GET pods/{name}`，不读取容器内容；多容器 Pod 必须由调用方显式选择。
+    ///
+    /// # Errors
+    ///
+    /// 命名空间 / Pod 名为空返回 [`OpsError::Config`]；Pod 不存在按 404 归类。
+    pub async fn pod_containers(&self, namespace: &str, pod: &str) -> OpsResult<Vec<String>> {
+        let namespace = namespace.trim();
+        let pod = pod.trim();
+        if namespace.is_empty() || pod.is_empty() {
+            return Err(OpsError::Config(
+                "命名空间与 Pod 名不能为空".to_string(),
+            ));
+        }
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let object = api
+            .get(pod)
+            .await
+            .map_err(|err| map_kube_error("GET pods", err))?;
+        Ok(object
+            .spec
+            .map(|spec| spec.containers.into_iter().map(|item| item.name).collect())
+            .unwrap_or_default())
+    }
+
+    /// 校验 Pod 内的容器处于 Running（终端开会话前必须确认）
+    ///
+    /// 多容器 Pod 未指定容器时返回容器列表，由调用方决定默认容器。
+    ///
+    /// # Errors
+    ///
+    /// Pod 不存在 / 容器名不匹配 / 容器未运行均返回可读错误。
+    pub async fn ensure_container_running(
+        &self,
+        namespace: &str,
+        pod: &str,
+        container: Option<&str>,
+    ) -> OpsResult<Vec<String>> {
+        let containers = self.pod_containers(namespace, pod).await?;
+        let target = container
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(name) = target
+            && !containers.iter().any(|item| item == name)
+        {
+            return Err(OpsError::Api(format!(
+                "Pod {namespace}/{pod} 中不存在容器 {name}"
+            )));
+        }
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let object = api
+            .get(pod)
+            .await
+            .map_err(|err| map_kube_error("GET pods", err))?;
+        let statuses = object
+            .status
+            .as_ref()
+            .and_then(|status| status.container_statuses.as_ref());
+        let name = target
+            .map(ToString::to_string)
+            .or_else(|| containers.first().cloned())
+            .ok_or_else(|| OpsError::Api(format!("Pod {namespace}/{pod} 没有容器")))?;
+        let running = statuses
+            .and_then(|statuses| statuses.iter().find(|status| status.name == name))
+            .and_then(|status| status.state.as_ref())
+            .and_then(|state| state.running.as_ref())
+            .is_some();
+        if !running {
+            return Err(OpsError::Api(format!(
+                "容器 {name} 未在运行，无法打开终端"
+            )));
+        }
+        Ok(containers)
     }
 }
 
@@ -700,12 +779,19 @@ fn decorate_pod(object: &Pod, mut record: ResourceRecord) -> ResourceRecord {
                 .sum::<i32>()
         })
         .unwrap_or(0);
+    // 容器名列表供前端「日志 / 指标 / 终端」的容器下拉直接使用，避免二次查询
+    let container_names: Vec<String> = object
+        .spec
+        .as_ref()
+        .map(|spec| spec.containers.iter().map(|item| item.name.clone()).collect())
+        .unwrap_or_default();
     record.attributes = serde_json::json!({
         "node_name": node_name,
         "pod_ip": object.status.as_ref().and_then(|status| status.pod_ip.clone()),
         "qos_class": object.status.as_ref().and_then(|status| status.qos_class.clone()),
         "restart_count": restarts,
         "container_count": object.spec.as_ref().map(|spec| spec.containers.len()),
+        "container_names": container_names,
     });
     record
 }
@@ -807,6 +893,104 @@ fn decorate_secret(object: &Secret, mut record: ResourceRecord) -> ResourceRecor
         "immutable": object.immutable,
     });
     record
+}
+
+impl K8sConnector {
+    /// 读取 Pod 日志（`pods/log` 子资源；流式逐行读取 + 字节上限）
+    ///
+    /// 只读 GET 语义；`previous=true` 是 Docker 侧没有的能力（CrashLoopBackOff
+    /// 时配合 `container` 可以精确取「上次崩溃的那个容器」的日志）。
+    ///
+    /// # Errors
+    ///
+    /// 命名空间 / Pod 名为空返回 [`OpsError::Config`]；`APIServer` 拒绝或流读取失败
+    /// 按 [`OpsError`] 分类返回（404 / 403 会给出权限与命名空间提示）。
+    pub async fn pod_logs(&self, request: &PodLogsRequest) -> OpsResult<PodLogs> {
+        const ACTION: &str = "GET pods/log";
+        let namespace = request.namespace.trim();
+        let pod = request.pod.trim();
+        if namespace.is_empty() || pod.is_empty() {
+            return Err(OpsError::Config(
+                "命名空间与 Pod 名不能为空".to_string(),
+            ));
+        }
+        let api: Api<Pod> = Api::namespaced(self.client.clone(), namespace);
+        let params = pod_log_params(request);
+        let stream = api
+            .log_stream(pod, &params)
+            .await
+            .map_err(|err| map_kube_error(ACTION, err))?;
+        // `log_stream` 返回 `impl AsyncBufRead`，Box::pin 后无需关心 Unpin
+        let mut lines = Box::pin(stream).lines();
+        let limit = request.byte_limit();
+        let mut collected = Vec::new();
+        let mut bytes = 0_usize;
+        let mut truncated = false;
+        while let Some(line) = lines.next().await {
+            let line =
+                line.map_err(|err| OpsError::Api(format!("{ACTION}：读取日志流失败（{err}）")))?;
+            // 行尾已被 `lines()` 去掉，计字节时补回换行
+            let size = line.len() + 1;
+            if bytes + size > limit {
+                truncated = true;
+                break;
+            }
+            bytes += size;
+            collected.push(line);
+        }
+        // break 后 Lines 被 drop，底层连接随之断开，不会挂住 APIServer
+        Ok(PodLogs {
+            namespace: namespace.to_string(),
+            pod: pod.to_string(),
+            container: request.container.clone(),
+            previous: request.previous,
+            lines: collected,
+            bytes,
+            truncated,
+        })
+    }
+
+    /// 读取 Pod 指标（metrics.k8s.io/v1beta1，仅 CPU / 内存）
+    ///
+    /// 无法像 Docker `stats` 那样给网络 / 磁盘 / pids；未安装 metrics-server
+    /// 时映射成带自检建议的可读错误，而不是裸 404。
+    ///
+    /// # Errors
+    ///
+    /// 命名空间 / Pod 名为空返回 [`OpsError::Config`]；metrics-server 缺失或
+    /// 当前账号无权限时返回带 `kubectl top` 自检建议的 [`OpsError::Api`]。
+    pub async fn pod_metrics(&self, namespace: &str, pod: &str) -> OpsResult<PodMetrics> {
+        let namespace = namespace.trim();
+        let pod = pod.trim();
+        if namespace.is_empty() || pod.is_empty() {
+            return Err(OpsError::Config(
+                "命名空间与 Pod 名不能为空".to_string(),
+            ));
+        }
+        let gvk = GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "PodMetrics");
+        // 资源名是 `pods`：`from_gvk` 会按 kind 拼成 `podmetrics` → 404
+        let resource = ApiResource::from_gvk_with_plural(&gvk, "pods");
+        let api: Api<DynamicObject> =
+            Api::namespaced_with(self.client.clone(), namespace, &resource);
+        let object = api.get(pod).await.map_err(map_metrics_error)?;
+        Ok(PodMetrics::from_json(namespace, pod, &object.data))
+    }
+}
+
+/// metrics-server 缺失 / 无权限时的统一提示（前端直接展示）
+const METRICS_HINT: &str =
+    "集群未安装 metrics-server 或当前账号缺少 metrics.k8s.io 的 pods 读权限";
+
+/// metrics-server 错误映射：404 / 403 → 带 `kubectl top` 自检建议的可读错误
+fn map_metrics_error(err: kube::Error) -> OpsError {
+    if let kube::Error::Api(response) = &err
+        && (response.code == 404 || response.code == 403)
+    {
+        return OpsError::Api(format!(
+            "{METRICS_HINT}（{response}）；可执行 `kubectl top pods -n <namespace>` 自检"
+        ));
+    }
+    map_kube_error("GET metrics.k8s.io/v1beta1 PodMetrics", err)
 }
 
 #[cfg(test)]
@@ -955,6 +1139,20 @@ contexts:
             panic!("provider 不匹配必须失败");
         };
         assert_eq!(err.classify(), FailureClass::Config);
+    }
+
+    #[test]
+    fn metrics_resource_uses_pods_plural() {
+        let gvk = GroupVersionKind::gvk("metrics.k8s.io", "v1beta1", "PodMetrics");
+        let resource = ApiResource::from_gvk_with_plural(&gvk, "pods");
+        assert_eq!(resource.group, "metrics.k8s.io");
+        assert_eq!(resource.version, "v1beta1");
+        assert_eq!(resource.api_version, "metrics.k8s.io/v1beta1");
+        assert_eq!(resource.kind, "PodMetrics");
+        assert_eq!(
+            resource.plural, "pods",
+            "必须显式给复数：from_gvk 会算成 podmetrics → 404"
+        );
     }
 
     #[test]

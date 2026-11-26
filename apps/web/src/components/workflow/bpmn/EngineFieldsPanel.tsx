@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Badge,
@@ -8,6 +8,7 @@ import {
     Divider,
     Group,
     NumberInput,
+    SegmentedControl,
     Select,
     Stack,
     Text,
@@ -17,6 +18,9 @@ import type { ConditionFields, ElementPatch, SelectedBpmnElement } from './types
 import { parseConditionExpression } from './mapping/helpers';
 import { CONDITION_OPERATORS } from './mapping/helpers';
 import { ConfigField, TextField } from './formFields';
+import ApprovalAssigneePicker from '../ApprovalAssigneePicker';
+import { getDepartments, type Department } from '@/services/departmentService';
+import { useAuthStore } from '@/store/authStore';
 
 interface EngineFieldsPanelProps {
     element: SelectedBpmnElement;
@@ -127,7 +131,227 @@ function ConditionEditor({ element, onUpdate }: EngineFieldsPanelProps) {
 /**
  * 执行参数面板：只写 `assets:EngineConfig`，不改变 BPMN 元素类型。
  */
+function ApprovalEditor({
+    element,
+    onUpdate,
+}: {
+    element: SelectedBpmnElement;
+    onUpdate: (patch: ElementPatch) => void;
+}) {
+    const tenantId = useAuthStore(
+        (state) => state.selectedTenantId ?? state.user?.tenant_id ?? null
+    );
+    const [departments, setDepartments] = useState<Department[]>([]);
+
+    useEffect(() => {
+        let mounted = true;
+        getDepartments(tenantId)
+            .then((list) => {
+                if (mounted) setDepartments(Array.isArray(list) ? list : []);
+            })
+            .catch(() => {
+                if (mounted) setDepartments([]);
+            });
+        return () => {
+            mounted = false;
+        };
+    }, [tenantId]);
+
+    const engine = element.engine;
+    const mode = engine.assigneeMode || 'user';
+    const approvalType = engine.approvalType || 'single';
+    const ids = (engine.assigneeIds || engine.assignee || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    const names = (engine.assigneeNames || engine.assigneeName || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    const update = (value: Record<string, unknown>) =>
+        onUpdate({ type: 'engine', value: value as never });
+
+    const changeApprovalType = (value: string) => {
+        if (value === 'single') {
+            update({
+                approvalType: value,
+                assignee: ids[0] || '',
+                assigneeIds: ids[0] || '',
+                assigneeName: names[0] || '',
+                assigneeNames: names[0] || '',
+            });
+        } else {
+            update({ approvalType: value });
+        }
+    };
+
+    const missingHint =
+        mode === 'user' && ids.length === 0
+            ? '请选择审批人'
+            : mode === 'department' && !engine.assigneeDeptId
+              ? '请选择部门'
+              : mode === 'form' && !engine.assigneeFormField
+                ? '请填写表单字段路径'
+                : null;
+
+    return (
+        <Stack gap="sm">
+            {missingHint && (
+                <Alert variant="light" color="yellow" p="xs">
+                    {missingHint}
+                </Alert>
+            )}
+
+            <ConfigField label="审批方式">
+                <SegmentedControl
+                    size="xs"
+                    fullWidth
+                    data={[
+                        { value: 'user', label: '指定用户' },
+                        { value: 'department', label: '指定部门' },
+                        { value: 'form', label: '表单字段' },
+                    ]}
+                    value={mode}
+                    onChange={(value) => update({ assigneeMode: value })}
+                />
+            </ConfigField>
+
+            {mode === 'user' && (
+                <ApprovalAssigneePicker
+                    value={ids}
+                    valueNames={names}
+                    multiple={approvalType !== 'single'}
+                    tenantId={tenantId}
+                    onChange={(nextIds, options) =>
+                        update({
+                            assignee: nextIds[0] || '',
+                            assigneeIds: nextIds.join(','),
+                            assigneeName: options[0]?.name || '',
+                            assigneeNames: options.map((item) => item.name).join(','),
+                        })
+                    }
+                />
+            )}
+
+            {mode === 'department' && (
+                <>
+                    <ConfigField label="部门">
+                        <Select
+                            size="xs"
+                            placeholder="请选择部门"
+                            searchable
+                            clearable
+                            data={departments.map((dept) => ({
+                                value: String(dept.id),
+                                label: dept.department_name,
+                            }))}
+                            value={engine.assigneeDeptId || null}
+                            onChange={(value) => {
+                                const dept = departments.find(
+                                    (item) => String(item.id) === value
+                                );
+                                update({
+                                    assigneeDeptId: value || '',
+                                    assigneeDeptName: dept?.department_name || '',
+                                });
+                            }}
+                        />
+                    </ConfigField>
+                    <ConfigField label="部门范围">
+                        <SegmentedControl
+                            size="xs"
+                            fullWidth
+                            data={[
+                                { value: 'leader', label: '部门负责人' },
+                                { value: 'members', label: '部门成员' },
+                            ]}
+                            value={engine.assigneeDeptScope || 'leader'}
+                            onChange={(value) =>
+                                update({
+                                    assigneeDeptScope: value,
+                                    ...(value === 'members' && approvalType === 'single'
+                                        ? { approvalType: 'all' }
+                                        : {}),
+                                })
+                            }
+                        />
+                    </ConfigField>
+                </>
+            )}
+
+            {mode === 'form' && (
+                <TextField
+                    label="表单字段路径"
+                    value={engine.assigneeFormField}
+                    placeholder="form.approver_id / approver_ids"
+                    hint="执行 inputData 或流程变量的顶层字段 / 点路径；数组按审批类型解析"
+                    onCommit={(value) => update({ assigneeFormField: value })}
+                />
+            )}
+
+            <ConfigField label="审批类型">
+                <SegmentedControl
+                    size="xs"
+                    fullWidth
+                    data={[
+                        { value: 'single', label: '单人' },
+                        { value: 'all', label: '会签' },
+                        { value: 'any', label: '或签' },
+                    ]}
+                    value={approvalType}
+                    onChange={changeApprovalType}
+                />
+            </ConfigField>
+
+            <ConfigField label="拒绝后">
+                <SegmentedControl
+                    size="xs"
+                    fullWidth
+                    data={[
+                        { value: 'terminate', label: '终止流程' },
+                        { value: 'continue', label: '继续' },
+                    ]}
+                    value={
+                        engine.rejectAction ||
+                        (mode === 'user' && approvalType === 'single'
+                            ? 'continue'
+                            : 'terminate')
+                    }
+                    onChange={(value) => update({ rejectAction: value })}
+                />
+            </ConfigField>
+
+            <TextField
+                label="任务标题"
+                value={engine.approvalTitle}
+                placeholder="请审批"
+                onCommit={(value) => update({ approvalTitle: value })}
+            />
+            <TextField
+                label="任务说明"
+                value={engine.approvalDescription}
+                textarea
+                minRows={2}
+                onCommit={(value) => update({ approvalDescription: value })}
+            />
+            <TextField
+                label="审批结果变量"
+                value={engine.approvalVariable}
+                placeholder="approved"
+                hint="complete_user_task 的 variables.approved 会写回该变量"
+                onCommit={(value) => update({ approvalVariable: value })}
+            />
+            <Alert variant="light" color="blue" p="xs">
+                会签：全部通过才通过，任一拒绝终止；或签：任一通过即通过，全部拒绝才终止。
+            </Alert>
+        </Stack>
+    );
+}
+
 export default function EngineFieldsPanel({ element, onUpdate }: EngineFieldsPanelProps) {
+
+
     if (element.kind === 'condition') {
         return <ConditionEditor element={element} onUpdate={onUpdate} />;
     }
@@ -305,51 +529,7 @@ export default function EngineFieldsPanel({ element, onUpdate }: EngineFieldsPan
     }
 
     if (element.kind === 'approval') {
-        return (
-            <Stack gap="sm">
-                {!element.engine.assignee && (
-                    <Alert variant="light" color="yellow" p="xs">
-                        未设置审批人时，任务会进入未分配队列。
-                    </Alert>
-                )}
-                <TextField
-                    label="审批人"
-                    value={element.engine.assignee}
-                    placeholder="admin / 用户 ID"
-                    hint="写入 bpmn:UserTask data-assignee 与节点 config，引擎按此生成待办"
-                    onCommit={(value) => onUpdate({ type: 'engine', value: { assignee: value } })}
-                />
-                <TextField
-                    label="任务标题"
-                    value={element.engine.approvalTitle}
-                    placeholder="请审批"
-                    onCommit={(value) =>
-                        onUpdate({ type: 'engine', value: { approvalTitle: value } })
-                    }
-                />
-                <TextField
-                    label="任务说明"
-                    value={element.engine.approvalDescription}
-                    textarea
-                    minRows={2}
-                    onCommit={(value) =>
-                        onUpdate({ type: 'engine', value: { approvalDescription: value } })
-                    }
-                />
-                <TextField
-                    label="审批结果变量"
-                    value={element.engine.approvalVariable}
-                    placeholder="approved"
-                    hint="complete_user_task 的 variables.approved 会写回该变量"
-                    onCommit={(value) =>
-                        onUpdate({ type: 'engine', value: { approvalVariable: value } })
-                    }
-                />
-                <Alert variant="light" color="blue" p="xs">
-                    流程运行到该节点会挂起为 waiting；审批通过后引擎从当前节点继续。
-                </Alert>
-            </Stack>
-        );
+        return <ApprovalEditor element={element} onUpdate={onUpdate} />;
     }
 
     if (element.kind === 'llm') {

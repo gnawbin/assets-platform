@@ -135,6 +135,8 @@ apps/backend/src-tauri/crates/ops/
 4. **AI 故障总结**：固定 Prompt 模板——识别报错关键字 → 推导 1~2 个核心根因 → 输出可执行排查步骤；调用 `llm_gateway`，默认路由本地 Ollama/llama.cpp 端点模型
 5. **结果落地**：AI 结论文本写入 `ops_history`（运维历史子表）；前端提供"**一键同步工单问题描述**"
 6. **前端**：日志查看组件（高亮/折叠/时间线）+ AI 结论卡片 + 一键建单按钮
+7. **落地细节**：bollard 的日志/性能接口实测结论、行数与字节上限、脱敏执行点、`scratch` 镜像的处理方式见
+   [容器日志、性能与终端实施方案](./运维采集模块/容器日志、性能与终端实施方案.md) §1 / §6
 
 ---
 
@@ -172,6 +174,8 @@ apps/backend/src-tauri/crates/ops/
    - K8s 三套 RBAC 制品（存放 `script/`）：① 采集账号仅 `get/list/watch` 只读；② 日志排查账号单独授 `pods/log`；③ 启停账号仅 `scale` 且需单独审批授权。
    - Docker API **没有细粒度权限**（重点坑）：应用层强制**连接分级**——发现与日志走"只读连接"；启停走"受控连接"并强制过 §5 全量校验；socket 建议 TLS / 限网段暴露。
 2. **禁止 SSH 登录容器**：统一 docker exec / kubectl exec 内核命名空间接入，杜绝容器内 SSHD（文档第 6 章避坑规则）。
+   容器终端的票据鉴权、会话审计表与“默认关闭”三重开关见
+   [容器日志、性能与终端实施方案](./运维采集模块/容器日志、性能与终端实施方案.md) §5。
 3. **K8s 严禁连接节点 docker.sock 采集**：一律经 kube-rs 走 APIServer。
 4. **接口安全**：所有运维/日志/启停接口挂 JWT + 独立权限点；Tauri 命令层与 Axum 层共享同一 service 做同样校验，防命令层绕过。
 5. **审计不可删除**：`ops_audit_log` 从代码与数据库双侧保证只 INSERT 不可 UPDATE/DELETE；高危操作留存不可删。
@@ -247,7 +251,8 @@ apps/backend/src-tauri/crates/ops/
 7. 编译/集成验证：bollard + kube-rs 特性裁剪进桌面包体积评估。
 
 ### V1.1 —— 日志排查 + AI 总结 + 审计
-8. 日志拉取接口（Docker/K8s，含 previous 崩溃日志）与安全上限。
+8. 日志拉取接口（Docker/K8s，含 previous 崩溃日志）与安全上限（Docker 侧落地细节见
+   [容器日志、性能与终端实施方案](./运维采集模块/容器日志、性能与终端实施方案.md)；注意 bollard 0.21.1 暂无 `previous` 参数）。
 9. 日志脱敏组件 + 固定 Prompt + LLM 网关接入（AI 故障总结）。
 10. AI 结论落 `ops_history`、一键同步工单；运维工作台 UI + 历史页 + 审计页。
 11. 采集流水 `ops_discovery_event` 与全链路 OTel 观测补齐。

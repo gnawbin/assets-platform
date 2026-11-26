@@ -3,6 +3,8 @@
 //! 提供用户的 RESTful 接口。
 
 use axum::extract::Query;
+use axum::http::{header, HeaderMap, HeaderValue};
+use axum::response::{IntoResponse, Response};
 use axum::{extract::Path, Extension, Json};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -22,8 +24,11 @@ pub struct CreateUserRequest {
     pub password: String,
     /// 真实姓名
     pub real_name: String,
+    /// 状态（1=启用 0=禁用），缺省启用
+    pub status: Option<i16>,
     pub email: Option<String>,
     pub phone: Option<String>,
+    /// 所属部门 ID（字符串或数字均可）
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub department_id: Option<i64>,
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
@@ -40,10 +45,15 @@ pub struct CreateUserRequest {
 /// 更新用户请求
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateUserRequest {
+    /// 登录名（缺省沿用 real_name，兼容旧前端）
+    pub username: Option<String>,
     /// 真实姓名
     pub real_name: String,
+    /// 状态（1=启用 0=禁用），缺省启用
+    pub status: Option<i16>,
     pub email: Option<String>,
     pub phone: Option<String>,
+    /// 所属部门 ID（字符串或数字均可）
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub department_id: Option<i64>,
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
@@ -71,23 +81,6 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-/// 登录响应
-#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
-pub struct LoginResponse {
-    /// JWT，后续请求放入 `Authorization: Bearer <token>`
-    pub token: String,
-    /// 刷新令牌，仅用于 `POST /api/auth/refresh`（每次刷新都会轮换，旧令牌立即失效）
-    pub refresh_token: String,
-    /// 访问令牌有效期（秒）
-    pub expires_in: i64,
-    /// 用户 ID（雪花 ID 字符串）
-    pub user_id: String,
-    pub username: String,
-    pub real_name: String,
-    /// 是否超级管理员
-    pub is_super_admin: bool,
-}
-
 /// 用户登录
 #[utoipa::path(
     post,
@@ -95,25 +88,38 @@ pub struct LoginResponse {
     tag = "认证",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "登录成功", body = ApiResponse<LoginResponse>),
+        // 直接复用 service 层结构：与桌面命令返回同形（含 id / tenant_id / available_tenants）
+        (status = 200, description = "登录成功", body = ApiResponse<service::user_service::LoginResponse>),
         (status = 401, description = "用户名或密码错误", body = ApiError),
     )
 )]
 pub async fn login(
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<ApiResponse<LoginResponse>>, ApiError> {
-    match service::user_service::login(&req.username, &req.password).await {
+) -> Result<Response, ApiError> {
+    // HTTP 侧不写全局 schema：`service::user_service::login` 内部会把 `GLOBAL_SCHEMA`
+    // 切到该用户租户（供 Tauri 命令模式使用）。这里在调用前后保存 / 恢复，
+    // 避免一次 HTTP 登录改掉同进程桌面会话的 schema（设计文档 §16 T-3）。
+    let schema_snapshot = database::global_schema_name();
+    let result = service::user_service::login(&req.username, &req.password).await;
+    database::set_global_schema(schema_snapshot);
+
+    match result {
         Ok(resp) => {
-            let login_resp = LoginResponse {
-                token: resp.token.clone(),
-                refresh_token: resp.refresh_token.clone(),
-                expires_in: resp.expires_in,
-                user_id: resp.id.to_string(),
-                username: resp.username.clone(),
-                real_name: resp.real_name.clone(),
-                is_super_admin: resp.is_super_admin,
-            };
-            Ok(Json(ApiResponse::success(login_resp)))
+            // 同时下发浏览器会话 Cookie（OAuth 2.1 方案 B：`/oauth/authorize` 同意页依赖它）。
+            // 会话签发失败只记 WARN，不影响 JWT 登录本身（桌面端 / Bearer 调用方无感）。
+            let cookies =
+                super::oauth_browser::issue_session_cookies(&headers, resp.id, resp.tenant_id)
+                    .await;
+
+            let mut response = Json(ApiResponse::success(resp)).into_response();
+            let response_headers = response.headers_mut();
+            for cookie in cookies {
+                if let Ok(value) = HeaderValue::from_str(&cookie) {
+                    response_headers.append(header::SET_COOKIE, value);
+                }
+            }
+            Ok(response)
         }
         Err(e) => Err(ApiError::unauthorized(e)),
     }
@@ -179,12 +185,34 @@ pub async fn refresh(
     )
 )]
 pub async fn logout(
+    headers: HeaderMap,
     Json(req): Json<RefreshTokenRequest>,
-) -> Result<Json<ApiResponse<()>>, ApiError> {
+) -> Result<Response, ApiError> {
     service::user_service::revoke_refresh_token(&req.refresh_token)
         .await
         .map_err(ApiError::internal_error)?;
-    Ok(Json(ApiResponse::success(())))
+
+    // 同时撤销浏览器会话（OAuth 方案 B）并清理 Cookie，幂等
+    if let Some(raw) = super::oauth_session::read_cookie(
+        &headers,
+        super::oauth_session::SESSION_COOKIE_NAME,
+    ) {
+        if let Err(e) = service::session_service::revoke_session(&raw).await {
+            tracing::warn!("撤销浏览器会话失败: {}", e);
+        }
+    }
+
+    let mut response = Json(ApiResponse::success(())).into_response();
+    let response_headers = response.headers_mut();
+    for cookie in [
+        super::oauth_session::clear_cookie(super::oauth_session::SESSION_COOKIE_NAME),
+        super::oauth_session::clear_csrf_cookie(),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response_headers.append(header::SET_COOKIE, value);
+        }
+    }
+    Ok(response)
 }
 
 /// 获取所有用户
@@ -239,7 +267,7 @@ pub async fn insert_user(
         req.email.as_deref(),
         req.phone.as_deref(),
         req.department_id,
-        1, // status: 启用
+        req.status.unwrap_or(1), // status: 缺省启用
         req.nickname.as_deref(),
         req.person_id.as_deref(),
         req.person_code.as_deref(),
@@ -279,12 +307,12 @@ pub async fn update_user(
 
     match service::user_service::update_user(
         id,
-        &req.real_name, // username 复用 real_name
+        req.username.as_deref().unwrap_or(&req.real_name),
         &req.real_name,
         req.email.as_deref(),
         req.phone.as_deref(),
         req.department_id,
-        1, // status
+        req.status.unwrap_or(1), // status: 缺省启用
         req.nickname.as_deref(),
         req.person_id.as_deref(),
         req.person_code.as_deref(),
@@ -293,7 +321,11 @@ pub async fn update_user(
     )
     .await
     {
-        Ok(user) => Ok(Json(ApiResponse::success(user))),
+        Ok(user) => {
+            // 角色 / 权限可能随资料更新而变化：清掉授权快照，下一个请求重新回源（§6.8）
+            auth::invalidate_user_authority(id);
+            Ok(Json(ApiResponse::success(user)))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -321,7 +353,14 @@ pub async fn reset_password(
         .map_err(|_| ApiError::bad_request("无效的用户ID"))?;
 
     match service::user_service::reset_password(id, &req.new_password).await {
-        Ok(_) => Ok(Json(ApiResponse::success(()))),
+        Ok(_) => {
+            // 改密后：授权快照失效 + 全部浏览器会话失效（已登录的浏览器需重新登录）
+            auth::invalidate_user_authority(id);
+            if let Err(e) = service::session_service::revoke_all_user_sessions(id).await {
+                tracing::warn!("改密后撤销浏览器会话失败: user_id={}, error={}", id, e);
+            }
+            Ok(Json(ApiResponse::success(())))
+        }
         Err(e) => Err(ApiError::internal_error(e)),
     }
 }
@@ -355,7 +394,14 @@ pub async fn delete_user(
         Ok(current_user) => {
             let is_super_admin = current_user.is_super_admin;
             match service::user_service::delete_user(id, current_user_id, is_super_admin).await {
-                Ok(_) => Ok(Json(ApiResponse::success(()))),
+                Ok(_) => {
+                    // 删除后：授权快照 + 浏览器会话立即作废
+                    auth::invalidate_user_authority(id);
+                    if let Err(e) = service::session_service::revoke_all_user_sessions(id).await {
+                        tracing::warn!("删除用户后撤销浏览器会话失败: user_id={}, error={}", id, e);
+                    }
+                    Ok(Json(ApiResponse::success(())))
+                }
                 Err(e) => Err(ApiError::internal_error(e)),
             }
         }

@@ -64,7 +64,7 @@ pub async fn insert_category(category: &AssetCategory) -> Result<AssetCategory, 
         .bind((next_id()) as i64)
         .bind(&category.category_name)
         .bind(&category.asset_type)
-        .bind(category.parent_id)
+        .bind(category.parent_id.unwrap_or(0) )
         .bind(category.sort)
         .bind(&category.description)
         .bind(&category.created_by)

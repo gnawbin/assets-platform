@@ -24,6 +24,8 @@ pub struct CreateDepartmentRequest {
     /// 上级部门 ID（字符串或数字均可）
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub parent_id: Option<i64>,
+    #[serde(deserialize_with = "database::models::opt_i64_from_string")]
+    pub leader_id: Option<i64>,
     pub description: Option<String>,
     /// 所属租户 ID（字符串或数字均可）
     #[serde(deserialize_with = "database::models::i64_from_string")]
@@ -36,6 +38,8 @@ pub struct UpdateDepartmentRequest {
     pub department_name: String,
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub parent_id: Option<i64>,
+    #[serde(deserialize_with = "database::models::opt_i64_from_string")]
+    pub leader_id: Option<i64>,
     pub description: Option<String>,
 }
 
@@ -88,6 +92,7 @@ pub async fn insert_department(
     match service::department_service::insert_department(
         &req.department_name,
         req.parent_id,
+        req.leader_id,
         req.description.as_deref(),
         Some(1),
         req.tenant_id,
@@ -125,6 +130,7 @@ pub async fn update_department(
         id,
         &req.department_name,
         req.parent_id,
+        req.leader_id,
         req.description.as_deref(),
         Some(1),
     )

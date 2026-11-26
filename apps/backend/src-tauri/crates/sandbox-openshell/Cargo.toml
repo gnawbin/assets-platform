@@ -1,0 +1,26 @@
+[package]
+edition = "2024"
+name = "sandbox-openshell"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# OpenShell 客户端实现（对齐 `crates/llm` + `llm-openai` 的分层）：
+# - 只依赖契约 crate `sandbox`，禁止反向依赖 service / database / api；
+# - proto 已 vendor 到本 crate（来源：NVIDIA/OpenShell tag v0.1.9 的 `proto/`），
+#   不引入 git 依赖；protoc 由 `protoc-bin-vendored` 提供，无需宿主安装。
+[dependencies]
+sandbox.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+prost.workspace = true
+prost-types.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true
+protoc-bin-vendored.workspace = true

@@ -7,11 +7,17 @@
  *   chatStream.send({ userId, question, convId, attachments });
  *
  * 后端端点：POST /api/chat/stream（JSON body，支持附件）
- * 后端地址由 NEXT_PUBLIC_API_BASE_URL 环境变量控制，默认 http://localhost:3001
+ * 基址由 `utils/apiBase.ts` 运行时解析（不再硬编码 `localhost:3001`）。
  */
 
 import { useState, useRef, useCallback } from 'react';
 import type { ChatAttachment } from '@/services/conversationService';
+import { getAuthToken } from '@/utils/authToken';
+import { getApiOrigin } from '@/utils/apiBase';
+import {
+    extractServerMessage,
+    refreshAccessToken,
+} from '@/utils/adapters/httpAdapter';
 
 export interface StreamResult {
     convId?: string;
@@ -29,7 +35,16 @@ export interface StreamCallbacks {
     onError?: (error: string) => void;
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001';
+/**
+ * 读取错误响应体（SSE 失败时后端返回 JSON `ApiError`）
+ */
+async function readErrorBody(response: Response): Promise<string> {
+    try {
+        return typeof response.text === 'function' ? await response.text() : '';
+    } catch {
+        return '';
+    }
+}
 
 /**
  * SSE 流式对话 Hook
@@ -67,24 +82,50 @@ export function useChatStream(callbacks?: StreamCallbacks) {
             setStreaming(true);
 
             try {
-                const url = `${BASE_URL}/api/chat/stream`;
-                const response = await fetch(url, {
+                const origin = getApiOrigin();
+                if (!origin) {
+                    callbacks?.onError?.(
+                        '未配置服务器地址：请到「系统配置 → 服务端连接」填写后端地址'
+                        + '（或设置环境变量 NEXT_PUBLIC_API_BASE_URL）',
+                    );
+                    return;
+                }
+
+                const url = `${origin}/api/chat/stream`;
+                const body = JSON.stringify({
+                    user_id: params.userId,
+                    question: params.question,
+                    conv_id: params.convId || null,
+                    attachments: params.attachments || [],
+                });
+
+                // 该端点已纳入后端 auth_middleware，未登录会直接 401
+                const doFetch = (token: string | null) => fetch(url, {
                     method: 'POST',
                     signal: controller.signal,
                     headers: {
                         Accept: 'text/event-stream',
                         'Content-Type': 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
                     },
-                    body: JSON.stringify({
-                        user_id: params.userId,
-                        question: params.question,
-                        conv_id: params.convId || null,
-                        attachments: params.attachments || [],
-                    }),
+                    body,
                 });
 
+                let response = await doFetch(getAuthToken());
+
+                // 401 → 静默续期并重放一次（与 httpAdapter 行为一致）
+                if (response.status === 401 && getAuthToken()) {
+                    const renewedToken = await refreshAccessToken();
+                    if (renewedToken) {
+                        response = await doFetch(renewedToken);
+                    }
+                }
+
                 if (!response.ok) {
-                    throw new Error(`SSE 连接失败: ${response.status} ${response.statusText}`);
+                    const serverMessage = extractServerMessage(await readErrorBody(response));
+                    const statusLine = `HTTP ${response.status} ${response.statusText}`.trim();
+                    const hint = response.status === 401 ? '，请重新登录' : '';
+                    throw new Error(`SSE 连接失败: ${serverMessage || statusLine}${hint}`);
                 }
 
                 const reader = response.body?.getReader();

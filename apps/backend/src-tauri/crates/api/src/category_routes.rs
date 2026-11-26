@@ -17,6 +17,7 @@ pub struct CreateCategoryRequest {
     pub category_name: String,
     /// 资产类型：hardware / intangible
     pub asset_type: String,
+    #[serde(default)]
     /// 父分类 ID（雪花 ID，可传字符串或数字）
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub parent_id: Option<i64>,
@@ -24,18 +25,39 @@ pub struct CreateCategoryRequest {
     pub sort: i16,
     pub description: Option<String>,
 }
-
+impl Default for CreateCategoryRequest{
+    fn default()->Self{
+        CreateCategoryRequest{
+            category_name: String::new(),
+            asset_type: String::new(),
+            parent_id: Some(0),
+            sort: 0,
+            description: None,
+        }
+    }
+}
 /// 更新分类请求
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct UpdateCategoryRequest {
     pub category_name: String,
     pub asset_type: String,
+    #[serde(default)]
     #[serde(deserialize_with = "database::models::opt_i64_from_string")]
     pub parent_id: Option<i64>,
     pub sort: i16,
     pub description: Option<String>,
 }
-
+impl Default for UpdateCategoryRequest{
+     fn default()->Self{
+        UpdateCategoryRequest{
+            category_name: String::new(),
+            asset_type: String::new(),
+            parent_id: Some(0),
+            sort: 0,
+            description: None,
+        }
+    }
+}
 /// 获取所有资产分类
 #[utoipa::path(
     get,

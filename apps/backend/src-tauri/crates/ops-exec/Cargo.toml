@@ -1,0 +1,23 @@
+[package]
+edition = "2024"
+name = "ops-exec"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# 容器终端独立 crate：exec 属写操作，绝不混入只读的 ops crate。
+# Docker 走 bollard 的 HTTP Upgrade；K8s 走 kube 的 ws feature（仅在本 crate 内局部开启，
+# 不改根 workspace 里 kube 的 features，避免拖慢主构建）。
+[dependencies]
+async-trait.workspace = true
+bollard.workspace = true
+futures.workspace = true
+k8s-openapi.workspace = true
+kube = {workspace = true, features = ["ws"]}
+ops = {workspace = true, features = ["docker", "k8s"]}
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = {workspace = true, features = ["io-util", "sync", "time"]}
+tracing.workspace = true

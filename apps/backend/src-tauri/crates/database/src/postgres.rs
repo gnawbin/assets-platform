@@ -10,6 +10,8 @@ use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
     PgPool,
 };
+// `close()`（主动释放独占连接）来自 `Connection` trait，必须显式引入
+use sqlx::Connection as _;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{OnceLock, RwLock};
@@ -676,6 +678,12 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
+/// 迁移互斥锁的 advisory lock key（设计文档附录 D.2）
+///
+/// 多实例同时启动时用它把「建表 + 迁移」串行化，取值为 ASCII `GWMIGRAT`
+/// 的 8 字节，与网关侧清理选主锁（`gateway::worker::CLEANUP_LOCK_KEY`）不同 key。
+pub const MIGRATION_LOCK_KEY: i64 = 0x4757_4D49_4752_4154;
+
 /// 执行 SQL 文件内容（通过 include_str! 编译时嵌入）
 ///
 /// 整个文件在**单个事务**中执行：任一语句失败则回滚本文件的全部改动，
@@ -750,6 +758,18 @@ pub async fn migrate_public_tables(pool: &PgPool) -> Result<()> {
     execute_sql_content(pool, sql, "public_migration").await
 }
 
+/// 初始化网关多实例协调表（设计文档附录 D.2）
+///
+/// 四张表分别承担：worker id 租约、SSE 一次性票据、SSE 事件日志（Last-Event-ID
+/// 续传）、跨实例限流计数。全部 `IF NOT EXISTS`，重复执行安全。
+///
+/// 依赖 PostgreSQL 的 `LISTEN/NOTIFY` 与 advisory lock，因此**不需要**Redis：
+/// 唯一硬依赖仍是本进程本就必需的 PostgreSQL。
+pub async fn migrate_gateway_tables(pool: &PgPool) -> Result<()> {
+    let sql = include_str!("sql/gateway_migration.sql");
+    execute_sql_content(pool, sql, "gateway_migration").await
+}
+
 /// 初始化租户 schema 表结构
 #[allow(dead_code)]
 pub async fn init_tenant_tables(pool: &PgPool, schema: &str) -> Result<()> {
@@ -758,7 +778,41 @@ pub async fn init_tenant_tables(pool: &PgPool, schema: &str) -> Result<()> {
     // 工作流引擎（bpmninja + adk-graph）相关表随租户表一起初始化，保证新租户开箱可用
     migrate_tenant_workflow_tables(pool, schema).await?;
     // 运维采集（Docker / Swarm / K8s）连接配置与资源桥表随租户表一起初始化
-    migrate_tenant_ops_tables(pool, schema).await
+    migrate_tenant_ops_tables(pool, schema).await?;
+    // 运维终端（SSH 主机配置 + 会话审计）随租户表一起初始化
+    migrate_tenant_terminal_tables(pool, schema).await?;
+    // 异步任务队列进度表（task_ticket）随租户表一起初始化
+    migrate_tenant_task_queue_tables(pool, schema).await
+}
+
+/// 迁移单个租户的异步任务队列进度表（幂等，可重复执行）
+///
+/// `apalis` 自己的表在 `apalis` schema（全局），本脚本只建业务进度表 `task_ticket`。
+#[allow(dead_code)]
+pub async fn migrate_tenant_task_queue_tables(pool: &PgPool, schema: &str) -> Result<()> {
+    let sql = include_str!("sql/task_queue_migration.sql");
+    execute_sql_content_with_schema(pool, sql, schema, "task_queue_migration").await
+}
+
+/// 迁移所有已启用租户的异步任务队列进度表（应用启动时调用）
+#[allow(dead_code)]
+pub async fn migrate_all_tenant_task_queue_tables(pool: &PgPool) -> Result<()> {
+    let schemas: Vec<String> = sqlx::query_scalar::<_, String>(
+        "SELECT schema_name FROM public.sys_tenant WHERE enable = true AND schema_name IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| anyhow!("读取租户 schema 列表失败: {}", e))?;
+
+    for schema in schemas {
+        if let Err(e) = migrate_tenant_task_queue_tables(pool, &schema).await {
+            // 单个租户迁移失败不阻断启动流程，只记录告警
+            tracing::warn!("租户 '{}' 任务进度表迁移失败: {}", schema, e);
+        } else {
+            tracing::info!("租户 '{}' 任务进度表迁移完成", schema);
+        }
+    }
+    Ok(())
 }
 
 /// 迁移单个租户的工作流引擎表（幂等，可重复执行）
@@ -812,6 +866,34 @@ pub async fn migrate_all_tenant_ops_tables(pool: &PgPool) -> Result<()> {
             tracing::warn!("租户 '{}' 运维采集表迁移失败: {}", schema, e);
         } else {
             tracing::info!("租户 '{}' 运维采集表迁移完成", schema);
+        }
+    }
+    Ok(())
+}
+
+/// 迁移单个租户的运维终端表（幂等，可重复执行）
+#[allow(dead_code)]
+pub async fn migrate_tenant_terminal_tables(pool: &PgPool, schema: &str) -> Result<()> {
+    let sql = include_str!("sql/terminal_module_migration.sql");
+    execute_sql_content_with_schema(pool, sql, schema, "terminal_module_migration").await
+}
+
+/// 迁移所有已启用租户的运维终端表（应用启动时调用）
+#[allow(dead_code)]
+pub async fn migrate_all_tenant_terminal_tables(pool: &PgPool) -> Result<()> {
+    let schemas: Vec<String> = sqlx::query_scalar::<_, String>(
+        "SELECT schema_name FROM public.sys_tenant WHERE enable = true AND schema_name IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| anyhow!("读取租户 schema 列表失败: {}", e))?;
+
+    for schema in schemas {
+        if let Err(e) = migrate_tenant_terminal_tables(pool, &schema).await {
+            // 单个租户迁移失败不阻断启动流程，只记录告警
+            tracing::warn!("租户 '{}' 运维终端表迁移失败: {}", schema, e);
+        } else {
+            tracing::info!("租户 '{}' 运维终端表迁移完成", schema);
         }
     }
     Ok(())
@@ -928,6 +1010,67 @@ async fn run_init_step(
     }
 }
 
+/// 获取迁移互斥锁（会话级 advisory lock，独占连接）
+///
+/// 用 `acquire().detach()` 而不是事务级锁（`pg_advisory_xact_lock`）：
+/// 现有初始化函数全部是 `&PgPool` 的多语句 DDL，无法整体套进一个事务。
+/// 连接在提前返回或 panic 时 drop 即由 PostgreSQL 自动释放，不会把锁带回连接池。
+///
+/// 获取失败（例如等待超过 `lock_timeout`）时只告警并返回 `None`：所有迁移脚本
+/// 都是幂等的，最坏情况是并发执行同一批 `IF NOT EXISTS` 语句。
+async fn acquire_migration_lock(pool: &PgPool) -> Option<sqlx::PgConnection> {
+    let mut conn = match pool.acquire().await {
+        Ok(conn) => conn.detach(),
+        Err(e) => {
+            tracing::warn!("获取迁移锁连接失败（跳过串行化，幂等 DDL 仍安全）: {}", e);
+            return None;
+        }
+    };
+
+    // lock_timeout 只作用于本连接：第二个实例最多等 300s 而不是无限阻塞
+    if let Err(e) = sqlx::query("SET lock_timeout TO '300s'")
+        .execute(&mut conn)
+        .await
+    {
+        tracing::warn!("设置迁移锁 lock_timeout 失败: {}", e);
+    }
+
+    let started = std::time::Instant::now();
+    match sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(MIGRATION_LOCK_KEY)
+        .execute(&mut conn)
+        .await
+    {
+        Ok(_) => {
+            tracing::info!(
+                "已获取数据库迁移互斥锁（等待 {:?}，key={}）",
+                started.elapsed(),
+                MIGRATION_LOCK_KEY
+            );
+            Some(conn)
+        }
+        Err(e) => {
+            tracing::warn!("获取数据库迁移互斥锁失败（继续执行）: {}", e);
+            let _ = conn.close().await;
+            None
+        }
+    }
+}
+
+/// 释放迁移互斥锁并关闭独占连接
+async fn release_migration_lock(lock: &mut Option<sqlx::PgConnection>) {
+    if let Some(mut conn) = lock.take() {
+        if let Err(e) = sqlx::query("SELECT pg_advisory_unlock($1)")
+            .bind(MIGRATION_LOCK_KEY)
+            .execute(&mut conn)
+            .await
+        {
+            tracing::warn!("释放数据库迁移互斥锁失败（连接关闭时自动释放）: {}", e);
+        }
+        let _ = conn.close().await;
+    }
+}
+
 /// 完整的 PostgreSQL 数据库初始化（多租户 schema 模式）
 ///
 /// 除连接池与 public schema 创建外，其余步骤均独立容错：
@@ -950,6 +1093,9 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
 
     // 失败步骤登记表，供末尾汇总
     let mut failures: Vec<String> = Vec::new();
+
+    // 2.5 迁移串行化（附录 D.2）：多实例同时启动时只允许一个实例执行业务 DDL
+    let mut migration_lock = acquire_migration_lock(&pool).await;
 
     // 3. 初始化 public schema 表结构
     tracing::info!("正在初始化 public schema 表结构...");
@@ -1058,12 +1204,39 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
     )
     .await;
 
+    // 11.3 迁移其余租户的运维终端表（默认租户已在 init_tenant_tables 中完成）
+    tracing::info!("正在迁移租户运维终端表...");
+    run_init_step(
+        &mut failures,
+        "其余租户运维终端表迁移",
+        migrate_all_tenant_terminal_tables(&pool),
+    )
+    .await;
+
+    // 11.4 迁移其余租户的异步任务进度表（默认租户已在 init_tenant_tables 中完成）
+    tracing::info!("正在迁移租户任务进度表...");
+    run_init_step(
+        &mut failures,
+        "其余租户任务进度表迁移",
+        migrate_all_tenant_task_queue_tables(&pool),
+    )
+    .await;
+
     // 12. 初始化知识库模块 public 表
     tracing::info!("正在初始化知识库模块 public 表...");
     run_init_step(
         &mut failures,
         "知识库模块 public 表",
         init_knowledge_module_public(&pool),
+    )
+    .await;
+
+    // 12.5 网关多实例协调表（附录 D.2：租约 / 票据 / 事件 / 限流）
+    tracing::info!("正在初始化网关协调表...");
+    run_init_step(
+        &mut failures,
+        "网关协调表（sys_gateway_*）",
+        migrate_gateway_tables(&pool),
     )
     .await;
 
@@ -1074,6 +1247,9 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
         preload_schema_cache(&pool),
     )
     .await;
+
+    // 14. 释放迁移互斥锁（后续实例可以开始幂等 DDL）
+    release_migration_lock(&mut migration_lock).await;
 
     if failures.is_empty() {
         tracing::info!("数据库初始化完成！");

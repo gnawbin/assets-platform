@@ -1,18 +1,26 @@
 /**
  * useChunkedUpload Hook 单元测试
  *
+ * 上传已改为**纯 HTTP 单通道 + 两步提交**：
+ *   POST /api/upload/init → POST /api/upload/{id}/start
+ *   → PUT presigned（分片直传 S3）+ POST /api/upload/{id}/chunk（上报）
+ *   → POST /api/upload/{id}/complete
+ *
+ * 基址由 `utils/apiBase.ts` 运行时解析，测试通过 `window.__API_BASE__`
+ * 注入固定地址，断言完整 URL（顺带守住「不拼出 /api/api」）。
+ *
  * 测试覆盖：
  * - 状态机转换（idle → uploading → completed）
- * - 暂停/继续
+ * - 暂停/继续（resume 会先查询进度）
  * - 取消上传
  * - 重试
  * - 断点续传逻辑
  * - 并发控制
  * - 错误处理
- * - 速度计算
+ * - 进度回调
  */
 
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import { useChunkedUpload } from '@/hooks/useChunkedUpload';
 
 // ======================== Mock ========================
@@ -42,12 +50,79 @@ function createTestFile(name = 'test.pdf', size = 1024 * 1024, type = 'applicati
   return new File([content], name, { type });
 }
 
+// ======================== 响应队列辅助 ========================
+
+/** 测试用服务端地址（由 apiBase 的 `window.__API_BASE__` 注入，归一化后带 `/api`） */
+const API_BASE = 'http://test.local/api';
+
+/** 两步提交第 1 步：`POST /upload/init`（仅占位，返回 uploadId） */
+function mockInit(uploadId = 'upload-001'): void {
+  mockFetch.mockResolvedValueOnce(createMockResponse({ uploadId, needStart: true }));
+}
+
+/** 两步提交第 2 步：`POST /upload/{id}/start`（创建 MultipartUpload，返回预签名地址） */
+function mockStart(opts: { uploadId?: string; chunkSize?: number; totalChunks?: number } = {}): void {
+  const { uploadId = 'upload-001', chunkSize = 1024 * 1024, totalChunks = 1 } = opts;
+  mockFetch.mockResolvedValueOnce(
+    createMockResponse({
+      uploadId,
+      s3UploadId: `s3-${uploadId}`,
+      chunkSize,
+      totalChunks,
+      presignedUrls: Array.from(
+        { length: totalChunks },
+        (_, i) => `https://s3.example.com/part/${i + 1}`
+      ),
+    })
+  );
+}
+
+/** 单个分片的 2 次调用：PUT presigned（返回 ETag）+ POST 上报进度 */
+function mockChunk(partNumber = 1): void {
+  mockFetch.mockResolvedValueOnce(
+    createMockResponse({}, 200, { ETag: `"etag-00${partNumber}"` })
+  );
+  mockFetch.mockResolvedValueOnce(createMockResponse({}));
+}
+
+/** 最后一步：`POST /upload/{id}/complete`（合并分片） */
+function mockComplete(etag = '"etag-final"'): void {
+  mockFetch.mockResolvedValueOnce(
+    createMockResponse({
+      fileUrl: 'https://storage.example.com/files/test.pdf',
+      etag,
+    })
+  );
+}
+
+/**
+ * 先制造一次失败，让 hook 保留 `fileRef`（`resume()` 依赖它）
+ *
+ * `resume()` 只在有文件上下文时才动作，而文件上下文由 `start()` 写入，
+ * 所以续传类用例必须先跑一次失败的上传。
+ */
+async function startWithFailure() {
+  mockFetch.mockRejectedValueOnce(new Error('网络错误'));
+  const hook = renderHook(() => useChunkedUpload({ concurrency: 1 }));
+  await act(async () => {
+    await hook.result.current.start(createTestFile('test.pdf', 10240));
+  });
+  expect(hook.result.current.status).toBe('error');
+  return hook;
+}
+
 // ======================== 测试用例 ========================
 
 describe('useChunkedUpload', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorage.clear();
+    // 固定基址，避免用例受 jsdom 默认 origin / 环境变量影响
+    (window as Window & { __API_BASE__?: unknown }).__API_BASE__ = 'http://test.local';
+  });
+
+  afterEach(() => {
+    delete (window as Window & { __API_BASE__?: unknown }).__API_BASE__;
   });
 
   // ======================== 初始状态 ========================
@@ -69,28 +144,10 @@ describe('useChunkedUpload', () => {
 
   describe('start', () => {
     it('应成功开始上传并完成', async () => {
-      // Mock init 响应
-      mockFetch
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-001',
-            s3UploadId: 's3-001',
-            chunkSize: 1024 * 1024,
-            totalChunks: 1,
-            presignedUrls: ['https://s3.example.com/part/1'],
-          })
-        )
-        // Mock uploadChunk 响应
-        .mockResolvedValueOnce(createMockResponse({}, 200, { etag: '"etag-001"' }))
-        // Mock reportChunk 响应
-        .mockResolvedValueOnce(createMockResponse({}))
-        // Mock complete 响应
-        .mockResolvedValueOnce(
-          createMockResponse({
-            fileUrl: 'https://storage.example.com/files/test.pdf',
-            etag: '"etag-001"',
-          })
-        );
+      mockInit();
+      mockStart();
+      mockChunk(1);
+      mockComplete('"etag-001"');
 
       const onComplete = jest.fn();
       const { result } = renderHook(() =>
@@ -109,6 +166,17 @@ describe('useChunkedUpload', () => {
         fileUrl: 'https://storage.example.com/files/test.pdf',
         etag: '"etag-001"',
       });
+
+      // 两步提交 + 分片直传 + 上报 + 合并，共 5 次请求
+      const urls = mockFetch.mock.calls.map(([url]) => url);
+      expect(urls).toEqual([
+        `${API_BASE}/upload/init`,
+        `${API_BASE}/upload/upload-001/start`,
+        'https://s3.example.com/part/1',
+        `${API_BASE}/upload/upload-001/chunk`,
+        `${API_BASE}/upload/upload-001/complete`,
+      ]);
+      expect(urls.some((url) => String(url).includes('/api/api'))).toBe(false);
     });
 
     it('上传失败时应切换到 error 状态', async () => {
@@ -128,24 +196,10 @@ describe('useChunkedUpload', () => {
     });
 
     it('应保存 upload_id 到 localStorage', async () => {
-      mockFetch
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-001',
-            s3UploadId: 's3-001',
-            chunkSize: 1024 * 1024,
-            totalChunks: 1,
-            presignedUrls: ['https://s3.example.com/part/1'],
-          })
-        )
-        .mockResolvedValueOnce(createMockResponse({}, 200, { etag: '"etag-001"' }))
-        .mockResolvedValueOnce(createMockResponse({}))
-        .mockResolvedValueOnce(
-          createMockResponse({
-            fileUrl: 'https://storage.example.com/files/test.pdf',
-            etag: '"etag-001"',
-          })
-        );
+      mockInit();
+      mockStart();
+      mockChunk(1);
+      mockComplete('"etag-001"');
 
       const { result } = renderHook(() =>
         useChunkedUpload({ concurrency: 1, storageKey: 'test_upload_id' })
@@ -166,19 +220,9 @@ describe('useChunkedUpload', () => {
   describe('pause / resume', () => {
     it('暂停后应切换到 paused 状态', async () => {
       // 模拟一个需要多次分片的上传
-      mockFetch
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-001',
-            s3UploadId: 's3-001',
-            chunkSize: 1024,
-            totalChunks: 10,
-            presignedUrls: Array(10).fill('https://s3.example.com/part/1'),
-          })
-        )
-        // 第一个分片成功
-        .mockResolvedValueOnce(createMockResponse({}, 200, { etag: '"etag-001"' }))
-        .mockResolvedValueOnce(createMockResponse({}));
+      mockInit();
+      mockStart({ chunkSize: 1024, totalChunks: 10 });
+      mockChunk(1);
 
       const { result } = renderHook(() => useChunkedUpload({ concurrency: 1 }));
 
@@ -197,46 +241,32 @@ describe('useChunkedUpload', () => {
       expect(result.current.status).toBe('paused');
     });
 
-    it('继续上传应恢复 uploading 状态', async () => {
-      // 模拟断点续传场景
-      mockFetch
-        // getProgress 查询
-        .mockResolvedValueOnce(
-          createMockResponse({
-            status: 'uploading',
-            receivedChunks: [1, 2, 3],
-            totalChunks: 10,
-            progressPct: 30,
-          })
-        )
-        // init 重新初始化
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-002',
-            s3UploadId: 's3-002',
-            chunkSize: 1024,
-            totalChunks: 10,
-            presignedUrls: Array(10).fill('https://s3.example.com/part/1'),
-          })
-        );
+    it('resume 时进度未完成则重新走两步提交并完成', async () => {
+      const { result } = await startWithFailure();
 
-      // 先保存一个 upload_id 到 localStorage
-      localStorage.setItem('chunked_upload_id', 'upload-001');
-
-      const { result } = renderHook(() =>
-        useChunkedUpload({ concurrency: 1, autoResume: true })
+      localStorage.setItem('chunked_upload_id', 'upload-002');
+      mockFetch.mockResolvedValueOnce(
+        createMockResponse({
+          status: 'uploading',
+          receivedChunks: [1],
+          totalChunks: 2,
+          progressPct: 50,
+        })
       );
+      mockInit('upload-002');
+      mockStart({ uploadId: 'upload-002' });
+      mockChunk(1);
+      mockComplete();
 
-      const file = createTestFile('test.pdf', 10240);
-
-      // 开始上传（会触发断点续传）
       await act(async () => {
-        await result.current.start(file);
+        await result.current.resume();
       });
 
-      // 由于 mock 不完整，可能会进入 error 状态
-      // 但至少验证了断点续传逻辑被触发
-      expect(mockFetch).toHaveBeenCalledWith('/api/upload/upload-001/progress');
+      expect(result.current.status).toBe('completed');
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${API_BASE}/upload/upload-002/progress`,
+        expect.anything()
+      );
     });
   });
 
@@ -258,24 +288,10 @@ describe('useChunkedUpload', () => {
 
     it('取消时应调用 abort API', async () => {
       // 先开始一个上传
-      mockFetch
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-001',
-            s3UploadId: 's3-001',
-            chunkSize: 1024 * 1024,
-            totalChunks: 1,
-            presignedUrls: ['https://s3.example.com/part/1'],
-          })
-        )
-        .mockResolvedValueOnce(createMockResponse({}, 200, { etag: '"etag-001"' }))
-        .mockResolvedValueOnce(createMockResponse({}))
-        .mockResolvedValueOnce(
-          createMockResponse({
-            fileUrl: 'https://storage.example.com/files/test.pdf',
-            etag: '"etag-001"',
-          })
-        );
+      mockInit();
+      mockStart();
+      mockChunk(1);
+      mockComplete('"etag-001"');
 
       const { result } = renderHook(() => useChunkedUpload({ concurrency: 1 }));
 
@@ -310,24 +326,10 @@ describe('useChunkedUpload', () => {
       expect(result.current.status).toBe('error');
 
       // 第二次成功
-      mockFetch
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-002',
-            s3UploadId: 's3-002',
-            chunkSize: 1024 * 1024,
-            totalChunks: 1,
-            presignedUrls: ['https://s3.example.com/part/1'],
-          })
-        )
-        .mockResolvedValueOnce(createMockResponse({}, 200, { etag: '"etag-002"' }))
-        .mockResolvedValueOnce(createMockResponse({}))
-        .mockResolvedValueOnce(
-          createMockResponse({
-            fileUrl: 'https://storage.example.com/files/test.pdf',
-            etag: '"etag-002"',
-          })
-        );
+      mockInit('upload-002');
+      mockStart({ uploadId: 'upload-002' });
+      mockChunk(1);
+      mockComplete('"etag-002"');
 
       await act(async () => {
         await result.current.retry();
@@ -341,53 +343,28 @@ describe('useChunkedUpload', () => {
   // ======================== 断点续传 ========================
 
   describe('断点续传', () => {
-    it('有未完成的上传时应自动续传', async () => {
-      // 保存 upload_id
+    it('start() 不再自动查询进度（续传只发生在显式 resume）', async () => {
       localStorage.setItem('chunked_upload_id', 'upload-001');
+      mockInit('upload-002');
+      mockStart({ uploadId: 'upload-002' });
+      mockChunk(1);
+      mockComplete();
 
-      // Mock getProgress 返回进行中的状态
-      mockFetch
-        .mockResolvedValueOnce(
-          createMockResponse({
-            status: 'uploading',
-            receivedChunks: [1, 2, 3],
-            totalChunks: 10,
-            progressPct: 30,
-          })
-        )
-        // init 重新初始化
-        .mockResolvedValueOnce(
-          createMockResponse({
-            uploadId: 'upload-002',
-            s3UploadId: 's3-002',
-            chunkSize: 1024,
-            totalChunks: 10,
-            presignedUrls: Array(10).fill('https://s3.example.com/part/1'),
-          })
-        );
-
-      const { result } = renderHook(() =>
-        useChunkedUpload({ concurrency: 1, autoResume: true })
-      );
-
-      const file = createTestFile('test.pdf', 10240);
+      const { result } = renderHook(() => useChunkedUpload({ concurrency: 1 }));
 
       await act(async () => {
-        await result.current.start(file);
+        await result.current.start(createTestFile('test.pdf', 10240));
       });
 
-      // 验证调用了 getProgress
-      expect(mockFetch).toHaveBeenCalledWith('/api/upload/upload-001/progress');
+      expect(result.current.status).toBe('completed');
+      const urls = mockFetch.mock.calls.map(([url]) => String(url));
+      expect(urls.some((url) => url.endsWith('/progress'))).toBe(false);
     });
 
-    it('上传已完成时应直接完成', async () => {
-      localStorage.setItem('chunked_upload_id', 'upload-001');
+    it('resume() 前会先查询进度，且使用统一基址', async () => {
+      const { result } = await startWithFailure();
 
-      // 第一步：start 调用 getProgress，返回 completed（需要 mock init 内的 fetch 调用）
-      // 这里需要 mock 一个 init 调用来避免"初始化上传失败"
-      // 但断点续传逻辑只在 autoResume=true 时触发，
-      // getProgress 返回 completed 时，会设置 completed 状态并提前 return
-      // 所以只需要 mock 一个 getProgress 调用
+      localStorage.setItem('chunked_upload_id', 'upload-001');
       mockFetch.mockResolvedValueOnce(
         createMockResponse({
           status: 'completed',
@@ -397,19 +374,16 @@ describe('useChunkedUpload', () => {
         })
       );
 
-      const onComplete = jest.fn();
-      const { result } = renderHook(() =>
-        useChunkedUpload({ concurrency: 1, autoResume: true, onComplete })
-      );
-
-      const file = createTestFile('test.pdf', 5120);
-
       await act(async () => {
-        await result.current.start(file);
+        await result.current.resume();
       });
 
       expect(result.current.status).toBe('completed');
       expect(result.current.progress).toBe(100);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${API_BASE}/upload/upload-001/progress`,
+        expect.anything()
+      );
     });
   });
 
@@ -421,30 +395,15 @@ describe('useChunkedUpload', () => {
       const totalChunks = 6;
       const fileSize = chunkSize * totalChunks;
 
-      // init 响应
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({
-          uploadId: 'upload-001',
-          s3UploadId: 's3-001',
-          chunkSize,
-          totalChunks,
-          presignedUrls: Array(totalChunks).fill('https://s3.example.com/part/1'),
-        })
-      );
+      mockInit();
+      mockStart({ chunkSize, totalChunks });
 
       // 每个分片需要 uploadChunk + reportChunk = 2 次调用
       for (let i = 0; i < totalChunks; i++) {
-        mockFetch.mockResolvedValueOnce(createMockResponse({}, 200, { etag: `"etag-00${i + 1}"` }));
-        mockFetch.mockResolvedValueOnce(createMockResponse({}));
+        mockChunk(i + 1);
       }
 
-      // complete 响应
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({
-          fileUrl: 'https://storage.example.com/files/test.pdf',
-          etag: '"etag-final"',
-        })
-      );
+      mockComplete();
 
       const { result } = renderHook(() => useChunkedUpload({ concurrency: 3 }));
 
@@ -466,27 +425,14 @@ describe('useChunkedUpload', () => {
       const totalChunks = 3;
       const fileSize = chunkSize * totalChunks;
 
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({
-          uploadId: 'upload-001',
-          s3UploadId: 's3-001',
-          chunkSize,
-          totalChunks,
-          presignedUrls: Array(totalChunks).fill('https://s3.example.com/part/1'),
-        })
-      );
+      mockInit();
+      mockStart({ chunkSize, totalChunks });
 
       for (let i = 0; i < totalChunks; i++) {
-        mockFetch.mockResolvedValueOnce(createMockResponse({}, 200, { etag: `"etag-00${i + 1}"` }));
-        mockFetch.mockResolvedValueOnce(createMockResponse({}));
+        mockChunk(i + 1);
       }
 
-      mockFetch.mockResolvedValueOnce(
-        createMockResponse({
-          fileUrl: 'https://storage.example.com/files/test.pdf',
-          etag: '"etag-final"',
-        })
-      );
+      mockComplete();
 
       const onProgress = jest.fn();
       const { result } = renderHook(() =>

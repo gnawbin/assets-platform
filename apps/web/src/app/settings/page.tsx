@@ -22,9 +22,19 @@ import {
   IconFileText,
   IconUserCheck,
   IconHash,
+  IconKey,
+  IconApps,
+  IconServer,
 } from '@tabler/icons-react';
 
 const settingsItems = [
+  {
+    title: '服务端连接',
+    description: '查看当前后端地址与来源，测试连通性、诊断延迟与版本',
+    icon: IconServer,
+    color: 'blue',
+    href: '/settings/server',
+  },
   {
     title: '用户管理',
     description: '管理系统用户账号、角色分配和权限控制',
@@ -80,6 +90,20 @@ const settingsItems = [
     icon: IconHash,
     color: 'indigo',
     href: '/settings/numbering',
+  },
+  {
+    title: 'API Key 管理',
+    description: '签发外部系统接入凭证，配置权限点、有效期与限流',
+    icon: IconKey,
+    color: 'pink',
+    href: '/settings/api-keys',
+  },
+  {
+    title: 'OAuth 客户端',
+    description: '注册 OAuth 2.1 客户端（授权码 + PKCE），配置回调地址与授权范围',
+    icon: IconApps,
+    color: 'red',
+    href: '/settings/oauth-clients',
   },
   {
     title: '操作日志',

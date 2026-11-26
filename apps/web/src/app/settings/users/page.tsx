@@ -200,7 +200,7 @@ const UsersPage: React.FC = () => {
         realName: newUser.real_name.trim(),
         email: newUser.email.trim() || null,
         phone: newUser.phone.trim() || null,
-        departmentId: newUser.department_id ? Number(newUser.department_id) : null,
+        departmentId: newUser.department_id || null,
         status: newUser.status,
         nickname: newUser.nickname.trim() || null,
         personId: null,
@@ -264,7 +264,7 @@ const UsersPage: React.FC = () => {
         realName: editForm.real_name.trim(),
         email: editForm.email.trim() || null,
         phone: editForm.phone.trim() || null,
-        departmentId: editForm.department_id ? Number(editForm.department_id) : null,
+        departmentId: editForm.department_id || null,
         status: editForm.status,
         nickname: editForm.nickname.trim() || null,
         personId: null,
@@ -291,7 +291,7 @@ const UsersPage: React.FC = () => {
   const handleDeleteUser = async () => {
     if (!deleteTargetUser || !currentUser) return;
     try {
-      await doDeleteUser(deleteTargetUser.id, currentUser.id, isSuperAdmin);
+      await doDeleteUser(deleteTargetUser.id);
       setDeleteModalOpen(false);
       setDeleteTargetUser(null);
       notifySuccess('用户删除成功');
@@ -399,7 +399,7 @@ const UsersPage: React.FC = () => {
   const handleAssignTenants = async () => {
     if (!tenantModalUser || !currentUser) return;
     try {
-      await doAssignUserTenants(tenantModalUser.id, selectedTenantIds, currentUser.id);
+      await doAssignUserTenants(tenantModalUser.id, selectedTenantIds);
       setTenantModalOpen(false);
       setTenantModalUser(null);
       setSelectedTenantIds([]);

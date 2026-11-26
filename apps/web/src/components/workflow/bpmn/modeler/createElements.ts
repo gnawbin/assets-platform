@@ -153,6 +153,14 @@ export function createBusinessObjectForPreset(
             // 这里必须用 set() 而不是直接赋值，否则导出 XML 时会丢字段。
             const assignee = asString(options.engine?.assignee);
             if (assignee) businessObject.set('data-assignee', assignee);
+            const assigneeName =
+                asString(options.engine?.assigneeNames) ||
+                asString(options.engine?.assigneeName);
+            if (assigneeName) businessObject.set('data-assignee-name', assigneeName);
+            const assigneeIds = asString(options.engine?.assigneeIds);
+            if (assigneeIds) businessObject.set('data-assignee-ids', assigneeIds);
+            const assigneeMode = asString(options.engine?.assigneeMode);
+            if (assigneeMode) businessObject.set('data-assignee-mode', assigneeMode);
             return businessObject;
         }
         case 'bpmn:ScriptTask':

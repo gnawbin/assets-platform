@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   NavLink,
@@ -27,6 +27,7 @@ import {
   IconStack2,
   IconHierarchy,
   IconChevronDown,
+  IconBox,
 } from '@tabler/icons-react';
 
 import { getUserMenus, type MenuItem } from '@/services/menuService';
@@ -46,6 +47,8 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   IconHierarchy: <IconHierarchy size={18} />,
   IconServer: <IconServer size={18} />,
   IconStack2: <IconStack2 size={18} />,
+  // 菜单 63「容器运维」
+  IconBox: <IconBox size={18} />,
 };
 
 
@@ -54,6 +57,24 @@ function getIcon(iconName?: string): React.ReactNode {
   if (!iconName) return null;
   return ICON_MAP[iconName] ?? <IconDeviceDesktop size={18} />;
 }
+
+/**
+ * 始终可见的内置入口
+ *
+ * 为什么需要：数据库 `sys_menu` 可能还没执行到对应迁移（例如后端未重启），
+ * 或当前角色未被分配该菜单 —— 页面本身是可用的，只是入口丢了。
+ * 这里按 `path` 去重后兜底展示，保证「任务中心」永远点得到。
+ */
+const ALWAYS_VISIBLE_ITEMS: MenuItem[] = [
+  { label: '任务中心', path: '/tasks', icon: 'IconListCheck' },
+];
+
+/** 完全没有任何菜单时的兜底入口（保持改造前行为：AI 工作流） */
+const EMPTY_MENU_FALLBACK: MenuItem = {
+  label: 'AI 工作流',
+  path: '/knowledge/workflow',
+  icon: 'IconHierarchy',
+};
 
 // ======================== 导航项组件 ========================
 
@@ -182,6 +203,26 @@ const Sidebar: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const { user } = useAuthStore();
 
+  // 数据库菜单 + 内置兜底（按 path 去重，保证任务中心入口不依赖迁移是否已执行）
+  const displayItems = useMemo(() => {
+    const existingPaths = new Set<string>();
+    const collect = (items: MenuItem[]) => {
+      for (const item of items) {
+        if (item.path) existingPaths.add(item.path);
+        if (item.children?.length) collect(item.children);
+      }
+    };
+    collect(menuItems);
+    const fallback = ALWAYS_VISIBLE_ITEMS.filter(
+      (item) => !item.path || !existingPaths.has(item.path),
+    );
+    // 完全没有任何菜单时，保留改造前的「AI 工作流」兜底
+    if (menuItems.length === 0 && !existingPaths.has(EMPTY_MENU_FALLBACK.path ?? '')) {
+      fallback.unshift(EMPTY_MENU_FALLBACK);
+    }
+    return [...menuItems, ...fallback];
+  }, [menuItems]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -240,12 +281,8 @@ const Sidebar: React.FC = () => {
               <Text c="red" size="sm" ta="center" py="xl">
                 {error}
               </Text>
-            ) : menuItems.length === 0 && !loading ? (
-              <>
-                <NavItem item={{ label: 'AI 工作流', path: '/knowledge/workflow', icon: 'IconHierarchy' }} />
-              </>
             ) : (
-              menuItems.map((item, index) => (
+              displayItems.map((item, index) => (
                 <NavItem key={item.label + index} item={item} />
               ))
             )}

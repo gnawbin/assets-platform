@@ -23,6 +23,12 @@ COMMENT ON COLUMN public.sys_tenant.is_leaf IS '是否末级节点（末级才�
 
 COMMENT ON COLUMN public.sys_tenant.schema_name IS '对应 PostgreSQL schema 名，如 factory_a（仅末级节点需要）';
 
+-- sys_department 表增加部门负责人
+ALTER TABLE public.sys_department
+ADD COLUMN IF NOT EXISTS leader_id BIGINT;
+
+COMMENT ON COLUMN public.sys_department.leader_id IS '部门负责人用户ID';
+
 -- sys_user 表补充缺失列
 
 -- 将 tenant_id 改为可空（超级管理员不属于任何机构）
@@ -185,3 +191,757 @@ COMMENT ON COLUMN public.sys_user_refresh_token.replaced_by IS '轮换后的新 
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_refresh_token_user ON public.sys_user_refresh_token (user_id);
 
 CREATE INDEX IF NOT EXISTS idx_public_sys_user_refresh_token_family ON public.sys_user_refresh_token (family_id);
+
+-- ==============================
+-- API Key（外部系统接入凭证，设计文档 §9.1）
+-- 说明：
+--   * key_hash = SHA-256(完整 key) 的十六进制，单向哈希，不可逆
+--   * key_prefix 为明文定位段，用于列表展示、日志定位与用户自查
+--   * 主键由应用层 Snowflake 生成（utils::snowflake::next_id），不用 BIGSERIAL
+--   * 全部 IF NOT EXISTS，保证老库每次启动幂等执行
+-- ==============================
+CREATE TABLE IF NOT EXISTS public.sys_api_key (
+    id BIGINT PRIMARY KEY,
+    tenant_id BIGINT,
+    name VARCHAR(100) NOT NULL,
+    description VARCHAR(500),
+    key_prefix VARCHAR(32) NOT NULL,
+    key_hash CHAR(64) NOT NULL,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    rate_limit_per_min INT NOT NULL DEFAULT 600,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    last_used_at TIMESTAMP WITH TIME ZONE,
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    created_by BIGINT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_by BIGINT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    enable BOOLEAN NOT NULL DEFAULT TRUE,
+    deleted SMALLINT NOT NULL DEFAULT 0
+);
+
+COMMENT ON TABLE public.sys_api_key IS '外部系统 API Key（只存哈希，明文仅创建/轮换响应出现一次）';
+
+COMMENT ON COLUMN public.sys_api_key.tenant_id IS '所属租户（空表示 public 全局 key）';
+
+COMMENT ON COLUMN public.sys_api_key.key_prefix IS '定位段（明文，用于展示与日志定位，不参与校验）';
+
+COMMENT ON COLUMN public.sys_api_key.key_hash IS '完整 key 的 SHA-256 十六进制（等值查找，禁止可逆加密）';
+
+COMMENT ON COLUMN public.sys_api_key.scopes IS '权限点集合（必须 ⊆ 创建者当前权限，禁止 system:* 与 upload:*）';
+
+COMMENT ON COLUMN public.sys_api_key.rate_limit_per_min IS '每分钟请求数上限（默认 600）';
+
+COMMENT ON COLUMN public.sys_api_key.revoked_at IS '吊销时间（非空即失效，行保留用于审计）';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_api_key_hash ON public.sys_api_key (key_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_api_key_tenant ON public.sys_api_key (tenant_id, enable, deleted);
+
+CREATE INDEX IF NOT EXISTS idx_sys_api_key_prefix ON public.sys_api_key (key_prefix);
+
+-- ==============================
+-- 权限点补录（Phase 1，设计文档 §6.2 / §6.3）
+-- 说明：
+--   * 只填 perms / http_method / http_path，**不填 command_name**
+--     （T-6：command_name 是 Tauri 命令 → 权限的映射，新接口没有 Tauri 命令）
+--   * 全部为 menu_type = 3（按钮），hidden_button = true（不出现在侧边栏）
+--   * 同一 perms 覆盖多条路由时只登记一条代表性记录，
+--     其余路由由代码侧 api::authz::ROUTE_PERMS 兜底（设计文档 §6.3 手段 2）
+--   * id 段 200–299 专用于 HTTP 鉴权权限点，避免与既有 1–165 冲突
+-- ==============================
+
+-- API Key 管理（system:apikey:*）
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    200,
+    'API Key 列表',
+    5,
+    NULL,
+    NULL,
+    NULL,
+    1,
+    true,
+    'system:apikey:list',
+    3,
+    true,
+    NULL,
+    'GET',
+    '/api/api-keys',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 200
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    201,
+    '创建 API Key',
+    5,
+    NULL,
+    NULL,
+    NULL,
+    2,
+    true,
+    'system:apikey:add',
+    3,
+    true,
+    NULL,
+    'POST',
+    '/api/api-keys',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 201
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    202,
+    '轮换 API Key',
+    5,
+    NULL,
+    NULL,
+    NULL,
+    3,
+    true,
+    'system:apikey:edit',
+    3,
+    true,
+    NULL,
+    'POST',
+    '/api/api-keys/{id}/rotate',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 202
+    );
+
+INSERT INTO
+    public.sys_menu (
+        id,
+        menu_name,
+        parent_id,
+        path,
+        component,
+        icon,
+        order_num,
+        visible,
+        perms,
+        menu_type,
+        hidden_button,
+        command_name,
+        http_method,
+        http_path,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at,
+        deleted
+    )
+SELECT
+    203,
+    '吊销 API Key',
+    5,
+    NULL,
+    NULL,
+    NULL,
+    4,
+    true,
+    'system:apikey:delete',
+    3,
+    true,
+    NULL,
+    'DELETE',
+    '/api/api-keys/{id}',
+    1,
+    NOW(),
+    NULL,
+    NULL,
+    0
+WHERE
+    NOT EXISTS (
+        SELECT 1
+        FROM public.sys_menu
+        WHERE
+            id = 203
+    );
+
+-- OAuth 客户端管理（system:oauthclient:*，Phase 2 才挂路由，这里先落权限点）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 205, 'OAuth 客户端列表', 5, NULL, NULL, NULL, 5, true, 'system:oauthclient:list', 3, true, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 205);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 206, '新增 OAuth 客户端', 5, NULL, NULL, NULL, 6, true, 'system:oauthclient:add', 3, true, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 206);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 207, '编辑 OAuth 客户端', 5, NULL, NULL, NULL, 7, true, 'system:oauthclient:edit', 3, true, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 207);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 208, '删除 OAuth 客户端', 5, NULL, NULL, NULL, 8, true, 'system:oauthclient:delete', 3, true, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 208);
+
+-- API Key 管理页面（侧边栏可见，perms 与列表权限点一致）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 48, 'API Key 管理', 5, '/settings/api-keys', '/settings/api-keys/page', 'IconKey', 9, true, 'system:apikey:list', 2, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 48);
+
+-- Agent Skill（/api/skills*，改造前挂在 auth 之外，Phase 1 一并纳入鉴权）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 210, '技能列表', 5, NULL, NULL, NULL, 10, true, 'system:skill:list', 3, true, NULL, 'GET', '/api/skills', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 210);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 211, '执行技能', 5, NULL, NULL, NULL, 11, true, 'system:skill:execute', 3, true, NULL, 'POST', '/api/skills/execute', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 211);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 212, '注册技能', 5, NULL, NULL, NULL, 12, true, 'system:skill:add', 3, true, NULL, 'POST', '/api/skills/register', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 212);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 213, '注销技能', 5, NULL, NULL, NULL, 13, true, 'system:skill:delete', 3, true, NULL, 'DELETE', '/api/skills/{skill_id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 213);
+
+-- 注册审核（/api/auth/registrations*，改造前无权限点）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 214, '注册申请列表', 5, NULL, NULL, NULL, 14, true, 'system:registration:list', 3, true, NULL, 'GET', '/api/auth/registrations', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 214);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 215, '审核注册申请', 5, NULL, NULL, NULL, 15, true, 'system:registration:approve', 3, true, NULL, 'POST', '/api/auth/registrations/{id}/approve', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 215);
+
+-- 大文件上传（/api/upload/*，改造前匿名可访问）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 220, '上传文件', 5, NULL, NULL, NULL, 16, true, 'upload:file:add', 3, true, NULL, 'POST', '/api/upload/init', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 220);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 221, '上传进度', 5, NULL, NULL, NULL, 17, true, 'upload:file:list', 3, true, NULL, 'GET', '/api/upload/{id}/progress', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 221);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 222, '中止上传', 5, NULL, NULL, NULL, 18, true, 'upload:file:delete', 3, true, NULL, 'DELETE', '/api/upload/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 222);
+
+-- 智能问答（/api/chat/stream，改造前匿名可访问）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 230, '智能问答', 52, NULL, NULL, NULL, 1, true, 'chat:completion:add', 3, true, NULL, 'POST', '/api/chat/stream', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 230);
+
+-- 会话管理（/api/conversations*，改造前仅 Tauri 命令可访问；归属校验以令牌 sub 为准）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 231, '会话列表', 52, NULL, NULL, NULL, 2, true, 'chat:conversation:list', 3, true, NULL, 'GET', '/api/conversations', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 231);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 232, '会话历史消息', 52, NULL, NULL, NULL, 3, true, 'chat:conversation:list', 3, true, NULL, 'GET', '/api/conversations/{convId}/messages', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 232);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 233, '新建会话', 52, NULL, NULL, NULL, 4, true, 'chat:completion:add', 3, true, NULL, 'POST', '/api/conversations', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 233);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 234, '继续会话', 52, NULL, NULL, NULL, 5, true, 'chat:completion:add', 3, true, NULL, 'POST', '/api/conversations/{convId}/messages', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 234);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 235, '修改会话标题', 52, NULL, NULL, NULL, 6, true, 'chat:conversation:edit', 3, true, NULL, 'PUT', '/api/conversations/{convId}/title', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 235);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 236, '删除会话', 52, NULL, NULL, NULL, 7, true, 'chat:conversation:delete', 3, true, NULL, 'DELETE', '/api/conversations/{convId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 236);
+
+-- 用户管理写操作（/api/users*）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 240, '新增用户', 43, NULL, NULL, NULL, 1, true, 'system:user:add', 3, true, NULL, 'POST', '/api/users', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 240);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 241, '编辑用户', 43, NULL, NULL, NULL, 2, true, 'system:user:edit', 3, true, NULL, 'PUT', '/api/users/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 241);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 242, '删除用户', 43, NULL, NULL, NULL, 3, true, 'system:user:delete', 3, true, NULL, 'DELETE', '/api/users/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 242);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 243, '重置密码', 43, NULL, NULL, NULL, 4, true, 'system:user:reset', 3, true, NULL, 'POST', '/api/users/{id}/reset-password', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 243);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 244, '分配用户角色', 43, NULL, NULL, NULL, 5, true, 'system:user:assign', 3, true, NULL, 'POST', '/api/users/{id}/roles', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 244);
+
+
+-- 角色管理写操作（/api/roles*）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 245, '新增角色', 41, NULL, NULL, NULL, 1, true, 'system:role:add', 3, true, NULL, 'POST', '/api/roles', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 245);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 246, '删除角色', 41, NULL, NULL, NULL, 2, true, 'system:role:delete', 3, true, NULL, 'DELETE', '/api/roles/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 246);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 247, '分配角色权限', 41, NULL, NULL, NULL, 3, true, 'system:role:assign', 3, true, NULL, 'POST', '/api/roles/{id}/menus', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 247);
+
+-- 部门管理写操作（/api/departments*）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 250, '新增部门', 42, NULL, NULL, NULL, 1, true, 'system:department:add', 3, true, NULL, 'POST', '/api/departments', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 250);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 251, '编辑部门', 42, NULL, NULL, NULL, 2, true, 'system:department:edit', 3, true, NULL, 'PUT', '/api/departments/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 251);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 252, '删除部门', 42, NULL, NULL, NULL, 3, true, 'system:department:delete', 3, true, NULL, 'DELETE', '/api/departments/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 252);
+
+-- 租户分配 / 切换（租户切换是超管跨租户能力，独立权限点 + 审计）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 253, '分配用户租户', 46, NULL, NULL, NULL, 4, true, 'system:tenant:assign', 3, true, NULL, 'POST', '/api/tenants/assign', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 253);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 254, '切换租户', 46, NULL, NULL, NULL, 5, true, 'system:tenant:switch', 3, true, NULL, 'POST', '/api/tenants/switch', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 254);
+
+-- 知识库写操作（/api/knowledge*）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 260, '新增知识', 50, NULL, NULL, NULL, 1, true, 'knowledge:add', 3, true, NULL, 'POST', '/api/knowledge', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 260);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 261, '编辑知识', 50, NULL, NULL, NULL, 2, true, 'knowledge:edit', 3, true, NULL, 'PUT', '/api/knowledge/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 261);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 262, '删除知识', 50, NULL, NULL, NULL, 3, true, 'knowledge:delete', 3, true, NULL, 'DELETE', '/api/knowledge/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 262);
+
+
+
+-- 流程列表 / 编辑（补齐原先只有 add / approve / delete 的缺口）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 270, '领用申请列表', 20, NULL, NULL, NULL, 1, true, 'process:receive:list', 3, true, NULL, 'GET', '/api/process/receive', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 270);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 271, '编辑领用申请', 20, NULL, NULL, NULL, 2, true, 'process:receive:edit', 3, true, NULL, 'PUT', '/api/process/receive/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 271);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 272, '编辑归还申请', 21, NULL, NULL, NULL, 2, true, 'process:return:edit', 3, true, NULL, 'PUT', '/api/process/return/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 272);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 273, '编辑调拨申请', 22, NULL, NULL, NULL, 2, true, 'process:transfer:edit', 3, true, NULL, 'PUT', '/api/process/transfer/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 273);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 274, '维修申请列表', 23, NULL, NULL, NULL, 1, true, 'process:repair:list', 3, true, NULL, 'GET', '/api/process/repair', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 274);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 275, '编辑维修申请', 23, NULL, NULL, NULL, 2, true, 'process:repair:edit', 3, true, NULL, 'PUT', '/api/process/repair/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 275);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 276, '编辑报废申请', 24, NULL, NULL, NULL, 2, true, 'process:scrap:edit', 3, true, NULL, 'PUT', '/api/process/scrap/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 276);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 277, '采购申请列表', 25, NULL, NULL, NULL, 1, true, 'process:purchase:list', 3, true, NULL, 'GET', '/api/process/purchase', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 277);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 278, '编辑采购申请', 25, NULL, NULL, NULL, 2, true, 'process:purchase:edit', 3, true, NULL, 'PUT', '/api/process/purchase/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 278);
+
+-- ============================================================================
+-- OAuth 2.1 授权服务器（Phase 2，设计文档 §9.2）
+--   只新增表与索引，不改既有表结构（§16 T-5 加法式 DDL）；
+--   客户端管理权限点（system:oauthclient:*，id 205-208）已在 Phase 1 落库，
+--   这里补上 http_method / http_path，供鉴权自检与 DB 优先映射比对。
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.sys_oauth_client (
+    id BIGINT PRIMARY KEY,
+    client_id VARCHAR(64) NOT NULL,
+    client_name VARCHAR(100) NOT NULL,
+    client_secret_hash CHAR(64),
+    client_type SMALLINT NOT NULL DEFAULT 1,
+    redirect_uris TEXT[] NOT NULL DEFAULT '{}',
+    allowed_scopes TEXT[] NOT NULL DEFAULT '{}',
+    grant_types TEXT[] NOT NULL DEFAULT '{authorization_code,refresh_token}',
+    access_token_ttl INT NOT NULL DEFAULT 900,
+    refresh_token_ttl INT NOT NULL DEFAULT 2592000,
+    tenant_id BIGINT,
+    enable BOOLEAN NOT NULL DEFAULT TRUE,
+    deleted SMALLINT NOT NULL DEFAULT 0,
+    created_by BIGINT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_by BIGINT,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_oauth_client_id ON public.sys_oauth_client (client_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_client_tenant ON public.sys_oauth_client (tenant_id, enable, deleted);
+
+CREATE TABLE IF NOT EXISTS public.sys_oauth_code (
+    id BIGINT PRIMARY KEY,
+    code_hash CHAR(64) NOT NULL,
+    client_id VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    redirect_uri TEXT NOT NULL,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    code_challenge VARCHAR(128) NOT NULL,
+    code_challenge_method VARCHAR(10) NOT NULL DEFAULT 'S256',
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_oauth_code_hash ON public.sys_oauth_code (code_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_code_expires ON public.sys_oauth_code (expires_at);
+
+CREATE TABLE IF NOT EXISTS public.sys_oauth_token (
+    id BIGINT PRIMARY KEY,
+    token_hash CHAR(64) NOT NULL,
+    token_type SMALLINT NOT NULL,
+    client_id VARCHAR(64) NOT NULL,
+    user_id BIGINT,
+    tenant_id BIGINT,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    family_id UUID NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    replaced_by VARCHAR(64),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_oauth_token_hash ON public.sys_oauth_token (token_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_token_family ON public.sys_oauth_token (family_id);
+
+CREATE INDEX IF NOT EXISTS idx_sys_oauth_token_user ON public.sys_oauth_token (user_id, revoked_at);
+
+-- 浏览器会话（方案 B，设计文档 §7.3 / §9.2）：
+--   `/oauth/authorize` 的浏览器重定向流程需要「已登录的用户会话」，
+--   这里只增加一张表（§16 T-5 加法式 DDL），会话令牌只存 SHA-256。
+CREATE TABLE IF NOT EXISTS public.sys_user_session (
+    id BIGINT PRIMARY KEY,
+    session_hash CHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    csrf_hash CHAR(64) NOT NULL,
+    ip INET,
+    user_agent VARCHAR(512),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    last_seen_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+COMMENT ON TABLE public.sys_user_session IS '浏览器会话（OAuth 方案 B：httpOnly Cookie 的 authorize 流程，只存哈希）';
+
+COMMENT ON COLUMN public.sys_user_session.session_hash IS '会话令牌的 SHA-256 十六进制（Cookie 里的明文不落库）';
+
+COMMENT ON COLUMN public.sys_user_session.csrf_hash IS '同意页 CSRF 令牌的 SHA-256（双提交 Cookie 校验）';
+
+COMMENT ON COLUMN public.sys_user_session.revoked_at IS '撤销时间（登出 / 改密 / 封禁，非空即失效）';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sys_user_session_hash ON public.sys_user_session (session_hash);
+
+CREATE INDEX IF NOT EXISTS idx_sys_user_session_user ON public.sys_user_session (user_id, revoked_at);
+
+CREATE INDEX IF NOT EXISTS idx_sys_user_session_expires ON public.sys_user_session (expires_at);
+
+-- 客户端管理权限点补登路由（与 ROUTE_PERMS 保持一致，DB 优先）
+UPDATE public.sys_menu SET http_method = 'GET', http_path = '/api/oauth-clients' WHERE id = 205 AND http_path IS NULL;
+
+UPDATE public.sys_menu SET http_method = 'POST', http_path = '/api/oauth-clients' WHERE id = 206 AND http_path IS NULL;
+
+UPDATE public.sys_menu SET http_method = 'PUT', http_path = '/api/oauth-clients/{id}' WHERE id = 207 AND http_path IS NULL;
+
+UPDATE public.sys_menu SET http_method = 'DELETE', http_path = '/api/oauth-clients/{id}' WHERE id = 208 AND http_path IS NULL;
+
+-- OAuth 客户端管理页面（侧边栏可见，perms 与列表权限点一致）
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 49, 'OAuth 客户端', 5, '/settings/oauth-clients', '/settings/oauth-clients/page', 'IconApps', 10, true, 'system:oauthclient:list', 2, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 49);
+
+-- ===== AI Agent 沙箱（CubeSandbox）：权限点，路由见 crates/api/src/sandbox_routes.rs =====
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 280, '沙箱健康检查', 5, NULL, NULL, NULL, 20, true, 'sandbox:health:read', 3, true, NULL, 'GET', '/api/sandbox/health', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 280);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 281, '创建沙箱会话', 5, NULL, NULL, NULL, 21, true, 'sandbox:session:create', 3, true, NULL, 'POST', '/api/sandbox/sessions', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 281);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 282, '查询沙箱会话', 5, NULL, NULL, NULL, 22, true, 'sandbox:session:list', 3, true, NULL, 'GET', '/api/sandbox/sessions/{scope}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 282);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 283, '释放沙箱会话', 5, NULL, NULL, NULL, 23, true, 'sandbox:session:delete', 3, true, NULL, 'DELETE', '/api/sandbox/sessions/{scope}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 283);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 284, '沙箱执行代码', 5, NULL, NULL, NULL, 24, true, 'sandbox:exec', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/exec', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 284);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 285, '沙箱执行命令', 5, NULL, NULL, NULL, 25, true, 'sandbox:exec', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/command', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 285);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 286, '沙箱写文件', 5, NULL, NULL, NULL, 26, true, 'sandbox:file:write', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/files', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 286);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 287, '沙箱读文件', 5, NULL, NULL, NULL, 27, true, 'sandbox:file:read', 3, true, NULL, 'GET', '/api/sandbox/sessions/{scope}/files', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 287);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 288, '沙箱列目录', 5, NULL, NULL, NULL, 28, true, 'sandbox:file:read', 3, true, NULL, 'GET', '/api/sandbox/sessions/{scope}/files/list', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 288);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 289, '暂停沙箱会话', 5, NULL, NULL, NULL, 29, true, 'sandbox:session:update', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/pause', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 289);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 290, '恢复沙箱会话', 5, NULL, NULL, NULL, 30, true, 'sandbox:session:update', 3, true, NULL, 'POST', '/api/sandbox/sessions/{scope}/resume', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 290);
+
+-- ============================================================
+-- OKF 知识资产（新表 knowledge_asset）权限点补登路由
+-- 与 ROUTE_PERMS 保持一致（DB 优先）；复用既有 knowledge:* 权限点
+-- ============================================================
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 291, '知识资产列表', 5, NULL, NULL, NULL, 31, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/knowledge/asset', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 291);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 292, '按节点查知识资产', 5, NULL, NULL, NULL, 32, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/knowledge/asset/by-tree-node/{treeNodeId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 292);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 293, '知识资产详情', 5, NULL, NULL, NULL, 33, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/knowledge/asset/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 293);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 294, '新增知识资产', 5, NULL, NULL, NULL, 34, true, 'knowledge:add', 3, true, NULL, 'POST', '/api/knowledge/asset', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 294);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 295, '编辑知识资产', 5, NULL, NULL, NULL, 35, true, 'knowledge:edit', 3, true, NULL, 'PUT', '/api/knowledge/asset/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 295);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 296, '删除知识资产', 5, NULL, NULL, NULL, 36, true, 'knowledge:delete', 3, true, NULL, 'DELETE', '/api/knowledge/asset/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 296);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 297, '知识资产绑定文件', 5, NULL, NULL, NULL, 37, true, 'knowledge:edit', 3, true, NULL, 'POST', '/api/knowledge/asset/{assetId}/attach', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 297);
+
+
+-- ============================================================
+-- LLM 厂商 / 模型 权限点补登路由（与 ROUTE_PERMS 保持一致，DB 优先）
+-- 读：knowledge:llm:list（既有，id 54）；写：knowledge:llm:edit（新增）
+-- 用户偏好（/api/llm/user-setting）只需登录，登记在 authz::AUTH_ONLY_ROUTES，不设权限点
+-- ============================================================
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 298, 'LLM 厂商列表', 5, NULL, NULL, NULL, 38, true, 'knowledge:llm:list', 3, true, NULL, 'GET', '/api/llm/providers', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 298);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 299, 'LLM 厂商详情', 5, NULL, NULL, NULL, 39, true, 'knowledge:llm:list', 3, true, NULL, 'GET', '/api/llm/providers/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 299);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 300, '新增 LLM 厂商', 5, NULL, NULL, NULL, 40, true, 'knowledge:llm:edit', 3, true, NULL, 'POST', '/api/llm/providers', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 300);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 301, '编辑 LLM 厂商', 5, NULL, NULL, NULL, 41, true, 'knowledge:llm:edit', 3, true, NULL, 'PUT', '/api/llm/providers/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 301);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 302, '删除 LLM 厂商', 5, NULL, NULL, NULL, 42, true, 'knowledge:llm:edit', 3, true, NULL, 'DELETE', '/api/llm/providers/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 302);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 303, 'LLM 拉取模型', 5, NULL, NULL, NULL, 43, true, 'knowledge:llm:edit', 3, true, NULL, 'POST', '/api/llm/providers/{providerId}/fetch-models', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 303);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 304, 'LLM 模型列表', 5, NULL, NULL, NULL, 44, true, 'knowledge:llm:list', 3, true, NULL, 'GET', '/api/llm/models', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 304);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 305, '新增 LLM 模型', 5, NULL, NULL, NULL, 45, true, 'knowledge:llm:edit', 3, true, NULL, 'POST', '/api/llm/models', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 305);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 306, '编辑 LLM 模型', 5, NULL, NULL, NULL, 46, true, 'knowledge:llm:edit', 3, true, NULL, 'PUT', '/api/llm/models/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 306);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 307, '删除 LLM 模型', 5, NULL, NULL, NULL, 47, true, 'knowledge:llm:edit', 3, true, NULL, 'DELETE', '/api/llm/models/{id}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 307);
+
+
+-- ============================================================
+-- 文件版本历史（upload_get_version_history）路由权限点
+-- ============================================================
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 308, '文件版本历史', 5, NULL, NULL, NULL, 48, true, 'upload:file:list', 3, true, NULL, 'GET', '/api/upload/versions/{fileGroupId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 308);
+
+
+
+-- ==============================
+-- 任务中心（异步解析任务，apalis 队列）
+-- 幂等：存量库启动时补齐菜单与权限点（新库由 public_initial_data.sql 负责）
+-- ==============================
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 240, '任务中心', 6, '/tasks', '/tasks/page', 'IconListCheck', 9, true, NULL, 2, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 240);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 241, '发起解析任务', 6, NULL, NULL, NULL, 20, true, 'knowledge:edit', 3, true, NULL, 'POST', '/api/tasks/parse', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 241);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 242, '任务列表', 6, NULL, NULL, NULL, 21, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/tasks', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 242);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 243, '任务进度查询', 6, NULL, NULL, NULL, 22, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/tasks/{taskId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 243);
+
+-- ==============================
+-- 任务中心菜单分配给「所有已有角色」（幂等）
+-- 新菜单默认不属于任何角色，非超管用户会看不到；这里一次性补齐。
+-- 真正的操作权限仍由 perms（knowledge:list / knowledge:edit）+ authz 中间件控制。
+-- ==============================
+INSERT INTO public.sys_role_menu (id, role_id, menu_id, created_by, created_at, deleted)
+SELECT (
+        SELECT COALESCE(MAX(id), 1000)
+        FROM public.sys_role_menu
+    ) + row_number() OVER (ORDER BY r.id, m.id),
+    r.id, m.id, 1, NOW(), 0
+FROM public.sys_role r
+CROSS JOIN public.sys_menu m
+WHERE m.id IN (240, 241, 242, 243)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.sys_role_menu rm
+      WHERE rm.role_id = r.id
+        AND rm.menu_id = m.id
+        AND (rm.deleted IS NULL OR rm.deleted = 0)
+  );
+

@@ -18,6 +18,14 @@
             "cache": false,
             "persistent": true
         },
+        "dev:web": {
+            "cache": false,
+            "persistent": true
+        },
+        "dev:server": {
+            "cache": false,
+            "persistent": true
+        },
         "test": {
             "dependsOn": [
                 "^build"

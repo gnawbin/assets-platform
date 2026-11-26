@@ -9,8 +9,8 @@
 use serde::Serialize;
 use serde_json::Value;
 use workflow::types::{
-    ExecuteWorkflowInput, PendingWorkflowTask, SaveWorkflowInput, WorkflowDefinition,
-    WorkflowExecution, WorkflowMeta,
+    ApprovalDecisionResult, ExecuteWorkflowInput, PendingWorkflowTask, SaveWorkflowInput,
+    WorkflowDefinition, WorkflowExecution, WorkflowMeta,
 };
 use workflow::WorkflowService;
 
@@ -165,8 +165,16 @@ pub async fn cancel_execution(
 pub async fn list_pending_tasks(
     workflow_id: Option<String>,
     execution_id: Option<String>,
+    current_user_id: Option<String>,
+    include_all: Option<bool>,
 ) -> Result<Vec<PendingWorkflowTask>, String> {
-    WorkflowService::list_pending_tasks(workflow_id.as_deref(), execution_id.as_deref()).await
+    WorkflowService::list_pending_tasks(
+        workflow_id.as_deref(),
+        execution_id.as_deref(),
+        Some(current_user(current_user_id)),
+        include_all.unwrap_or(false),
+    )
+    .await
 }
 
 /// 完成人工审批任务，`variables` 中的 `approved` / `comment` 会驱动 Agent 恢复。
@@ -175,7 +183,7 @@ pub async fn complete_user_task(
     task_id: String,
     variables: Option<Value>,
     current_user_id: Option<String>,
-) -> Result<(), String> {
+) -> Result<ApprovalDecisionResult, String> {
     WorkflowService::complete_user_task(
         &task_id,
         variables.unwrap_or(Value::Null),

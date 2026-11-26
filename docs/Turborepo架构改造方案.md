@@ -269,8 +269,8 @@ apps/backend/src-tauri/target
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev --webpack -p 1480",
-    "build": "next build --webpack",
+    "dev": "next dev -p 1480",
+    "build": "next build",
     "preview": "next start",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -388,11 +388,6 @@ apps/backend/src-tauri/target
 #### 4.2.2 `apps/web/next.config.js`（从根目录移入 + 修改）
 
 ```js
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -401,28 +396,14 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  webpack: (config) => {
-    config.resolve.fallback = {
-      fs: false,
-      net: false,
-      tls: false,
-      crypto: false,
-      stream: false,
-      buffer: false,
-    };
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      '@': path.resolve(__dirname, 'src'),
-      '@assets/shared': path.resolve(__dirname, '../../packages/shared/src'),
-    };
-    return config;
-  },
+  // Next.js 16 默认使用 Turbopack，不再需要自定义 webpack 配置。
+  // `@` 别名由 tsconfig.json 的 paths 负责解析。
 };
 
 export default nextConfig;
 ```
 
-**变更要点：** 添加 `@assets/shared` 别名指向 `packages/shared/src`
+**变更要点：** 使用 Next.js 16 默认的 Turbopack，移除 webpack 配置；`@` 别名由 tsconfig paths 解析。
 
 #### 4.2.3 `apps/web/tsconfig.json`（从根目录移入 + 修改）
 

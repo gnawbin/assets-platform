@@ -175,7 +175,13 @@ pub async fn switch_tenant(
         .parse()
         .map_err(|_| ApiError::bad_request("无效的租户ID"))?;
 
-    match service::tenant_service::switch_tenant(ctx.user_id, tenant_id).await {
+    // 同 `login`：`tenant_service::switch_tenant` 会写 `GLOBAL_SCHEMA`（Tauri 专用），
+    // HTTP 侧调用后立即恢复快照，避免污染桌面会话（设计文档 §16 T-3）。
+    let schema_snapshot = database::global_schema_name();
+    let result = service::tenant_service::switch_tenant(ctx.user_id, tenant_id).await;
+    database::set_global_schema(schema_snapshot);
+
+    match result {
         Ok(info) => Ok(Json(ApiResponse::success(info))),
         Err(e) => Err(ApiError::internal_error(e)),
     }

@@ -21,16 +21,26 @@
 //! ```
 
 pub mod agent;
+pub mod approval_group;
+pub mod assignee;
 pub mod bpmn;
 pub mod persistence;
 pub mod projection;
+// 沙箱执行节点：供 ServiceTask worker 复用（只依赖 sandbox 契约）
+pub mod sandbox_agent;
+pub mod sandbox_node;
 pub mod service;
 pub mod types;
 pub mod workflow_service;
 
 pub use agent::{AgentConfig, AgentGraphRunner, AgentInvocation, AgentOutcome};
+pub use approval_group::GroupRow;
+pub use types::ApprovalDecisionResult;
+pub use assignee::{engine_assignee, resolve_approval_groups, ApprovalNodeConfig};
 pub use bpmn::{BpmnCompiler, CompiledBpmn};
 pub use persistence::{PostgresCheckpointer, PostgresWorkflowPersistence};
+pub use sandbox_agent::SandboxAgentRunner;
+pub use sandbox_node::{SandboxNodeConfig, SandboxNodeOutput};
 pub use service::{TenantWorkflowRuntime, WorkflowManager};
 pub use workflow_service::WorkflowService;
 
@@ -164,5 +174,49 @@ mod tests {
             }
             other => panic!("Approve_1 应为 UserTask，实际为 {other:?}"),
         }
+    }
+
+    #[test]
+    fn compile_group_approval_uses_group_token_and_reject_branch() {
+        let definition = WorkflowDefinition {
+            name: "会签流程".to_string(),
+            nodes: vec![node(
+                "Approve_1",
+                "approval",
+                json!({
+                    "kind": "approval",
+                    "approval_type": "all",
+                    "assignee_ids": ["101", "102"],
+                    "reject_action": "terminate",
+                }),
+            )],
+            ..Default::default()
+        };
+
+        let compiled = BpmnCompiler::compile(approval_definition_xml(), &definition)
+            .expect("会签审批应可编译");
+
+        match compiled.definition.nodes.get("Approve_1") {
+            Some(engine_core::domain::BpmnElement::UserTask(assignee)) => {
+                assert_eq!(assignee, "group:Approve_1");
+            }
+            other => panic!("Approve_1 应为 UserTask，实际为 {other:?}"),
+        }
+        assert!(compiled.definition.nodes.contains_key("Decision_Approve_1"));
+        assert!(compiled.definition.nodes.contains_key("Reject_Approve_1"));
+        assert_eq!(compiled.definition.flows["Decision_Approve_1"].len(), 2);
+    }
+
+    #[test]
+    fn read_variable_path_supports_nested_and_array_values() {
+        let variables = std::collections::HashMap::from([(
+            "form".to_string(),
+            json!({ "approvers": [{ "user_id": "101" }, { "user_id": "102" }] }),
+        )]);
+        assert_eq!(
+            crate::assignee::read_variable_path(&variables, "form.approvers[1].user_id"),
+            Some(json!("102"))
+        );
+        assert_eq!(crate::assignee::read_variable_path(&variables, "missing.value"), None);
     }
 }

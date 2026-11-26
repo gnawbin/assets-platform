@@ -51,6 +51,21 @@ export interface EngineFields {
     interruptPolicy?: string;
     /** 人工审批人（写入 bpmn:UserTask assignee） */
     assignee?: string;
+    /** user / department / form */
+    assigneeMode?: string;
+    assigneeName?: string;
+    assigneeNames?: string;
+    assigneeIds?: string;
+    /** single / all / any */
+    approvalType?: string;
+    assigneeDeptId?: string;
+    assigneeDeptName?: string;
+    /** leader / members */
+    assigneeDeptScope?: string;
+    assigneeDeptIncludeChildren?: boolean;
+    assigneeFormField?: string;
+    /** terminate / continue */
+    rejectAction?: string;
     approvalTitle?: string;
     approvalDescription?: string;
     approvalVariable?: string;

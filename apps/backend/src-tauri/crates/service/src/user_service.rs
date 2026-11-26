@@ -25,10 +25,98 @@ pub struct Claims {
     /// 刷新令牌白名单主键（雪花 ID 字符串），仅 refresh 令牌携带
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jti: Option<String>,
+    /// 签发方（Phase 3 新增；历史令牌没有该字段，`None` 表示旧令牌）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
+    /// 受众（Phase 3 新增；同上）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
 }
 
-/// 登录响应（包含 JWT Token）
-#[derive(Debug, Serialize)]
+/// 默认签发方（可用 `JWT_ISSUER` 覆盖）
+pub const DEFAULT_JWT_ISSUER: &str = "assets-platform";
+/// 默认受众（可用 `JWT_AUDIENCE` 覆盖）
+pub const DEFAULT_JWT_AUDIENCE: &str = "assets-platform-api";
+
+/// 当前生效的签发方
+pub fn jwt_issuer() -> String {
+    std::env::var("JWT_ISSUER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JWT_ISSUER.to_string())
+}
+
+/// 当前生效的受众
+pub fn jwt_audience() -> String {
+    std::env::var("JWT_AUDIENCE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_JWT_AUDIENCE.to_string())
+}
+
+/// 是否强制要求 `iss` / `aud` 声明（`JWT_STRICT_ISS_AUD=true`）
+///
+/// 缺省 `false`：**存在即校验**，缺失则按历史令牌放过 —— 这样升级瞬间不会把
+/// 所有 7 天有效期内的旧令牌踢下线。等旧令牌自然过期后把该开关置为 true 即可
+/// 完成严格化（设计文档 §7.9 迁移步骤）。
+fn strict_iss_aud() -> bool {
+    matches!(
+        std::env::var("JWT_STRICT_ISS_AUD")
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on")
+    )
+}
+
+/// 纯函数版 `iss` / `aud` 校验（便于单测）
+///
+/// - 声明存在但与期望值不符 → `Err`
+/// - 声明缺失且 `strict` → `Err`；非严格模式放过（兼容历史令牌）
+pub fn check_scope(
+    issuer: Option<&str>,
+    audience: Option<&str>,
+    expected_iss: &str,
+    expected_aud: &str,
+    strict: bool,
+) -> Result<(), String> {
+    match issuer {
+        Some(value) if value != expected_iss => {
+            return Err("令牌签发方（iss）不匹配，请重新登录".to_string())
+        }
+        None if strict => return Err("令牌缺少 iss 声明，请重新登录".to_string()),
+        _ => {}
+    }
+    match audience {
+        Some(value) if value != expected_aud => {
+            return Err("令牌受众（aud）不匹配，请重新登录".to_string())
+        }
+        None if strict => return Err("令牌缺少 aud 声明，请重新登录".to_string()),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// 按当前环境配置校验令牌的 `iss` / `aud`
+pub fn check_token_scope(issuer: Option<&str>, audience: Option<&str>) -> Result<(), String> {
+    let expected_iss = jwt_issuer();
+    let expected_aud = jwt_audience();
+    check_scope(
+        issuer,
+        audience,
+        &expected_iss,
+        &expected_aud,
+        strict_iss_aud(),
+    )
+}
+
+/// 登录响应（包含 JWT Token + 完整用户信息）
+///
+/// HTTP 侧 `/api/auth/login` 与桌面命令 `login` 共用同一结构，
+/// 因此除令牌外还返回 `id`（雪花字符串）/ `tenant_id` / `available_tenants`，
+/// 前端可据此直接建立登录态并渲染租户切换器（不要另建精简 DTO，否则两套契约会漂移）。
+#[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct LoginResponse {
     #[serde(serialize_with = "database::models::i64_to_string")]
     pub id: i64,
@@ -77,6 +165,36 @@ fn jwt_secret() -> String {
     std::env::var("JWT_SECRET").unwrap_or_else(|_| "assets-platform-default-secret-key".to_string())
 }
 
+/// 构造 JWT 校验参数（service / api / tauri 三处共用，避免 `iss` / `aud` 配置漂移）
+///
+/// **必须显式设置 audience**：`jsonwebtoken` 12 的 `Validation::default()` 是
+/// `validate_aud = true` 且 `aud = None`，此时**只要令牌带 `aud` 声明就返回
+/// `InvalidAudience`**（见 `validation.rs` 的 `(TryParse::Parsed(_), None)` 分支）。
+/// 签发侧自 Phase 3 起固定写 `aud` / `iss`，因此用默认校验会让刷新令牌、
+/// 登出撤销与桌面命令全部失效。
+///
+/// 兼容说明：`jsonwebtoken` 仅在令牌**存在** `aud` / `iss` 时才比对，
+/// 历史令牌（无这两个声明）依旧放行；严格模式由
+/// [`check_token_scope`] 的 `JWT_STRICT_ISS_AUD` 控制。
+pub fn jwt_validation() -> Validation {
+    let mut validation = Validation::default();
+    validation.set_audience(&[jwt_audience()]);
+    validation.set_issuer(&[jwt_issuer()]);
+    validation
+}
+
+/// HMAC 编码密钥（`jsonwebtoken` 12 起 `from_secret` 返回 `Result`，空密钥视为配置错误）
+fn encoding_key() -> Result<EncodingKey, String> {
+    EncodingKey::from_secret(jwt_secret().as_bytes())
+        .map_err(|e| format!("JWT 密钥配置无效: {}", e))
+}
+
+/// HMAC 解码密钥（service / api / tauri 三处共用）
+pub fn decoding_key() -> Result<DecodingKey, String> {
+    DecodingKey::from_secret(jwt_secret().as_bytes())
+        .map_err(|e| format!("JWT 密钥配置无效: {}", e))
+}
+
 /// 读取有效期配置（非法值 / 非正数回落默认值）
 fn env_ttl_secs(key: &str, default: i64) -> i64 {
     std::env::var(key)
@@ -96,12 +214,8 @@ fn now_secs() -> Result<usize, String> {
 
 /// 签发 JWT（HS256）
 fn sign_claims(claims: &Claims) -> Result<String, String> {
-    encode(
-        &Header::default(),
-        claims,
-        &EncodingKey::from_secret(jwt_secret().as_bytes()),
-    )
-    .map_err(|e| format!("生成令牌失败: {}", e))
+    encode(&Header::default(), claims, &encoding_key()?)
+        .map_err(|e| format!("生成令牌失败: {}", e))
 }
 
 /// 生成 access / refresh 令牌对，并把 refresh 的 jti 写入白名单
@@ -122,6 +236,8 @@ async fn issue_token_pair(
         iat: now,
         typ: Some("access".to_string()),
         jti: None,
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let token = sign_claims(&access_claims)?;
 
@@ -133,6 +249,8 @@ async fn issue_token_pair(
         iat: now,
         typ: Some("refresh".to_string()),
         jti: Some(jti.to_string()),
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let refresh_token = sign_claims(&refresh_claims)?;
 
@@ -165,20 +283,23 @@ async fn issue_token_pair(
 /// - 已撤销的 jti 再次出现视为**令牌重放**，直接撤销整个轮换族；
 /// - 用户被禁用 / 删除后不再续期。
 pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
-    let claims = decode::<Claims>(
-        refresh_token,
-        &DecodingKey::from_secret(jwt_secret().as_bytes()),
-        &Validation::default(),
-    )
-    .map_err(|e| {
-        warn!("刷新令牌解析失败: {}", e);
-        "刷新令牌无效，请重新登录".to_string()
-    })?
-    .claims;
+    let key = decoding_key()?;
+    let claims = decode::<Claims>(refresh_token, &key, &jwt_validation())
+        .map_err(|e| {
+            warn!("刷新令牌解析失败: {}", e);
+            "刷新令牌无效，请重新登录".to_string()
+        })?
+        .claims;
 
     if claims.typ.as_deref() != Some("refresh") {
         warn!("拒绝使用非 refresh 令牌续期: sub={}", claims.sub);
         return Err("请使用刷新令牌（refresh token）".to_string());
+    }
+
+    // Phase 3：iss / aud 校验（存在即校验；JWT_STRICT_ISS_AUD=true 时强制存在）
+    if let Err(e) = check_token_scope(claims.iss.as_deref(), claims.aud.as_deref()) {
+        warn!("刷新令牌 scope 校验失败: sub={}, error={}", claims.sub, e);
+        return Err(e);
     }
 
     let jti: i64 = claims
@@ -301,6 +422,8 @@ pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
         iat: now,
         typ: Some("access".to_string()),
         jti: None,
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let token = sign_claims(&access_claims)?;
 
@@ -312,6 +435,8 @@ pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
         iat: now,
         typ: Some("refresh".to_string()),
         jti: Some(new_jti.to_string()),
+        iss: Some(jwt_issuer()),
+        aud: Some(jwt_audience()),
     };
     let new_refresh_token = sign_claims(&refresh_claims)?;
 
@@ -363,11 +488,8 @@ pub async fn refresh_tokens(refresh_token: &str) -> Result<TokenPair, String> {
 
 /// 撤销单个刷新令牌（登出；幂等：令牌非法也视为成功）
 pub async fn revoke_refresh_token(refresh_token: &str) -> Result<(), String> {
-    let Ok(decoded) = decode::<Claims>(
-        refresh_token,
-        &DecodingKey::from_secret(jwt_secret().as_bytes()),
-        &Validation::default(),
-    ) else {
+    let key = decoding_key()?;
+    let Ok(decoded) = decode::<Claims>(refresh_token, &key, &jwt_validation()) else {
         warn!("登出时刷新令牌解析失败，忽略");
         return Ok(());
     };
@@ -1061,3 +1183,160 @@ pub async fn reset_password(id: i64, new_password: &str) -> Result<(), String> {
     info!("重置用户密码成功: id={}", id);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== Phase 3：JWT iss / aud 校验 =====
+
+    #[test]
+    fn scope_accepts_matching_issuer_and_audience() {
+        assert!(check_scope(
+            Some(DEFAULT_JWT_ISSUER),
+            Some(DEFAULT_JWT_AUDIENCE),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn scope_rejects_mismatched_issuer_or_audience() {
+        let err = check_scope(
+            Some("other-issuer"),
+            Some(DEFAULT_JWT_AUDIENCE),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            false,
+        )
+        .expect_err("iss 不匹配必须拒绝");
+        assert!(err.contains("iss"));
+
+        let err = check_scope(
+            Some(DEFAULT_JWT_ISSUER),
+            Some("other-audience"),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            false,
+        )
+        .expect_err("aud 不匹配必须拒绝");
+        assert!(err.contains("aud"));
+    }
+
+    #[test]
+    fn scope_allows_legacy_tokens_unless_strict() {
+        // 历史令牌（无 iss / aud）：非严格模式放行，严格模式拒绝
+        assert!(check_scope(
+            None,
+            None,
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            false
+        )
+        .is_ok());
+        assert!(check_scope(
+            None,
+            None,
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_err());
+        // 只缺一个也按同样规则处理
+        assert!(check_scope(
+            Some(DEFAULT_JWT_ISSUER),
+            None,
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_err());
+        assert!(check_scope(
+            None,
+            Some(DEFAULT_JWT_AUDIENCE),
+            DEFAULT_JWT_ISSUER,
+            DEFAULT_JWT_AUDIENCE,
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn jwt_issuer_and_audience_have_stable_defaults() {
+        // 未配置环境变量时使用内置默认值（测试进程默认无 JWT_ISSUER / JWT_AUDIENCE）
+        if std::env::var("JWT_ISSUER").is_err() {
+            assert_eq!(jwt_issuer(), DEFAULT_JWT_ISSUER);
+        }
+        if std::env::var("JWT_AUDIENCE").is_err() {
+            assert_eq!(jwt_audience(), DEFAULT_JWT_AUDIENCE);
+        }
+    }
+
+    // ===== jsonwebtoken 12：from_secret 返回 Result + 共享校验参数 =====
+
+    /// 与签发侧同形的声明（`scope = false` 模拟历史令牌）
+    fn test_claims(typ: &str, jti: Option<&str>, scope: bool) -> Claims {
+        let now = now_secs().expect("获取时间戳应成功");
+        Claims {
+            sub: 42,
+            username: "tester".to_string(),
+            exp: now + 3600,
+            iat: now,
+            typ: Some(typ.to_string()),
+            jti: jti.map(|value| value.to_string()),
+            iss: scope.then(jwt_issuer),
+            aud: scope.then(jwt_audience),
+        }
+    }
+
+    /// 签发 → 校验闭环：带 `iss` / `aud` 的令牌必须能通过共享校验参数
+    #[test]
+    fn signed_refresh_token_round_trips_with_shared_validation() {
+        let token = sign_claims(&test_claims("refresh", Some("1"), true)).expect("签发令牌应成功");
+        let decoded = decode::<Claims>(
+            &token,
+            &decoding_key().expect("解码密钥应可构造"),
+            &jwt_validation(),
+        )
+        .expect("带 iss/aud 的令牌应通过共享校验");
+
+        assert_eq!(decoded.claims.sub, 42);
+        assert_eq!(decoded.claims.typ.as_deref(), Some("refresh"));
+        assert_eq!(decoded.claims.jti.as_deref(), Some("1"));
+    }
+
+    /// 历史令牌（无 `iss` / `aud`）在共享校验参数下仍需放行
+    #[test]
+    fn legacy_token_without_scope_still_decodes() {
+        let token =
+            sign_claims(&test_claims("access", None, false)).expect("签发历史令牌应成功");
+        assert!(
+            decode::<Claims>(
+                &token,
+                &decoding_key().expect("解码密钥应可构造"),
+                &jwt_validation(),
+            )
+            .is_ok(),
+            "历史令牌（无 iss/aud）必须继续放行"
+        );
+    }
+
+    /// 回归：`Validation::default()` 未设置 audience 时必须拒绝带 `aud` 的令牌，
+    /// 这正是刷新令牌 / 登出撤销 / 桌面命令必须使用 [`jwt_validation`] 的原因。
+    #[test]
+    fn default_validation_rejects_tokens_with_audience() {
+        let token = sign_claims(&test_claims("refresh", Some("2"), true)).expect("签发令牌应成功");
+        assert!(
+            decode::<Claims>(
+                &token,
+                &decoding_key().expect("解码密钥应可构造"),
+                &Validation::default(),
+            )
+            .is_err(),
+            "未设置 audience 的默认校验必须拒绝带 aud 的令牌"
+        );
+    }
+}
+

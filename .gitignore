@@ -24,3 +24,4 @@ apps/doc-parser/deploy/doc-parser.env
 .ra-target
 package-lock.yaml
 output.log
+apps/*/storybook-static/

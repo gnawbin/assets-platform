@@ -1,0 +1,52 @@
+# 运维采集：只读发现（资产采集）
+#
+# 最低 K8s 版本：1.24（本仓 k8s-openapi 0.29 / v1_33 口径）
+# 自检：
+#   kubectl auth can-i list pods --as=system:serviceaccount:ops-platform:ops-discovery -A
+#   kubectl auth can-i get secrets --as=system:serviceaccount:ops-platform:ops-discovery -A
+# 说明：Secret 只授权 metadata 读取（get/list 返回的对象仍需在客户端丢弃 data）。
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ops-discovery
+  namespace: ops-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ops-discovery-readonly
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - nodes
+      - namespaces
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - secrets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-discovery-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ops-discovery-readonly
+subjects:
+  - kind: ServiceAccount
+    name: ops-discovery
+    namespace: ops-platform

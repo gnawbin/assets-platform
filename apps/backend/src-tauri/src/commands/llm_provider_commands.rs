@@ -27,33 +27,17 @@ pub async fn create_llm_provider(
     isLocal: Option<bool>,
     currentUserId: Option<String>,
 ) -> Result<LlmProvider, String> {
-    // 加密 API Key
-    let encrypted_key = match &apiKey {
-        Some(key) if !key.is_empty() => match utils::crypto::encrypt_api_key(key) {
-            Ok(ek) => Some(ek),
-            Err(_) => apiKey.clone(),
-        },
-        _ => apiKey.clone(),
-    };
-
     let user_id = currentUserId.and_then(|id| id.parse().ok());
 
-    let provider = LlmProvider {
-        id: 0,
-        provider_code: providerCode,
-        provider_name: providerName,
-        base_url: baseUrl,
-        api_key: encrypted_key,
-        secret_key: None,
-        extra_config: None,
+    let provider = llm_provider_service::build_provider_entity(
+        providerCode,
+        providerName,
+        baseUrl,
+        apiKey,
         weight,
-        is_local: isLocal.unwrap_or(false),
-        enable: true,
-        created_by: user_id,
-        created_at: None,
-        updated_at: None,
-        deleted: 0,
-    };
+        isLocal,
+        user_id,
+    );
 
     llm_provider_service::create_provider(&provider).await
 }

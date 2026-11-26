@@ -38,12 +38,27 @@ export function getRegistrations(status?: number) {
     return api.get<RegisterResponse[]>('get_registrations', { status });
 }
 
-// 审核通过注册申请
-export function approveRegistration(id: string, approve_by: string, tenant_id: string, approve_remark?: string) {
-    return api.post<RegisterResponse>('approve_registration', { id, approveBy: approve_by, tenantId: tenant_id, approveRemark: approve_remark });
+/**
+ * 审核通过注册申请
+ *
+ * 后端 `ApproveRequest` 为 `{ tenant_id, approve_remark }`，审核人取自登录态 token。
+ */
+export function approveRegistration(id: string, tenantId: string, approveRemark?: string) {
+    return api.post<RegisterResponse>('approve_registration', {
+        id,
+        tenant_id: tenantId,
+        approve_remark: approveRemark,
+    });
 }
 
-// 驳回注册申请
-export function rejectRegistration(id: string, approve_by: string, approve_remark?: string) {
-    return api.post<RegisterResponse>('reject_registration', { id, approveBy: approve_by, approveRemark: approve_remark });
+/**
+ * 驳回注册申请
+ *
+ * 后端 `RejectRequest` 为 `{ approve_remark }`，审核人取自登录态 token。
+ */
+export function rejectRegistration(id: string, approveRemark?: string) {
+    return api.post<RegisterResponse>('reject_registration', {
+        id,
+        approve_remark: approveRemark,
+    });
 }

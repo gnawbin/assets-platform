@@ -111,15 +111,12 @@ pub async fn delete_user(
 /// 获取当前登录用户信息（从 JWT token 解析用户ID）
 #[tauri::command]
 pub async fn get_current_user(token: String) -> Result<UserResponse, String> {
-    use jsonwebtoken::{decode, DecodingKey, Validation};
-
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "assets-platform-default-secret-key".to_string());
+    use jsonwebtoken::decode;
 
     let token_data = decode::<service::user_service::Claims>(
         &token,
-        &DecodingKey::from_secret(jwt_secret.as_bytes()),
-        &Validation::default(),
+        &service::user_service::decoding_key()?,
+        &service::user_service::jwt_validation(),
     )
     .map_err(|e| format!("Token 验证失败: {}", e))?;
 

@@ -1,5 +1,8 @@
 pub mod assets_categories_service;
 pub mod assets_service;
+pub mod api_key_service;
+pub mod container_exec_service;
+pub mod container_probe_service;
 pub mod conversation_service;
 pub mod department_service;
 pub mod doc_parser;
@@ -7,12 +10,21 @@ pub mod knowledge_asset_service;
 pub mod knowledge_service;
 pub mod llm_factory;
 pub mod llm_gateway_service;
+// LLM 调用计量（沙箱内 Agent 经内部端点调用模型网关）
+pub mod llm_call_record;
 pub mod llm_provider_service;
 pub mod numbering_service;
+pub mod oauth_service;
 pub mod ops_service;
 pub mod process_service;
 pub mod rag_service;
 pub mod register_service;
 pub mod role_service;
+pub mod sandbox_service;
+// OCSF 安全事件 → public.sys_oper_log（上游文档 §6.8 通道 2）
+pub mod sandbox_audit;
+pub mod session_service;
+// SSH 终端：主机配置 CRUD + 指纹探测 + 会话 hub + 空闲回收
+pub mod ssh_service;
 pub mod tenant_service;
 pub mod user_service;

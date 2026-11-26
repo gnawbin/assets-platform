@@ -112,10 +112,14 @@ pub async fn get_connection(
     )
 )]
 pub async fn create_connection(
-    Extension(ctx): Extension<UserContext>,
+    user_ctx: Option<Extension<UserContext>>,
     Json(input): Json<OpsConnectionInput>,
 ) -> Result<Json<ApiResponse<OpsConnectionView>>, ApiError> {
-    match ops_service::create_connection(input, Some(ctx.user_id)).await {
+    // 服务身份（API Key）没有用户上下文（无 `user_id`）：`created_by` 记 NULL，
+    // 而不是因缺少 `Extension<UserContext>` 直接 500（设计文档 §6.6「采集上报」模板
+    // 本来就允许 API Key 调用运维写接口）。
+    let user_id = user_ctx.map(|Extension(ctx)| ctx.user_id);
+    match ops_service::create_connection(input, user_id).await {
         Ok(view) => Ok(Json(ApiResponse::success(view))),
         Err(err) => Err(ApiError::bad_request(err)),
     }
@@ -136,12 +140,14 @@ pub async fn create_connection(
     )
 )]
 pub async fn update_connection(
-    Extension(ctx): Extension<UserContext>,
+    user_ctx: Option<Extension<UserContext>>,
     Path(id): Path<String>,
     Json(input): Json<OpsConnectionInput>,
 ) -> Result<Json<ApiResponse<OpsConnectionView>>, ApiError> {
     let id = parse_id(&id)?;
-    match ops_service::update_connection(id, input, Some(ctx.user_id)).await {
+    // 同上：API Key 场景 `updated_by` 为 NULL
+    let user_id = user_ctx.map(|Extension(ctx)| ctx.user_id);
+    match ops_service::update_connection(id, input, user_id).await {
         Ok(view) => Ok(Json(ApiResponse::success(view))),
         Err(err) => Err(ApiError::bad_request(err)),
     }
@@ -275,12 +281,14 @@ pub async fn list_links(
     )
 )]
 pub async fn bind_link(
-    Extension(ctx): Extension<UserContext>,
+    user_ctx: Option<Extension<UserContext>>,
     Path(link_id): Path<String>,
     Json(req): Json<BindRequest>,
 ) -> Result<Json<ApiResponse<OpsResourceLinkView>>, ApiError> {
     let link_id = parse_id(&link_id)?;
-    match ops_service::bind_link(link_id, req.asset_id, Some(ctx.user_id)).await {
+    // `ops:link:bind` 在「采集上报」模板内，API Key 必须能用：无用户上下文时 `updated_by` 记 NULL
+    let user_id = user_ctx.map(|Extension(ctx)| ctx.user_id);
+    match ops_service::bind_link(link_id, req.asset_id, user_id).await {
         Ok(view) => Ok(Json(ApiResponse::success(view))),
         Err(err) => Err(ApiError::bad_request(err)),
     }

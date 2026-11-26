@@ -1,0 +1,34 @@
+[package]
+description = "异步任务队列（apalis）：视频 / 音频 / 文档解析等耗时任务的契约与装配"
+edition = "2024"
+name = "task-queue"
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+# 所有依赖版本均在根 Cargo.toml 的 [workspace.dependencies] 中定义，禁止在此写 version。
+#
+# P1：任务契约（job）、入队（producer）、worker 装配与解析执行（worker）。
+# P2：定时维护（maintenance：票据收敛 + 队列指标，apalis-cron + 咨询锁互斥）。
+# P3：业务进度票据（ticket：task_ticket 读写，供 HTTP 进度查询）。
+# 依赖方向：task-queue → parser / service / storage / database；
+# 禁止反向依赖 api / gateway / bootstrap（见 docs/apalis异步任务队列开发文档.md §5.3）。
+[dependencies]
+apalis.workspace = true
+# 定时维护（Vacuum 语义的替代实现：票据收敛 + Metrics 打点）
+apalis-cron.workspace = true
+apalis-postgres.workspace = true
+cron.workspace = true
+database.workspace = true
+parser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+service.workspace = true
+sqlx.workspace = true
+storage.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+

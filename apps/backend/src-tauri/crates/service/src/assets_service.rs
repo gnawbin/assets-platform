@@ -25,7 +25,17 @@ pub struct HardwareAssetView {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
+    /// 使用部门 ID 集合（BIGINT[]，序列化为字符串数组，避免前端 JS 精度丢失）
+    #[serde(
+        serialize_with = "database::models::opt_vec_i64_to_string",
+        deserialize_with = "database::models::opt_vec_i64_from_string"
+    )]
     pub department_ids: Option<Vec<i64>>,
+    /// 使用人 ID 集合（同上）
+    #[serde(
+        serialize_with = "database::models::opt_vec_i64_to_string",
+        deserialize_with = "database::models::opt_vec_i64_from_string"
+    )]
     pub user_ids: Option<Vec<i64>>,
     pub status: i16,
     pub purchase_date: Option<String>,
@@ -85,7 +95,17 @@ pub struct IntangibleAssetView {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
+    /// 使用部门 ID 集合（BIGINT[]，序列化为字符串数组，避免前端 JS 精度丢失）
+    #[serde(
+        serialize_with = "database::models::opt_vec_i64_to_string",
+        deserialize_with = "database::models::opt_vec_i64_from_string"
+    )]
     pub department_ids: Option<Vec<i64>>,
+    /// 使用人 ID 集合（同上）
+    #[serde(
+        serialize_with = "database::models::opt_vec_i64_to_string",
+        deserialize_with = "database::models::opt_vec_i64_from_string"
+    )]
     pub user_ids: Option<Vec<i64>>,
     pub status: i16,
     pub purchase_date: Option<String>,
@@ -144,7 +164,11 @@ pub struct HardwareAssetInput {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
+    /// 使用部门 ID 集合（接受字符串数组 / 数字数组 / null）
+    #[serde(deserialize_with = "database::models::opt_vec_i64_from_string")]
     pub department_ids: Option<Vec<i64>>,
+    /// 使用人 ID 集合（同上）
+    #[serde(deserialize_with = "database::models::opt_vec_i64_from_string")]
     pub user_ids: Option<Vec<i64>>,
     pub status: Option<i16>,
     pub purchase_date: Option<String>,
@@ -174,7 +198,11 @@ pub struct IntangibleAssetInput {
     pub asset_name: String,
     pub manufacturer: Option<String>,
     pub model: Option<String>,
+    /// 使用部门 ID 集合（接受字符串数组 / 数字数组 / null）
+    #[serde(deserialize_with = "database::models::opt_vec_i64_from_string")]
     pub department_ids: Option<Vec<i64>>,
+    /// 使用人 ID 集合（同上）
+    #[serde(deserialize_with = "database::models::opt_vec_i64_from_string")]
     pub user_ids: Option<Vec<i64>>,
     pub status: Option<i16>,
     pub purchase_date: Option<String>,

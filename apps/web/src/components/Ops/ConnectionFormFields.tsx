@@ -49,6 +49,8 @@ export interface OpsFormState {
     maxItems: number;
     pollIntervalSecs: number;
     enabled: boolean;
+    /** 是否允许容器终端（默认关闭） */
+    execEnabled: boolean;
 }
 
 export function createEmptyForm(provider: OpsProvider = 'docker'): OpsFormState {
@@ -76,6 +78,7 @@ export function createEmptyForm(provider: OpsProvider = 'docker'): OpsFormState 
         maxItems: 20000,
         pollIntervalSecs: 300,
         enabled: true,
+        execEnabled: false,
     };
 }
 
@@ -93,6 +96,7 @@ export function viewToForm(view: OpsConnectionView): OpsFormState {
         maxItems: view.max_items,
         pollIntervalSecs: view.poll_interval_secs,
         enabled: view.enabled,
+        execEnabled: view.exec_enabled,
     };
 }
 
@@ -145,6 +149,7 @@ export function formToInput(form: OpsFormState): OpsConnectionInput {
         max_items: form.maxItems,
         poll_interval_secs: form.pollIntervalSecs,
         enabled: form.enabled,
+        exec_enabled: form.execEnabled,
     };
 }
 
@@ -273,6 +278,12 @@ export default function ConnectionFormFields({ value, onChange, providerOptions,
                 onChange={(next) => set({ pollIntervalSecs: Number(next) || 300 })} />
             <Switch label="启用该连接" checked={value.enabled}
                 onChange={(event) => set({ enabled: event.currentTarget.checked })} />
+            <Switch
+                label="允许容器终端（exec）"
+                description="默认关闭；还需服务端 OPS_CONTAINER_EXEC_ENABLED=true 与 ops:terminal:exec 权限点，且明文 TCP(2375) 端点始终禁止"
+                checked={value.execEnabled}
+                onChange={(event) => set({ execEnabled: event.currentTarget.checked })}
+            />
         </Stack>
     );
 }

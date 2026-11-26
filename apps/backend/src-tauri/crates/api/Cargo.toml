@@ -7,6 +7,10 @@ version = "0.1.0"
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+# `client_secret_basic` 解析（RFC 6749 §2.3.1）
+base64.workspace = true
+# 鉴权缓存（路由→权限点 / 用户授权快照，设计文档 §6.8）
+dashmap.workspace = true
 database.workspace = true
 engine.workspace = true
 futures.workspace = true
@@ -14,10 +18,23 @@ jsonwebtoken.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 service.workspace = true
+# 异步任务队列（P3）：解析入队、进度查询、解析结果落库钩子
+task-queue.workspace = true
+# ParseResultSink 的入参类型（parser::ParseResult）
+parser.workspace = true
+# 沙箱路由的响应类型（SandboxHandle / ExecResult / FileEntry / HealthInfo）
+sandbox.workspace = true
 sqlx.workspace = true
 storage.workspace = true
 tokio.workspace = true
+workflow.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
+# 运维终端：WS 帧转发用的 SshEvent
+remote-shell.workspace = true
+# 凭证前缀分流（utils::api_key::is_api_key_token / parse_api_key_prefix）
+utils.workspace = true
+# WS 一次性票据（uuid v4）
+uuid.workspace = true
 # OpenAPI 标注（#[utoipa::path] / ToSchema）：规范由 crates/apidoc 汇总并对外提供
 utoipa.workspace = true

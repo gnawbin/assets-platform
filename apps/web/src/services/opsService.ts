@@ -6,6 +6,7 @@
  */
 
 import { api } from '@/utils/api';
+import { getApiOrigin } from '@/utils/apiBase';
 
 // ======================== 类型定义 ========================
 
@@ -40,6 +41,8 @@ export interface OpsConnectionInput {
     max_items?: number;
     poll_interval_secs?: number;
     enabled?: boolean;
+    /** 是否允许容器终端（默认 false） */
+    exec_enabled?: boolean;
 }
 
 /** 连接视图（不含任何凭证明文） */
@@ -58,6 +61,8 @@ export interface OpsConnectionView {
     max_items: number;
     poll_interval_secs: number;
     enabled: boolean;
+    /** 是否允许容器终端（默认关闭） */
+    exec_enabled: boolean;
     tier: string;
     risk_hints: string[];
     last_collect_at: string | null;
@@ -138,6 +143,99 @@ export interface OpsProviderOption {
     auth_types: OpsAuthTypeOption[];
 }
 
+// ======================== 容器日志 / 性能 / 终端 ========================
+
+export interface OpsContainerLogLine {
+    stream: 'stdout' | 'stderr' | 'stdin' | 'console' | string;
+    message: string;
+}
+
+export interface OpsContainerLogsView {
+    container: string;
+    lines: OpsContainerLogLine[];
+    bytes: number;
+    truncated: boolean;
+}
+
+export interface OpsContainerStatsView {
+    container: string;
+    read_at_ms: number;
+    cpu_percent: number | null;
+    mem_used_bytes: number;
+    mem_limit_bytes: number;
+    mem_percent: number;
+    net_rx_bytes: number;
+    net_tx_bytes: number;
+    pids: number | null;
+    blkio_read_bytes: number | null;
+    blkio_write_bytes: number | null;
+}
+
+export interface OpsPodLogsView {
+    namespace: string;
+    pod: string;
+    container: string | null;
+    containers: string[];
+    previous: boolean;
+    lines: string[];
+    bytes: number;
+    truncated: boolean;
+}
+
+export interface OpsPodContainerMetrics {
+    name: string;
+    cpu_nanocores: number;
+    memory_bytes: number;
+}
+
+export interface OpsPodMetricsView {
+    namespace: string;
+    pod: string;
+    containers: string[];
+    window: string | null;
+    timestamp: string | null;
+    container_metrics: OpsPodContainerMetrics[];
+    cpu_nanocores: number;
+    memory_bytes: number;
+}
+
+/** 终端目标（Docker 与 K8s 共用一套会话 / WS） */
+export type OpsTerminalTarget =
+    | { kind: 'docker'; container: string }
+    | { kind: 'k8s'; namespace: string; pod: string; container?: string | null };
+
+/** 开会话响应（票据用于随后的 WS 升级） */
+export interface OpsTerminalSessionTicket {
+    session_id: string;
+    ticket: string;
+    expires_in: number;
+}
+
+/** 从 resource_uid 解析出的目标 */
+export type OpsResourceTarget =
+    | { provider: 'docker'; endpoint: string; containerId: string }
+    | { provider: 'k8s'; endpoint: string; namespace: string; pod: string };
+
+/**
+ * 解析 `resource_uid`（规则与后端 `ResourceKey::uid()` 完全一致）
+ *
+ * - `docker://<endpoint>/container/<containerId>`
+ * - `k8s://<endpoint>/pod/<namespace>/<pod>`
+ *
+ * endpoint 已去 scheme（如 `local` / `10.0.0.5:2375`）。
+ */
+export function parseOpsResourceTarget(uid: string): OpsResourceTarget | null {
+    const docker = /^docker:\/\/([^/]+)\/container\/(.+)$/.exec(uid);
+    if (docker) {
+        return { provider: 'docker', endpoint: docker[1], containerId: docker[2] };
+    }
+    const k8s = /^k8s:\/\/([^/]+)\/pod\/([^/]+)\/(.+)$/.exec(uid);
+    if (k8s) {
+        return { provider: 'k8s', endpoint: k8s[1], namespace: k8s[2], pod: k8s[3] };
+    }
+    return null;
+}
+
 // ======================== 服务方法 ========================
 
 /** 来源 / 认证方式下拉数据 */
@@ -155,14 +253,14 @@ export function getOpsConnection(id: string): Promise<OpsConnectionView> {
     return api.get<OpsConnectionView>('get_ops_connection', { id });
 }
 
-/** 新建连接 */
-export function createOpsConnection(input: OpsConnectionInput, currentUserId?: string) {
-    return api.post<OpsConnectionView>('create_ops_connection', { input, currentUserId });
+/** 新建连接（后端 DTO 为扁平 snake_case，创建人取自登录态 token） */
+export function createOpsConnection(input: OpsConnectionInput) {
+    return api.post<OpsConnectionView>('create_ops_connection', { ...input });
 }
 
-/** 更新连接（不传 auth 表示沿用已存凭证） */
-export function updateOpsConnection(id: string, input: OpsConnectionInput, currentUserId?: string) {
-    return api.put<OpsConnectionView>('update_ops_connection', { id, input, currentUserId });
+/** 更新连接（id 进路径；不传 auth 表示沿用已存凭证） */
+export function updateOpsConnection(id: string, input: OpsConnectionInput) {
+    return api.put<OpsConnectionView>('update_ops_connection', { ...input, id });
 }
 
 /** 删除连接（软删） */
@@ -170,9 +268,9 @@ export function deleteOpsConnection(id: string): Promise<void> {
     return api.delete<void>('delete_ops_connection', { id });
 }
 
-/** 草稿探测（不落库） */
+/** 草稿探测（不落库；请求体即扁平输入） */
 export function testOpsConnectionDraft(input: OpsConnectionInput): Promise<OpsHealthView> {
-    return api.post<OpsHealthView>('test_ops_connection_draft', { input });
+    return api.post<OpsHealthView>('test_ops_connection_draft', { ...input });
 }
 
 /** 已存连接探测 */
@@ -192,7 +290,102 @@ export function getOpsLinks(connectionId?: string | null): Promise<OpsResourceLi
         : api.get<OpsResourceLinkView[]>('get_ops_links');
 }
 
-/** 把观测资源归档到已有资产 */
-export function bindOpsLink(linkId: string, assetId: string, currentUserId?: string) {
-    return api.post<OpsResourceLinkView>('bind_ops_link', { linkId, assetId, currentUserId });
+/** 把观测资源归档到已有资产（linkId 走路径，请求体仅 `asset_id`；操作人取自登录态 token） */
+export function bindOpsLink(linkId: string, assetId: string) {
+    return api.post<OpsResourceLinkView>('bind_ops_link', { linkId, asset_id: assetId });
+}
+
+// ======================== 容器日志 / 性能 ========================
+
+/** Docker 容器日志 */
+export function getOpsContainerLogs(
+    connectionId: string,
+    container: string,
+    lines?: number,
+    timestamps?: boolean,
+): Promise<OpsContainerLogsView> {
+    return api.get<OpsContainerLogsView>('get_ops_container_logs', {
+        connectionId,
+        container,
+        lines,
+        timestamps,
+    });
+}
+
+/** Docker 容器性能 */
+export function getOpsContainerStats(
+    connectionId: string,
+    container: string,
+    twoSamples?: boolean,
+): Promise<OpsContainerStatsView> {
+    return api.get<OpsContainerStatsView>('get_ops_container_stats', {
+        connectionId,
+        container,
+        twoSamples,
+    });
+}
+
+/** K8s Pod 日志 */
+export function getOpsPodLogs(
+    connectionId: string,
+    namespace: string,
+    pod: string,
+    container?: string | null,
+    previous?: boolean,
+    lines?: number,
+    timestamps?: boolean,
+): Promise<OpsPodLogsView> {
+    return api.get<OpsPodLogsView>('get_ops_pod_logs', {
+        connectionId,
+        namespace,
+        pod,
+        container,
+        previous,
+        lines,
+        timestamps,
+    });
+}
+
+/** K8s Pod 指标 */
+export function getOpsPodMetrics(
+    connectionId: string,
+    namespace: string,
+    pod: string,
+): Promise<OpsPodMetricsView> {
+    return api.get<OpsPodMetricsView>('get_ops_pod_metrics', {
+        connectionId,
+        namespace,
+        pod,
+    });
+}
+
+// ======================== 容器终端 ========================
+
+/** 打开终端会话，返回 `sessionId + ticket` */
+export function openOpsTerminalSession(
+    connectionId: string,
+    target: OpsTerminalTarget,
+    shell?: string | null,
+    cols?: number,
+    rows?: number,
+): Promise<OpsTerminalSessionTicket> {
+    return api.post<OpsTerminalSessionTicket>('open_ops_terminal_session', {
+        connectionId,
+        target,
+        shell,
+        cols,
+        rows,
+    });
+}
+
+/** 关闭会话（幂等） */
+export function closeOpsTerminalSession(sessionId: string): Promise<void> {
+    return api.delete<void>('close_ops_terminal_session', { sessionId });
+}
+
+/** 拼装 WS 地址（票据走查询串，绝不把 JWT 放 URL） */
+export function buildOpsTerminalWsUrl(sessionId: string, ticket: string): string {
+    const origin = getApiOrigin() ?? window.location.origin;
+    const wsOrigin = origin.replace(/^http/, 'ws');
+    return `${wsOrigin}/api/ops/terminal/sessions/${encodeURIComponent(sessionId)}/ws?ticket=${encodeURIComponent(ticket)}`;
 }

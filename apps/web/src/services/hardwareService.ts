@@ -17,8 +17,10 @@ export interface HardwareAssetView {
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: string | null;
-    user_id: string | null;
+    /** 使用部门 ID 集合（后端 BIGINT[]，按字符串数组传输以免雪花 ID 精度丢失） */
+    department_ids: string[] | null;
+    /** 使用人 ID 集合 */
+    user_ids: string[] | null;
     status: number;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -37,7 +39,6 @@ export interface HardwareAssetView {
     mac_address: string | null;
     location: string | null;
     hardware_config: string | null;
-    use_user_id: string | null;
     use_start_date: string | null;
     maintenance_vendor: string | null;
     maintenance_type: string | null;
@@ -50,8 +51,10 @@ export interface HardwareAssetInput {
     asset_name: string;
     manufacturer: string | null;
     model: string | null;
-    department_id: string | null;
-    user_id: string | null;
+    /** 使用部门 ID 集合 */
+    department_ids: string[] | null;
+    /** 使用人 ID 集合 */
+    user_ids: string[] | null;
     status: number | null;
     purchase_date: string | null;
     purchase_price: number | null;
@@ -63,7 +66,6 @@ export interface HardwareAssetInput {
     mac_address: string | null;
     location: string | null;
     hardware_config: string | null;
-    use_user_id: string | null;
     use_start_date: string | null;
     maintenance_vendor: string | null;
     maintenance_type: string | null;
@@ -89,14 +91,19 @@ export function getHardwareAssets() {
     return api.get<HardwareAssetView[]>('get_hardware_assets');
 }
 
-/** 新增固定资产 */
+/**
+ * 新增固定资产
+ *
+ * 后端 `POST /api/assets/hardware` 直接反序列化 `HardwareAssetInput`（扁平结构），
+ * 不再包一层 `input`；`department_ids` / `user_ids` 为字符串数组。
+ */
 export function insertHardwareAsset(params: InsertHardwareAssetParams) {
-    return api.post<string>('insert_hardware_asset', { input: params.input });
+    return api.post<HardwareAssetView>('insert_hardware_asset', { ...params.input });
 }
 
-/** 更新固定资产 */
+/** 更新固定资产（id 进路径，其余字段进 body） */
 export function updateHardwareAsset(params: UpdateHardwareAssetParams) {
-    return api.put<string>('update_hardware_asset', { id: params.id, input: params.input });
+    return api.put<HardwareAssetView>('update_hardware_asset', { id: params.id, ...params.input });
 }
 
 /** 删除固定资产（软删除） */

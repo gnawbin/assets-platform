@@ -23,6 +23,8 @@ pub const NODE_TYPE_OUTPUT: &str = "output";
 pub const TOPIC_AGENT: &str = "ai-agent-task";
 /// Agent 审批通过后的恢复服务任务 topic。
 pub const TOPIC_AGENT_RESUME: &str = "ai-agent-resume";
+/// 多用户审批在引擎侧使用的占位 assignee 前缀。
+pub const GROUP_TOKEN_PREFIX: &str = "group:";
 
 /// 工作流节点位置。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -184,6 +186,53 @@ pub struct PendingWorkflowTask {
     pub workflow_name: Option<String>,
     #[serde(default)]
     pub interrupt_payload: Option<Value>,
+    #[serde(default)]
+    pub assignee_name: Option<String>,
+    #[serde(default)]
+    pub approval_type: Option<String>,
+    #[serde(default)]
+    pub member_count: Option<i32>,
+    #[serde(default)]
+    pub approved_count: Option<i32>,
+    #[serde(default)]
+    pub rejected_count: Option<i32>,
+    #[serde(default)]
+    pub has_voted: Option<bool>,
+}
+
+/// 审批组成员。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalMember {
+    pub user_id: String,
+    pub user_name: String,
+}
+
+/// 执行启动时解析出的审批组计划。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalGroupPlan {
+    #[serde(default = "default_approval_type")]
+    pub approval_type: String,
+    #[serde(default = "default_reject_action")]
+    pub reject_action: String,
+    #[serde(default)]
+    pub members: Vec<ApprovalMember>,
+}
+
+fn default_approval_type() -> String {
+    "single".to_string()
+}
+
+fn default_reject_action() -> String {
+    "terminate".to_string()
+}
+
+/// 审批投票结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalDecisionResult {
+    pub status: String,
+    pub approved_count: i32,
+    pub rejected_count: i32,
+    pub member_count: i32,
 }
 
 /// 单个节点的配置快照。运行中实例只依赖该快照，不受最新模板编辑影响。
@@ -202,6 +251,8 @@ pub struct ExecutionSnapshot {
     pub execution_id: String,
     pub workflow_name: String,
     pub node_configs: HashMap<String, NodeSnapshot>,
+    #[serde(default)]
+    pub approval_groups: HashMap<String, ApprovalGroupPlan>,
 }
 
 impl ExecutionSnapshot {
@@ -230,7 +281,17 @@ impl ExecutionSnapshot {
             execution_id: execution_id.into(),
             workflow_name: workflow_name.into(),
             node_configs,
+            approval_groups: HashMap::new(),
         }
+    }
+
+    /// 附加审批组计划。
+    pub fn with_approval_groups(
+        mut self,
+        approval_groups: HashMap<String, ApprovalGroupPlan>,
+    ) -> Self {
+        self.approval_groups = approval_groups;
+        self
     }
 
     /// 从流程变量中读取快照。

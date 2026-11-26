@@ -33,11 +33,11 @@ export interface User {
 
 // ======================== 服务方法 ========================
 
-/** 获取用户列表 */
+/** 获取用户列表（后端 query 参数为 tenant_id / keyword） */
 export function getUsers(tenantId?: string | null, keyword?: string) {
     const args: Record<string, unknown> = {};
     if (tenantId !== undefined && tenantId !== null) {
-        args.tenantId = tenantId;
+        args.tenant_id = tenantId;
     }
     if (keyword) {
         args.keyword = keyword;
@@ -46,47 +46,77 @@ export function getUsers(tenantId?: string | null, keyword?: string) {
 }
 
 
-/** 新增用户 */
+/**
+ * 新增用户
+ *
+ * 后端 `CreateUserRequest` 为扁平 snake_case（username / password / real_name 必填）；
+ * 雪花 ID 一律按字符串传输，避免 `Number()` 造成的精度丢失。
+ */
 export function insertUser(params: {
     username: string;
     password: string;
     realName: string;
     email: string | null;
     phone: string | null;
-    departmentId: number | null;
+    departmentId: string | null;
     status: number;
     nickname: string | null;
-    personId: null;
+    personId: string | null;
     personCode: string | null;
-    superUserId: null;
+    superUserId: string | null;
     tenantId: string | null;
 }) {
-    return api.post<string>('insert_user', params);
+    return api.post<User>('insert_user', {
+        username: params.username,
+        password: params.password,
+        real_name: params.realName,
+        email: params.email,
+        phone: params.phone,
+        department_id: params.departmentId,
+        status: params.status,
+        nickname: params.nickname,
+        person_id: params.personId,
+        person_code: params.personCode,
+        super_user_id: params.superUserId,
+        tenant_id: params.tenantId,
+    });
 }
 
-/** 更新用户 */
+/** 更新用户（id 进路径，其余字段 snake_case） */
 export function updateUser(params: {
     id: string;
     username: string;
     realName: string;
     email: string | null;
     phone: string | null;
-    departmentId: number | null;
+    departmentId: string | null;
     status: number;
     nickname: string | null;
-    personId: null;
+    personId: string | null;
     personCode: string | null;
-    superUserId: null;
+    superUserId: string | null;
 }) {
-    return api.put<string>('update_user', params);
+    return api.put<User>('update_user', {
+        id: params.id,
+        username: params.username,
+        real_name: params.realName,
+        email: params.email,
+        phone: params.phone,
+        department_id: params.departmentId,
+        status: params.status,
+        nickname: params.nickname,
+        person_id: params.personId,
+        person_code: params.personCode,
+        super_user_id: params.superUserId,
+    });
 }
 
-/** 删除用户（软删除） */
-export function deleteUser(id: string, currentUserId: string, isSuperAdmin: boolean) {
-    return api.delete<string>('delete_user', { id, currentUserId, isSuperAdmin });
+/** 删除用户（软删除，操作人取自登录态 token） */
+export function deleteUser(id: string) {
+    return api.delete<null>('delete_user', { id });
 }
 
-/** 重置密码 */
+/** 重置密码（id 进路径，body 为 new_password） */
 export function resetPassword(id: string, newPassword: string) {
-    return api.post<string>('reset_password', { id, newPassword });
+    return api.post<null>('reset_password', { id, new_password: newPassword });
 }

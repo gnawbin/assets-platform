@@ -84,3 +84,56 @@ CREATE INDEX IF NOT EXISTS idx_asset_ops_link_asset
 
 CREATE INDEX IF NOT EXISTS idx_asset_ops_link_seen
     ON {schema}.asset_ops_link(last_seen_at DESC);
+
+-- =====================
+-- 3. ops_connection.exec_enabled（容器终端连接级开关，默认关闭）
+-- =====================
+ALTER TABLE {schema}.ops_connection
+    ADD COLUMN IF NOT EXISTS exec_enabled SMALLINT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN {schema}.ops_connection.exec_enabled IS '是否允许容器终端（0=禁止 1=允许；默认 0，需同时满足环境开关与 ops:terminal:exec 权限点）';
+
+-- =====================
+-- 4. ops_terminal_session 容器终端会话审计（Docker + K8s 共用）
+-- =====================
+CREATE TABLE IF NOT EXISTS {schema}.ops_terminal_session (
+    id             BIGINT PRIMARY KEY,
+    provider       VARCHAR(16) NOT NULL,
+    connection_id  BIGINT NOT NULL,
+    target_kind    VARCHAR(16) NOT NULL,
+    container_uid  VARCHAR(255),
+    namespace      VARCHAR(255),
+    pod_name       VARCHAR(255),
+    container_name VARCHAR(255),
+    shell          VARCHAR(64),
+    user_id        BIGINT NOT NULL,
+    state          VARCHAR(16) NOT NULL,
+    client_ip      VARCHAR(64),
+    started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at       TIMESTAMPTZ,
+    bytes_in       BIGINT NOT NULL DEFAULT 0,
+    bytes_out      BIGINT NOT NULL DEFAULT 0,
+    exit_code      INT,
+    error          TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE {schema}.ops_terminal_session IS '容器终端会话审计（谁 / 何时 / 哪个连接与容器 / shell / 字节数 / 退出码）；真正的 exec 会话只存在于持有它的进程内';
+COMMENT ON COLUMN {schema}.ops_terminal_session.provider IS '来源：docker / k8s';
+COMMENT ON COLUMN {schema}.ops_terminal_session.connection_id IS '软引用 ops_connection.id（不建外键，避免软删阻塞）';
+COMMENT ON COLUMN {schema}.ops_terminal_session.target_kind IS '目标类型：docker_container / k8s_pod';
+COMMENT ON COLUMN {schema}.ops_terminal_session.container_uid IS 'Docker 容器 Id（与 asset_ops_link.resource_uid 同口径）';
+COMMENT ON COLUMN {schema}.ops_terminal_session.namespace IS 'K8s 命名空间';
+COMMENT ON COLUMN {schema}.ops_terminal_session.pod_name IS 'K8s Pod 名';
+COMMENT ON COLUMN {schema}.ops_terminal_session.container_name IS '容器名（Docker / K8s 都有；K8s 多容器必填）';
+COMMENT ON COLUMN {schema}.ops_terminal_session.shell IS '实际使用的 shell（白名单命中项）';
+COMMENT ON COLUMN {schema}.ops_terminal_session.state IS '会话状态：opening / active / closed / failed';
+COMMENT ON COLUMN {schema}.ops_terminal_session.bytes_in IS '客户端 → 容器 的累计字节数';
+COMMENT ON COLUMN {schema}.ops_terminal_session.bytes_out IS '容器 → 客户端 的累计字节数';
+COMMENT ON COLUMN {schema}.ops_terminal_session.error IS '失败原因（不含终端输出）';
+
+CREATE INDEX IF NOT EXISTS idx_ops_terminal_session_conn
+    ON {schema}.ops_terminal_session(connection_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ops_terminal_session_user
+    ON {schema}.ops_terminal_session(user_id, started_at DESC);

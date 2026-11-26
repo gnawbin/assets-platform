@@ -114,6 +114,7 @@
 ### 3.2 非目标
 
 - 不做 OIDC（`id_token` / `userinfo` / 完整 discovery），除非后续要接第三方登录。
+  > 补充（2026-11-18）：本非目标只约束**本系统作为 AS 对外签发 `id_token`**。若需「本系统作为 RP 接入企业 IdP 完成 SSO」，属另一条链路，见 `docs/OIDC单点登录（SSO）接入设计方案.md`；两者开关（`OAUTH_ENABLED` / `OIDC_ENABLED`）完全独立。
 - 不做动态客户端注册（RFC 7591）、mTLS（RFC 8705）、DPoP（发送方约束令牌）。
 - 不改前端权限配置 UI：继续复用现有「角色 → 菜单/按钮」勾选页，只是让它在**服务端生效**。
 - 不做字段级脱敏（列为后续增强）。
@@ -655,6 +656,75 @@ ORDER BY id DESC LIMIT $1 OFFSET $2;
 - `redirect_uris` 存**数组**（JSONB 或 `text[]`），逐条精确匹配。
 - **loopback 特例**：Tauri 桌面端回调端口随机，按 RFC 8252 §7.3，登记 `http://127.0.0.1/callback` 时忽略端口比较；实现中单独一个函数 `matches_redirect()` 处理并写注释说明理由，**不要**污染主流程的严格比较。
 
+### 7.7 Phase 2 落地说明（实现与本文档的差异）
+
+1. **方案 A 的交互形态**：`GET /oauth/authorize` 返回 JSON 同意信息（`client_name` / `scopes` / `state` / `issuer`），`POST /oauth/authorize` 提交 `approve` 后返回 `{ redirect_to }`，由调用方完成 302。**不返回 HTML 同意页、也不做浏览器重定向**：Bearer JWT 无法随浏览器跳转携带，这是方案 A 的固有限制（接外部第三方前需补方案 B）。
+2. **端点开关**：`/oauth/authorize`、`/oauth/token`、`/oauth/introspect`、`/oauth/revoke`、`/.well-known/oauth-authorization-server` 仅在 `OAUTH_ENABLED=true`（或 `OAUTH_ALLOW_INSECURE_HTTP=true`）时挂载，缺省 404（§16 T-7）。`/api/oauth-clients*` 管理接口不受该开关影响（权限点仍为 `system:oauthclient:*`）。
+3. **issuer**：`OAUTH_ISSUER` 缺省 `http://localhost:<API_PORT>`；启用且为明文 HTTP 时启动日志打印 WARN 横幅（§8.2）。
+4. **`family_id` 读写**：DDL 采用 `UUID`，但 sqlx 未启用 `uuid` feature，读写分别用 `$n::uuid` 与 `family_id::text`，无需新增依赖。
+5. **OAuth 主体**：`PrincipalKind::OAuth`，`subject = "u:<user_id>@client:<client_id>"`，只注入 `AuthPrincipal`（不注入 `UserContext` / `Claims`）；`authz` 对非用户主体始终 enforce，`system:*` / `upload:*` 与用户态接口一律 403。
+6. **重放处置**：刷新令牌重放 → 撤销整个 `family_id`；授权码重放 → 撤销该 `client_id + user_id` 的全部未撤销令牌；PKCE 校验失败 → 立即把该 code 置 `used_at`。
+7. **清理任务**：`oauth_service::cleanup_expired_grants()`（授权码保留 24h、令牌过期后保留 30d）供定时任务调用，不挂在请求路径上。
+
+---
+
+### 7.8 Phase 2.2 落地：方案 B（浏览器会话 Cookie）+ 传输护栏
+
+**新增数据表**（`public_migration.sql`，幂等）：
+
+| 表 | 关键列 | 说明 |
+|---|---|---|
+| `sys_user_session` | `session_hash`、`user_id`、`tenant_id`、`csrf_hash`、`ip inet`、`user_agent`、`expires_at`、`revoked_at` | 只存 `SHA-256`，明文只在 `Set-Cookie` 出现一次；`uk_sys_user_session_hash` + 用户 / 过期索引 |
+
+**Cookie 规格**：
+
+| Cookie | 前缀 | 属性 | 用途 |
+|---|---|---|---|
+| `ap_session` | `ss_<43>` | `HttpOnly; SameSite=Lax; Path=/; Max-Age=SESSION_TTL_SECS`（TLS 下加 `Secure`） | 浏览器授权流程的登录态 |
+| `ap_csrf` | `cs_<43>` | `SameSite=Lax; Path=/`（**不加 HttpOnly**） | 双提交 CSRF 校验 |
+
+**`/oauth/authorize` 双流程分流**（同一 URL，handler 内判定）：
+
+| 请求特征 | 分支 | 响应 |
+|---|---|---|
+| `Authorization: Bearer <用户 JWT>` | 方案 A | JSON 同意信息 / `{redirect_to}`（与 2.1 行为一致） |
+| 无 Bearer，带 `ap_session` | 方案 B | `GET` 渲染 HTML 同意页；`POST` 校验 CSRF 后 **302** 回调 |
+| 无 Bearer，无会话 | 方案 B | `401` HTML「请先登录」 |
+
+- 授权端点因此从「受保护路由」移到**公开路由**：方案 A 在 handler 内自行校验 Bearer（API Key / `at_` 令牌一律 `access_denied`），方案 B 靠 Cookie；
+- 方案 B 的 `POST` 顺序：CSRF 双提交校验（常数时间）→ 会话校验 → `ensure_user_active` → `prepare_authorization`（含 `redirect_uri` 精确匹配）→ 签发 code 并 302；拒绝授权时跳 `?error=access_denied&state=...`，**不泄漏**任何额外信息；
+- 同意页为纯静态 HTML（内联样式、无脚本），所有插值经 HTML 转义，并附 `CSP: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'` 与 `X-Frame-Options: DENY`、`Cache-Control: no-store`。
+
+**会话生命周期**：
+
+| 时机 | 行为 |
+|---|---|
+| `POST /api/auth/login` | 追加 `Set-Cookie`（会话 + CSRF）；签发失败只记 WARN，不影响 JWT 登录 |
+| `POST /api/auth/logout` | 追加清空 Cookie；撤销会话（幂等） |
+| `GET /api/auth/session` | 用 Cookie 返回 `{user_id, tenant_id, expires_at}`（无会话 401） |
+| `POST /api/auth/session/logout` | 撤销会话 + 清 Cookie |
+| 改密 / 删除用户 | `revoke_all_user_sessions(user_id)` 撤销该用户全部会话 |
+| 定时任务 | `cleanup_expired_sessions()` 每小时删除「过期超过 7 天」的行（保留期便于审计） |
+
+**传输与运维护栏**：
+
+| 项 | 行为 |
+|---|---|
+| `OAUTH_TRUSTED_CIDRS` | 非空时 `/oauth/*`、`/api/auth/session*` 只允许清单内来源；**配置了清单但取不到 IP 一律拒绝**（fail-closed），清单为空 = 不限制 |
+| `TRUST_PROXY_HEADERS` | 只有为 `true` 才采信 `X-Forwarded-For` / `X-Real-IP` / `X-Forwarded-Proto`；否则用 TCP 对端地址（`into_make_service_with_connect_info`） |
+| 安全响应头 | 全局 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`；HTTPS 下追加 `Strict-Transport-Security: max-age=31536000; includeSubDomains`（`HSTS_ENABLED=false` 可关闭） |
+| `GET /healthz` | 公开存活探测：`SELECT 1`（2s 超时）；正常 `200`，数据库不可达 `503`；附带 `insecure_transport`（§8.2 补偿控制 5） |
+| 后台清理 | 启动后 60s 首次执行，之后每 `OAUTH_CLEANUP_INTERVAL_SECS`（默认 3600s）清理授权码 / 令牌 / 会话；失败只记 WARN |
+
+**新增环境变量**：`SESSION_TTL_SECS`、`OAUTH_TRUSTED_CIDRS`、`TRUST_PROXY_HEADERS`、`HSTS_ENABLED`、`OAUTH_CLEANUP_INTERVAL_SECS`。全部有安全缺省值，不配置也能启动。
+
+### 7.9 JWT 加固：`iss` / `aud` 校验与迁移
+
+- 签发的 access / refresh 令牌新增 `iss`（`JWT_ISSUER`，默认 `assets-platform`）与 `aud`（`JWT_AUDIENCE`，默认 `assets-platform-api`）；
+- 校验规则：**存在即校验**（与期望值不符 → 401「令牌签发方/受众不匹配」）；缺失时由 `JWT_STRICT_ISS_AUD` 决定 —— `false`（默认）放过历史令牌，`true` 强制要求；
+- 迁移步骤：上线本版 → 等待现有令牌自然过期（access 7 天 / refresh 30 天，或提前缩短 `JWT_ACCESS_TTL_SECS`）→ 设 `JWT_STRICT_ISS_AUD=true` 完成严格化；
+- 校验点：`api::auth::verify_token()`（资源请求）与 `service::user_service::refresh_tokens()`（续期）两处，未覆盖的路径不会签出新令牌。
+
 ---
 
 ## 8. HTTP / TLS 落地方案
@@ -1070,3 +1140,23 @@ Phase 0 的三处改动都遵循本约束：
 | `crates/api/src/lib.rs` | 分层挂载 authz 层、把 upload/chat 纳入认证 |
 | `crates/api/src/response.rs` | 403 增加 `scope` 字段 |
 | `crates/apidoc/src/lib.rs` | 注册新 tag 与路径 |
+
+---
+
+## 附录 B：Bearer 令牌资源访问路径的待测待开发与回归口径
+
+「把 `at_` 令牌当资源凭证用」这条路径（`at_` → `parse_credential` → `verify_access_token` → `authz`）的测试覆盖、已知行为缝、页面 ↔ 后端接口对齐，单独整理在：
+
+> **《OAuth2.1 Bearer Token待测待开发清单.md》**（同目录）
+
+速查：
+
+| 类别 | 内容 | 详见 |
+|---|---|---|
+| 已覆盖 | `ApiError` 的 401 / 403 挑战头（`response.rs` 单测）、OAuth 主体非超管（`authz.rs`）、签发侧 26 条（`--lib oauth`） | 待测清单 §3 F-8、§4.1 A-10 |
+| 未覆盖 | `parse_credential` 的 `at_` / `rt_` 分流（0 条断言）、`verify_access_token`（0 条断言，需 DB）、`at_` 端到端调用（`crates/api` 无 `tests/`） | 待测清单 §4.1 / §4.2 / §4.4 |
+| 待开发 | 资源侧不校验用户状态；禁用 / 删除用户不吊销 `sys_oauth_token`；OAuth 令牌无限流；上传通道无 401 续期；前端 base URL 双 `/api` | 待测清单 §5 D-2…D-7 |
+| 页面 ↔ 接口 | `/settings/oauth-clients` 四个动作 ↔ 路由 / 权限点 / DTO / 错误体 | 待测清单 §6 |
+
+**注意**：`oauth_routes::tests::bearer_header_is_not_treated_as_client_credentials` 测的是 `/oauth/token` 的 `client_secret_basic` 解析，**不能**作为「Bearer 资源访问已测」的证据。详见待测清单 §2。
+
