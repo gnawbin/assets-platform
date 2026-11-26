@@ -902,3 +902,46 @@ SELECT 308, '文件版本历史', 5, NULL, NULL, NULL, 48, true, 'upload:file:li
 WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 308);
 
 
+
+-- ==============================
+-- 任务中心（异步解析任务，apalis 队列）
+-- 幂等：存量库启动时补齐菜单与权限点（新库由 public_initial_data.sql 负责）
+-- ==============================
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 240, '任务中心', 6, '/tasks', '/tasks/page', 'IconListCheck', 9, true, NULL, 2, false, NULL, NULL, NULL, 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 240);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 241, '发起解析任务', 6, NULL, NULL, NULL, 20, true, 'knowledge:edit', 3, true, NULL, 'POST', '/api/tasks/parse', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 241);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 242, '任务列表', 6, NULL, NULL, NULL, 21, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/tasks', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 242);
+
+INSERT INTO public.sys_menu (id, menu_name, parent_id, path, component, icon, order_num, visible, perms, menu_type, hidden_button, command_name, http_method, http_path, created_by, created_at, updated_by, updated_at, deleted)
+SELECT 243, '任务进度查询', 6, NULL, NULL, NULL, 22, true, 'knowledge:list', 3, true, NULL, 'GET', '/api/tasks/{taskId}', 1, NOW(), NULL, NULL, 0
+WHERE NOT EXISTS (SELECT 1 FROM public.sys_menu WHERE id = 243);
+
+-- ==============================
+-- 任务中心菜单分配给「所有已有角色」（幂等）
+-- 新菜单默认不属于任何角色，非超管用户会看不到；这里一次性补齐。
+-- 真正的操作权限仍由 perms（knowledge:list / knowledge:edit）+ authz 中间件控制。
+-- ==============================
+INSERT INTO public.sys_role_menu (id, role_id, menu_id, created_by, created_at, deleted)
+SELECT (
+        SELECT COALESCE(MAX(id), 1000)
+        FROM public.sys_role_menu
+    ) + row_number() OVER (ORDER BY r.id, m.id),
+    r.id, m.id, 1, NOW(), 0
+FROM public.sys_role r
+CROSS JOIN public.sys_menu m
+WHERE m.id IN (240, 241, 242, 243)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM public.sys_role_menu rm
+      WHERE rm.role_id = r.id
+        AND rm.menu_id = m.id
+        AND (rm.deleted IS NULL OR rm.deleted = 0)
+  );
+

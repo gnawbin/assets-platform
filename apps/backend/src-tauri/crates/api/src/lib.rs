@@ -15,6 +15,8 @@ pub mod department_routes;
 pub mod health;
 pub mod knowledge_routes;
 pub mod knowledge_asset_routes;
+pub mod task_routes;
+pub mod task_sink;
 pub mod llm_routes;
 pub mod numbering_routes;
 pub mod oauth_browser;
@@ -632,6 +634,11 @@ fn create_router(pool: sqlx::PgPool) -> Router {
             "/api/knowledge/asset/{assetId}/attach",
             post(knowledge_asset_routes::attach_file),
         )
+        // 异步任务（P3）：解析入队 + 进度查询
+        // 入队只做校验 + push，真正的解析在 worker 里执行（见 crates/task-queue）
+        .route("/api/tasks/parse", post(task_routes::push_parse))
+        .route("/api/tasks", get(task_routes::list_tasks))
+        .route("/api/tasks/{taskId}", get(task_routes::get_task_status))
         // LLM 厂商 / 模型 / 用户偏好
         // 注：`fetch-models` 的占位符用 `{providerId}`（命令参数名），
         // 其余路径占位符 `{id}` 对应命令的 `id`，前端 extractParams 才能剥离。

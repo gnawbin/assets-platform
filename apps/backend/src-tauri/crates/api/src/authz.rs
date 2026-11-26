@@ -270,6 +270,11 @@ pub const ROUTE_PERMS: &[(&str, &str, &str)] = &[
     ("DELETE", "/api/knowledge/asset/{id}", "knowledge:delete"),
     // 绑定文件属于修改资产内容
     ("POST", "/api/knowledge/asset/{assetId}/attach", "knowledge:edit"),
+    // ===== 异步任务（P3）=====
+    // 解析入队属于「写操作」，列表 / 进度查询属于「读操作」，复用知识库权限点
+    ("POST", "/api/tasks/parse", "knowledge:edit"),
+    ("GET", "/api/tasks", "knowledge:list"),
+    ("GET", "/api/tasks/{taskId}", "knowledge:list"),
     // ===== LLM 厂商 / 模型 =====
     // 读写统一走 LLM 管理权限点：读 `knowledge:llm:list`（既有），写 `knowledge:llm:edit`（新增）
     ("GET", "/api/llm/providers", "knowledge:llm:list"),

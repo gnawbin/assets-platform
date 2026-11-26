@@ -36,6 +36,7 @@ import {
     IconBook,
     IconArrowLeft,
     IconFileUpload,
+    IconPlayerPlay,
     IconBrain,
     IconCode,
 } from '@tabler/icons-react';
@@ -56,6 +57,7 @@ import {
     type KnowledgeAsset,
     type OkfType,
 } from '@/services/knowledgeAssetService';
+import { pushParseTask } from '@/services/taskService';
 import { UploadService } from '@/services/uploadService';
 import { notifications } from '@mantine/notifications';
 import MarkdownEditor from '@/components/MarkdownEditor';
@@ -201,6 +203,8 @@ export default function KnowledgeAssetPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    /** 正在入队的资产 id（按钮 loading，避免重复点击） */
+    const [parsingIds, setParsingIds] = useState<Record<string, boolean>>({});
 
     // 对话框
     const [showNodeDialog, setShowNodeDialog] = useState(false);
@@ -572,6 +576,49 @@ export default function KnowledgeAssetPage() {
 
     const okfTypeLabel = (t: string) => OKF_TYPE_OPTIONS.find(o => o.value === t)?.label || t;
 
+    /**
+     * 发起解析任务（异步队列）
+     *
+     * 只负责入队：真正的下载 / 解析 / 向量化在 worker 执行，
+     * 进度在「任务中心」页（`/tasks`）查看。
+     * 队列未开启（TASK_QUEUE_MODE=inline）时后端返回 400，这里原样提示。
+     */
+    const handleParseAsset = async (item: KnowledgeAsset) => {
+        if (!item.file_url) {
+            notifications.show({
+                color: 'yellow',
+                title: '无法解析',
+                message: '该资产还没有绑定文件，请先上传并绑定文件',
+            });
+            return;
+        }
+        setParsingIds((prev) => ({ ...prev, [item.id]: true }));
+        try {
+            const result = await pushParseTask({
+                assetId: item.id,
+                fileUrl: item.file_url,
+                fileName: item.file_name ?? item.title,
+                title: item.title,
+                okfType: item.okf_type,
+                tags: item.tags ?? [],
+                fileMd5: item.file_md5,
+            });
+            notifications.show({
+                color: 'teal',
+                title: '解析任务已入队',
+                message: `任务 ${result.taskId.slice(0, 8)} 已提交，可在「任务中心」查看进度`,
+            });
+        } catch (err) {
+            notifications.show({
+                color: 'red',
+                title: '入队失败',
+                message: err instanceof Error ? err.message : '请稍后重试',
+            });
+        } finally {
+            setParsingIds((prev) => ({ ...prev, [item.id]: false }));
+        }
+    };
+
     return (
         <Layout>
             <Stack gap="lg">
@@ -675,6 +722,24 @@ export default function KnowledgeAssetPage() {
                                                         {item.title}
                                                     </Text>
                                                     <Group gap={2} wrap="nowrap">
+                                                        <Tooltip
+                                                            label={
+                                                                item.file_url
+                                                                    ? '解析（异步任务）'
+                                                                    : '请先绑定文件'
+                                                            }
+                                                        >
+                                                            <ActionIcon
+                                                                variant="subtle"
+                                                                color="teal"
+                                                                size="sm"
+                                                                loading={Boolean(parsingIds[item.id])}
+                                                                disabled={!item.file_url}
+                                                                onClick={() => void handleParseAsset(item)}
+                                                            >
+                                                                <IconPlayerPlay size={14} />
+                                                            </ActionIcon>
+                                                        </Tooltip>
                                                         <Tooltip label="编辑">
                                                             <ActionIcon variant="subtle" color="blue" size="sm"
                                                                 onClick={() => handleSelectNode(item.tree_node_id)}>

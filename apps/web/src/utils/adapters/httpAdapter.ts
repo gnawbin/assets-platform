@@ -225,6 +225,12 @@ export const COMMAND_ROUTE_MAP: Record<string, RouteMapping> = {
     // assetId 走路径，文件信息留在 body
     attach_file_to_knowledge: { method: 'POST', path: '/api/knowledge/asset/{assetId}/attach' },
 
+    // ======================== 异步任务（任务中心 / 解析进度） ========================
+    // 入队只做校验 + push，解析在 worker 执行；taskId 走路径，status / limit 走 query
+    push_parse_task: { method: 'POST', path: '/api/tasks/parse' },
+    list_parse_tasks: { method: 'GET', path: '/api/tasks' },
+    get_parse_task: { method: 'GET', path: '/api/tasks/{taskId}' },
+
     // ======================== LLM 厂商 / 模型 / 用户偏好 ========================
     // 厂商响应里的 api_key 一律是脱敏占位符 ******；更新时回传该值表示「不修改」
     get_llm_providers: { method: 'GET', path: '/api/llm/providers' },

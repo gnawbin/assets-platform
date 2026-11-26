@@ -75,6 +75,9 @@ vector-pgvector = {path = "crates/vector-pgvector"}
 vector-redis = {path = "crates/vector-redis"}
 vfs = {path = "crates/vfs"}
 workflow = {path = "crates/workflow"}
+# 异步任务队列（apalis）：视频 / 音频 / 文档解析等耗时任务。
+# P0 只交付骨架与 docs/apalis异步任务队列开发文档.md，依赖在 P1 打开。
+task-queue = {path = "crates/task-queue"}
 
 # ---- 序列化 ----
 chrono = {version = "0.4.45", default-features = false, features = ["serde"]}
@@ -271,6 +274,22 @@ adk-rust = {version = "2.3.0", features = ["graph"]}
 bpmn-parser = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
 engine-core = {git = "https://github.com/maatini/bpmninja", rev = "74a0d0ee865af4215255d9fed5ce61a0c5a2bcbb"}
 llama-cpp-v3 = "0.1.8"
+
+# ---- 异步任务队列（apalis）----
+# 只选 PostgreSQL 后端：与 gateway「单一 PG 依赖，不引 Redis」策略一致，
+# 且 apalis-postgres 依赖 sqlx ^0.9，与工作区的 sqlx 0.9.1 同版本（不会解析出两份）。
+apalis = "1.2.0"
+# migrate：启动时建 apalis schema；tokio-comp：sqlx tokio 运行时（不可省）；
+# task-tracking：看板需要细粒度 worker/task 明细。
+apalis-postgres = {version = "1.2.0", default-features = false, features = [
+  "migrate",
+  "tokio-comp",
+  "task-tracking",
+]}
+# 定时维护任务（票据收敛 + 队列指标）：六段表达式（秒 分 时 日 月 周）
+apalis-cron = "1.2.0"
+# cron 表达式解析（apalis-cron 的调度器直接消费 `cron::Schedule`）
+cron = "0.17"
 
 # ---- Tauri ----
 opus = "0.4.0"

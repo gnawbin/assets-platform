@@ -18,6 +18,10 @@ jsonwebtoken.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 service.workspace = true
+# 异步任务队列（P3）：解析入队、进度查询、解析结果落库钩子
+task-queue.workspace = true
+# ParseResultSink 的入参类型（parser::ParseResult）
+parser.workspace = true
 # 沙箱路由的响应类型（SandboxHandle / ExecResult / FileEntry / HealthInfo）
 sandbox.workspace = true
 sqlx.workspace = true

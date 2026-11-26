@@ -780,7 +780,39 @@ pub async fn init_tenant_tables(pool: &PgPool, schema: &str) -> Result<()> {
     // 运维采集（Docker / Swarm / K8s）连接配置与资源桥表随租户表一起初始化
     migrate_tenant_ops_tables(pool, schema).await?;
     // 运维终端（SSH 主机配置 + 会话审计）随租户表一起初始化
-    migrate_tenant_terminal_tables(pool, schema).await
+    migrate_tenant_terminal_tables(pool, schema).await?;
+    // 异步任务队列进度表（task_ticket）随租户表一起初始化
+    migrate_tenant_task_queue_tables(pool, schema).await
+}
+
+/// 迁移单个租户的异步任务队列进度表（幂等，可重复执行）
+///
+/// `apalis` 自己的表在 `apalis` schema（全局），本脚本只建业务进度表 `task_ticket`。
+#[allow(dead_code)]
+pub async fn migrate_tenant_task_queue_tables(pool: &PgPool, schema: &str) -> Result<()> {
+    let sql = include_str!("sql/task_queue_migration.sql");
+    execute_sql_content_with_schema(pool, sql, schema, "task_queue_migration").await
+}
+
+/// 迁移所有已启用租户的异步任务队列进度表（应用启动时调用）
+#[allow(dead_code)]
+pub async fn migrate_all_tenant_task_queue_tables(pool: &PgPool) -> Result<()> {
+    let schemas: Vec<String> = sqlx::query_scalar::<_, String>(
+        "SELECT schema_name FROM public.sys_tenant WHERE enable = true AND schema_name IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| anyhow!("读取租户 schema 列表失败: {}", e))?;
+
+    for schema in schemas {
+        if let Err(e) = migrate_tenant_task_queue_tables(pool, &schema).await {
+            // 单个租户迁移失败不阻断启动流程，只记录告警
+            tracing::warn!("租户 '{}' 任务进度表迁移失败: {}", schema, e);
+        } else {
+            tracing::info!("租户 '{}' 任务进度表迁移完成", schema);
+        }
+    }
+    Ok(())
 }
 
 /// 迁移单个租户的工作流引擎表（幂等，可重复执行）
@@ -1178,6 +1210,15 @@ pub async fn init_postgres_database(config: PostgresConfig) -> Result<()> {
         &mut failures,
         "其余租户运维终端表迁移",
         migrate_all_tenant_terminal_tables(&pool),
+    )
+    .await;
+
+    // 11.4 迁移其余租户的异步任务进度表（默认租户已在 init_tenant_tables 中完成）
+    tracing::info!("正在迁移租户任务进度表...");
+    run_init_step(
+        &mut failures,
+        "其余租户任务进度表迁移",
+        migrate_all_tenant_task_queue_tables(&pool),
     )
     .await;
 

@@ -15,9 +15,71 @@
 pub mod config;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use service::llm_gateway_service::LLMRouter;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+
+/// 任务队列运行时句柄（与 HTTP / 网关进程同生命周期）
+///
+/// `TASK_QUEUE_MODE=inline`（默认）时返回空句柄：不建表、不起 worker、零副作用。
+pub struct TaskQueueRuntime {
+    shutdown: watch::Sender<bool>,
+    handles: Vec<JoinHandle<()>>,
+}
+
+impl TaskQueueRuntime {
+    /// 启动任务队列 worker（幂等建表 + 解析结果落库钩子）
+    ///
+    /// # Errors
+    ///
+    /// `apalis` 迁移失败或 worker 装配失败时返回错误；调用方应**降级**处理
+    /// （HTTP 仍可用，解析走同步路径），而不是让整个服务起不来。
+    pub async fn start(pool: sqlx::PgPool) -> Result<Self> {
+        let cfg = task_queue::TaskQueueConfig::from_env();
+        let (shutdown, rx) = watch::channel(false);
+        if !cfg.queue_enabled() {
+            tracing::info!(
+                mode = cfg.mode.as_str(),
+                "任务队列未开启（inline），跳过 worker 启动"
+            );
+            return Ok(Self {
+                shutdown,
+                handles: Vec::new(),
+            });
+        }
+
+        // 业务进度表：新租户在 init_database 时已建好，这里兜住存量租户（幂等）
+        if let Err(e) = database::postgres::migrate_all_tenant_task_queue_tables(&pool).await {
+            tracing::warn!(
+                "任务进度表迁移失败（worker 仍启动，票据可能不可用）: {:#}",
+                e
+            );
+        }
+
+        let sink: Arc<dyn task_queue::ParseResultSink> =
+            Arc::new(api::task_sink::BusinessParseSink);
+        let handles = task_queue::start_with_sink(pool, cfg, sink, rx)
+            .await
+            .map_err(|e| anyhow::anyhow!("任务队列启动失败: {e}"))?;
+
+        Ok(Self { shutdown, handles })
+    }
+
+    /// 优雅关闭：发信号 → 等 worker 收尾（单实例等待上限 20s，避免卡住进程退出）
+    pub async fn shutdown(self) {
+        let _ = self.shutdown.send(true);
+        for handle in self.handles {
+            match tokio::time::timeout(Duration::from_secs(20), handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("任务队列 worker 异常结束: {e}"),
+                Err(_) => tracing::warn!("任务队列 worker 关闭超时（20s），继续退出"),
+            }
+        }
+    }
+}
 
 /// 初始化数据库，并绑定默认租户 schema
 ///
@@ -89,8 +151,25 @@ pub async fn init_llm_router() -> Arc<LLMRouter> {
 pub async fn serve_http(pool: sqlx::PgPool, llm_router: Arc<LLMRouter>) -> Result<()> {
     let docs = apidoc::docs_enabled().then(apidoc::docs_router);
 
+    // 异步任务队列：与 HTTP 同生命周期启动/关闭。
+    // 启动失败只降级（HTTP 照常、解析走同步路径），不阻断服务。
+    let queue_runtime = match TaskQueueRuntime::start(pool.clone()).await {
+        Ok(runtime) => Some(runtime),
+        Err(e) => {
+            tracing::error!("任务队列启动失败（HTTP 继续提供，解析走同步路径）: {e:#}");
+            None
+        }
+    };
+
     tracing::info!("正在启动 HTTP API 服务...");
-    match api::start_http_server_with(pool, Some(llm_router), docs).await {
+    let result = api::start_http_server_with(pool, Some(llm_router), docs).await;
+
+    // HTTP 已退出（收到信号或异常）：先停 worker，再返回结果
+    if let Some(runtime) = queue_runtime {
+        runtime.shutdown().await;
+    }
+
+    match result {
         Ok(()) => {
             tracing::info!("HTTP API 服务已停止");
             Ok(())

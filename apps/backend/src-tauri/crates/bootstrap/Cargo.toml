@@ -14,6 +14,9 @@ apidoc.workspace = true
 database.workspace = true
 service.workspace = true
 sqlx.workspace = true
+# 异步任务队列（P3）：启动 worker 并复用 api 的业务落库钩子
+task-queue.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 workflow.workspace = true

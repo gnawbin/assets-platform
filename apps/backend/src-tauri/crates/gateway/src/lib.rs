@@ -81,6 +81,15 @@ pub async fn serve(
     worker::spawn_listener(state.clone(), shutdown_rx.clone());
     worker::spawn_leader(state.clone(), shutdown_rx.clone());
 
+    // 4.5 任务队列：与网关同生命周期（worker 名带 instance_id，跨实例分摊同一队列）
+    let queue_runtime = match bootstrap::TaskQueueRuntime::start(pool.clone()).await {
+        Ok(runtime) => Some(runtime),
+        Err(e) => {
+            warn!("任务队列启动失败（网关继续提供，解析走同步路径）: {e:#}");
+            None
+        }
+    };
+
     // 5. 装配路由并监听
     let app = router::build_app(state.clone(), llm_router).await?;
     let addr: std::net::SocketAddr = format!("{}:{}", cfg.bind, cfg.port)
@@ -133,8 +142,11 @@ pub async fn serve(
         }
     }
 
-    // 7. 收尾：停后台任务 + 释放租约（附录 D.8 第 7 步）
+    // 7. 收尾：停后台任务 + 停任务队列 worker + 释放租约（附录 D.8 第 7 步）
     let _ = shutdown_tx.send(true);
+    if let Some(runtime) = queue_runtime {
+        runtime.shutdown().await;
+    }
     if let Err(e) = coord::release_worker(&pool, cfg.worker_id, &cfg.instance_id).await {
         warn!(
             "释放 worker 租约失败（{}s 后自动过期）: {}",
