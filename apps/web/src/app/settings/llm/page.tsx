@@ -175,7 +175,7 @@ export default function LlmConfigPage() {
 
                 {providers.length === 0 ? (
                     <Card withBorder padding="xl" radius="md">
-                        <Text c="dimmed" ta="center">暂无厂商，点击"新增厂商"开始配置</Text>
+                        <Text c="dimmed" ta="center">暂无厂商，点击“新增厂商”开始配置</Text>
                     </Card>
                 ) : (
                     <SimpleGrid cols={{ base: 1, md: 2, lg: 3 }} spacing="md">
@@ -220,7 +220,7 @@ export default function LlmConfigPage() {
                                     </Group>
 
                                     {providerModels.length === 0 ? (
-                                        <Text size="xs" c="dimmed">暂无模型，点击"获取模型"从 API 拉取，或手动添加</Text>
+                                        <Text size="xs" c="dimmed">暂无模型，点击“获取模型”从 API 拉取，或手动添加</Text>
                                     ) : (
                                         providerModels.map(m => (
                                             <Group key={m.id} gap="xs" mb={2} justify="space-between">

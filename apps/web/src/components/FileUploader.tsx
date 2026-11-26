@@ -374,7 +374,14 @@ function UploadController({
   });
 
   // 同步状态到父组件
+  // 首次渲染跳过：父组件已根据文件校验结果设置初始状态（可能是 error），
+  // 不能用 useChunkedUpload 的初始 idle 覆盖它。
+  const didSyncStatusRef = useRef(false);
   useEffect(() => {
+    if (!didSyncStatusRef.current) {
+      didSyncStatusRef.current = true;
+      return;
+    }
     onStatusChange(task.id, upload.status);
   }, [upload.status, task.id, onStatusChange]);
 
@@ -793,22 +800,6 @@ export function FileUploader({
   const [tasks, setTasks] = useState<UploadTask[]>([]);
   const controllersRef = useRef<Map<string, UploadControllerHandle>>(new Map());
 
-  // ========== 内联模式：直接渲染 InlineFileAttach，不弹 Modal ==========
-  if (inline && singleFile) {
-    return (
-      <InlineFileAttach
-        fileUrl={fileUrl}
-        fileName={fileName}
-        fileSize={fileSize}
-        maxSize={maxSize}
-        accept={accept}
-        concurrency={concurrency}
-        onUploadComplete={onUploadComplete}
-        onUploadError={onUploadError}
-      />
-    );
-  }
-
   // ======================== 文件校验 ========================
 
   const validateFile = useCallback(
@@ -948,6 +939,23 @@ export function FileUploader({
       });
     }
   }, []);
+
+  // ========== 内联模式：直接渲染 InlineFileAttach，不弹 Modal ==========
+  // 注意：必须放在所有 Hook 之后，否则内联模式会跳过后续 useCallback，导致 Hook 调用顺序不一致。
+  if (inline && singleFile) {
+    return (
+      <InlineFileAttach
+        fileUrl={fileUrl}
+        fileName={fileName}
+        fileSize={fileSize}
+        maxSize={maxSize}
+        accept={accept}
+        concurrency={concurrency}
+        onUploadComplete={onUploadComplete}
+        onUploadError={onUploadError}
+      />
+    );
+  }
 
   // ======================== 统计 ========================
 

@@ -386,20 +386,19 @@ const ApiKeysSettingsPage: React.FC = () => {
                         placeholder="例如：ERP 集成"
                         required
                         value={form.name}
-                        onChange={(event) =>
-                            setForm((prev) => ({ ...prev, name: event.currentTarget.value }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setForm((prev) => ({ ...prev, name: value }));
+                        }}
                     />
                     <TextInput
                         label="用途说明"
                         placeholder="例如：财务系统只读对接"
                         value={form.description}
-                        onChange={(event) =>
-                            setForm((prev) => ({
-                                ...prev,
-                                description: event.currentTarget.value,
-                            }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setForm((prev) => ({ ...prev, description: value }));
+                        }}
                     />
                     <Select
                         label="权限模板"
@@ -415,12 +414,10 @@ const ApiKeysSettingsPage: React.FC = () => {
                         minRows={4}
                         maxRows={8}
                         value={form.scopes}
-                        onChange={(event) =>
-                            setForm((prev) => ({
-                                ...prev,
-                                scopes: event.currentTarget.value,
-                            }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setForm((prev) => ({ ...prev, scopes: value }));
+                        }}
                     />
                     <Group grow>
                         <NumberInput

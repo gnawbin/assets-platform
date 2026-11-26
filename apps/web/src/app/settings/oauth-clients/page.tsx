@@ -475,9 +475,12 @@ const OauthClientsSettingsPage: React.FC = () => {
                         placeholder="例如：ERP 系统"
                         required
                         value={form.client_name}
-                        onChange={(event) =>
-                            setForm((prev) => ({ ...prev, client_name: event.currentTarget.value }))
-                        }
+                        onChange={(event) => {
+                            // 必须在事件回调内同步取值：合成事件的 currentTarget 在回调结束后会被置空，
+                            // 而 setState 的函数式更新是延迟执行的，届时读取会得到 null。
+                            const { value } = event.currentTarget;
+                            setForm((prev) => ({ ...prev, client_name: value }));
+                        }}
                     />
                     <Select
                         label="客户端类型"
@@ -498,9 +501,10 @@ const OauthClientsSettingsPage: React.FC = () => {
                         minRows={2}
                         maxRows={5}
                         value={form.redirect_uris}
-                        onChange={(event) =>
-                            setForm((prev) => ({ ...prev, redirect_uris: event.currentTarget.value }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setForm((prev) => ({ ...prev, redirect_uris: value }));
+                        }}
                     />
                     <Select
                         label="权限模板"
@@ -516,9 +520,10 @@ const OauthClientsSettingsPage: React.FC = () => {
                         minRows={4}
                         maxRows={8}
                         value={form.scopes}
-                        onChange={(event) =>
-                            setForm((prev) => ({ ...prev, scopes: event.currentTarget.value }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setForm((prev) => ({ ...prev, scopes: value }));
+                        }}
                     />
                     <Group grow>
                         <NumberInput
@@ -615,12 +620,10 @@ const OauthClientsSettingsPage: React.FC = () => {
                         label="客户端名称"
                         required
                         value={editForm.client_name}
-                        onChange={(event) =>
-                            setEditForm((prev) => ({
-                                ...prev,
-                                client_name: event.currentTarget.value,
-                            }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setEditForm((prev) => ({ ...prev, client_name: value }));
+                        }}
                     />
                     <Textarea
                         label="回调地址（每行一个）"
@@ -629,12 +632,10 @@ const OauthClientsSettingsPage: React.FC = () => {
                         minRows={2}
                         maxRows={5}
                         value={editForm.redirect_uris}
-                        onChange={(event) =>
-                            setEditForm((prev) => ({
-                                ...prev,
-                                redirect_uris: event.currentTarget.value,
-                            }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setEditForm((prev) => ({ ...prev, redirect_uris: value }));
+                        }}
                     />
                     <Textarea
                         label="授权范围（每行一个 scope）"
@@ -643,20 +644,19 @@ const OauthClientsSettingsPage: React.FC = () => {
                         minRows={4}
                         maxRows={8}
                         value={editForm.scopes}
-                        onChange={(event) =>
-                            setEditForm((prev) => ({ ...prev, scopes: event.currentTarget.value }))
-                        }
+                        onChange={(event) => {
+                            const { value } = event.currentTarget;
+                            setEditForm((prev) => ({ ...prev, scopes: value }));
+                        }}
                     />
                     <Switch
                         label="启用"
                         description="关闭后该客户端无法再授权或换取令牌，且已签发令牌全部失效"
                         checked={editForm.enable}
-                        onChange={(event) =>
-                            setEditForm((prev) => ({
-                                ...prev,
-                                enable: event.currentTarget.checked,
-                            }))
-                        }
+                        onChange={(event) => {
+                            const { checked } = event.currentTarget;
+                            setEditForm((prev) => ({ ...prev, enable: checked }));
+                        }}
                     />
                     <Group justify="flex-end" mt="sm">
                         <Button variant="default" onClick={() => setEditTarget(null)}>
