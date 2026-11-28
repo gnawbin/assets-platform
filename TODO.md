@@ -235,3 +235,38 @@
   - 影响 2：仍需监控时，改为对 `sys_oper_log` 中 `agent_limit`（`status=exceeded`）计数告警；`agent_audit_steps = false` 不影响该事件
   - 落点：release notes + 运维告警规则；完成时回填本条 `[x]` 与发布日期
 
+
+## 🧭 混合路由（Hybrid Routing）实施（设计见 `docs/知识库模块/混合路由（Hybrid Routing）架构设计方案.md`）
+
+> 定位：在 V1.7 单通道检索**前面**加一层确定性路由（向量 + trustgraph-lite 图通道 + RRF 融合 + 信任重排）。
+> 铁律：`route_enabled=false` 时检索结果与现状逐字段一致；`trustgraph-lite` 内核与 6 个检索调用点**一行不改**；只新增纯逻辑 crate 与 `service` 适配器。
+> 关闭某条时把结论同步到设计文档 §16 变更记录，并保持本节 `[x]` + 日期。
+
+### R0：契约冻结（2 人日）
+- [ ] **54.** 新增 `crates/retrieval`（`types` / `route` / `fusion` / `policy` / `port` / `error`）+ 根 `Cargo.toml` 登记；依赖只允许 serde / serde_json / thiserror / async-trait
+  - 验收：`cargo check -p retrieval` 通过；`cargo tree -d` 不新增 `sqlx` / `pgvector` / `opentelemetry` 副本
+
+### R1：现状打平（3 人日）
+- [ ] **55.** `LegacyScanLane` 逐字复刻 `rag_service.rs:94` 现有 SQL（含 `0.0 AS similarity`、`ORDER BY dc.id`）；`RAGRetriever::retrieve` 委托 `HybridRetriever`，签名与返回类型不变
+  - 验收：`conversation_service.rs`（4 处）、`workflow/agent.rs:543`、`rag_commands` 的返回结果与改造前逐字段一致（golden test）
+
+### R2：路由引擎 + 影子（4 人日）
+- [ ] **56.** `RouteEngine::plan()`（7 类信号 + 固定顺序规则）+ `policy.rs` 词表 + `route_shadow_enabled` 差异日志
+  - 验收：同输入 1000 次 `plan` 序列化逐字节一致；影子差异可解释、无 panic，连续 3 天
+
+### R3：图通道（5 人日，依赖内核 Phase 2/3）
+- [ ] **57.** `GraphLaneImpl`（构图 / moka 快照 / `k_hop` / `trust_scores` / 权限剪枝 / 降级）+ `NoopGraphLane` 兜底
+  - 依赖未满足时只交付 `NoopGraphLane` + `MockGraphLane` 单测，图通道生产不启用
+  - 验收：图降级时结果与 R1 一致；10 万边构图 < 3s；跨租户用例断言不串图
+
+### R4：节点映射（3 人日）
+- [ ] **58.** `doc_meta.node_id` / `asset_id` 幂等 DDL + 分批回填 + `doc_meta_orphan_total` 指标
+  - 验收：回填跑两次 `node_id` 不变；未回填行被跳过并计数
+
+### R5：融合与信任重排（4 人日）
+- [ ] **59.** RRF（k=60）+ doc 级 trust 加成（λ=0.2）+ `per_doc_chunk_cap=3` + 稳定排序 + 预算截断
+  - 验收：单通道模式排序 == 向量原始序；cap / 去重 / 预算单测全绿
+
+### R6：多模态 + 自动边 + 灰度（5 人日）
+- [ ] **60.** `source_type` / 时间窗下推；`rag_doc_relation` 生成与评估；影子 → 白名单 → 全量三级灰度
+  - 验收：离线集 `recall@10` 相对基线 +5%，`P95` 增量 ≤ 15%，`recall@5` 不下降；描述型问题结果与单通道一致
