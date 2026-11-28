@@ -38,6 +38,7 @@
 
 **非目标**（本轮不做）：持久化与事务、分布式（Pulsar / Cassandra / Neo4j）、向量召回（属 `crates/vector`）、LLM 实体抽取、GraphRAG 编排、前端力导向布局。
 > 补充（2026-11-18）：上述「分布式 / 消息队列」非目标仅约束**内核自身**。集群节点间总线以独立 crate（`crates/mq`）承载，内核依赖图与零 IO 约束均不变；见 `docs/知识库模块/trustgraph集群消息总线（Pulsar）客户端基建设计方案.md`。
+> 补充（2026-11-28）：`GraphRAG 编排`（路由、双通道召回、RRF 融合、信任重排、图快照缓存）同样**不在内核**，由纯逻辑 crate `crates/retrieval` + `crates/service` 适配器承载，内核 API（`k_hop` / `trust_scores` / `top_k_by_trust` / `snapshot`）与本设计的零 IO、`i64` NodeId 约束**一行不改**；见 `docs/知识库模块/混合路由（Hybrid Routing）架构设计方案.md` §1.4。
 
 ---
 
